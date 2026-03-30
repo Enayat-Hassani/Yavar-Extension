@@ -1,0 +1,117 @@
+# OS Files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor Files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage directory
+coverage/
+.nyc_output/
+
+# Dependency directories
+node_modules/
+jspm_packages/
+vendor/
+
+# Build outputs
+dist/
+build/
+bundle/
+*.bundle.js
+*.bundle.css
+
+# Chrome Extension specific
+_metadata/
+*.pem
+*.crx
+*.zip
+*.tar.gz
+
+# Test artifacts
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+!icons/*.png
+
+# Temporary files
+tmp/
+temp/
+.cache/
+.parcel-cache/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE specific (JetBrains)
+.iml
+*.iml
+out/
+
+# Testing
+test-results/
+playwright-report/
+test-output/
+
+# Documentation build
+docs/_build/
+site/
+
+# Local configuration
+config.local.json
+settings.local.json
+
+# Clipboard files (from your workflow)
+clipboard-*.png
+
+# Test/debug files
+test-*.js
+debug-*.js
+*_backup.js
+*_old.js
+test-*.py
+
+# Output files from scripts
+*.xlsx
+*.csv
+!src/**/*.csv
+
+# Qwen/OpenCode specific
+.qwen/
+.output/
+
+# Reference/example code (not your own work)
+an_example.js
+example-*.js
+reference-*.js
+
+# Screenshots
+screenshots/
+
+# Bundle artifacts (if you create single-file builds)
+bundle.html
+artifact.html

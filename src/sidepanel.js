@@ -37,7 +37,7 @@ class YavarSidePanel {
     this.screenshotImg = document.getElementById('screenshot-img');
     this.btnCopyScreenshot = document.getElementById('btn-copy-screenshot');
     this.btnDismissScreenshot = document.getElementById('btn-dismiss-screenshot');
-    
+
     // Bottom bar buttons
     this.btnModelSwitcher = document.getElementById('btn-model-switcher');
     this.btnAnalyzeRepo = document.getElementById('btn-analyze-repo');
@@ -47,18 +47,24 @@ class YavarSidePanel {
     this.btnNewChat = document.getElementById('btn-new-chat');
     this.btnHelp = document.getElementById('btn-help');
     this.btnSettings = document.getElementById('btn-settings');
-    
+
     // Model switcher
     this.modelSwitcher = document.getElementById('model-switcher');
     this.modelList = document.getElementById('model-list');
     this.btnManageModels = document.getElementById('btn-manage-models');
-    
+
     // Settings panel
     this.settingsPanel = document.getElementById('settings-panel');
     this.btnCloseSettings = document.getElementById('btn-close-settings');
     this.modelsListContainer = document.getElementById('models-list-container');
     this.btnAddModel = document.getElementById('btn-add-model');
-    
+
+    // GitHub token section
+    this.githubTokenInput = document.getElementById('github-token-input');
+    this.btnSaveToken = document.getElementById('btn-save-github-token');
+    this.btnCheckRateLimit = document.getElementById('btn-check-rate-limit');
+    this.githubTokenStatus = document.getElementById('github-token-status');
+
     // Add model modal
     this.addModelModal = document.getElementById('add-model-modal');
     this.btnCloseModal = document.getElementById('btn-close-modal');
@@ -67,7 +73,7 @@ class YavarSidePanel {
     this.modelNameInput = document.getElementById('model-name');
     this.modelUrlInput = document.getElementById('model-url');
     this.modelEnabledCheckbox = document.getElementById('model-enabled');
-    
+
     // Help tooltip
     this.helpTooltip = document.getElementById('help-tooltip');
   }
@@ -170,14 +176,18 @@ class YavarSidePanel {
     
     // Add model form
     this.addModelForm.addEventListener('submit', (e) => this.handleAddModel(e));
-    
+
     // Notification dismiss
     this.notificationDismiss.addEventListener('click', () => this.hideNotification());
-    
+
     // Screenshot panel buttons
     this.btnCopyScreenshot.addEventListener('click', () => this.copyScreenshot());
     this.btnDismissScreenshot.addEventListener('click', () => this.dismissScreenshot());
-    
+
+    // GitHub token buttons
+    this.btnSaveToken.addEventListener('click', () => this.saveGitHubToken());
+    this.btnCheckRateLimit.addEventListener('click', () => this.checkRateLimit());
+
     // Iframe load handling
     this.aiFrame.addEventListener('load', () => this.handleFrameLoad());
   }
@@ -345,13 +355,13 @@ class YavarSidePanel {
 
   handleAddModel(e) {
     e.preventDefault();
-    
+
     const name = this.modelNameInput.value.trim();
     const url = this.modelUrlInput.value.trim();
     const enabled = this.modelEnabledCheckbox.checked;
-    
+
     if (!name || !url) return;
-    
+
     const newModel = {
       id: 'custom_' + Date.now(),
       name,
@@ -360,11 +370,72 @@ class YavarSidePanel {
       enabled,
       custom: true
     };
-    
+
     this.models.push(newModel);
     this.saveModels();
     this.hideAddModelModal();
     this.renderModelsList();
+  }
+
+  // ========== GitHub Token Management ==========
+
+  async saveGitHubToken() {
+    const token = this.githubTokenInput.value.trim();
+    
+    if (!token) {
+      this.showTokenStatus('Please enter a token', 'error');
+      return;
+    }
+
+    try {
+      // Save to local storage
+      await chrome.storage.local.set({ githubToken: token });
+      this.showTokenStatus('✅ Token saved! Rate limit: 15,000 requests/hour', 'success');
+      this.githubTokenInput.value = '';
+    } catch (error) {
+      this.showTokenStatus('❌ Failed to save token', 'error');
+    }
+  }
+
+  async checkRateLimit() {
+    try {
+      this.showTokenStatus('⏳ Checking rate limit...', 'info');
+      
+      const limits = await chrome.runtime.sendMessage({ action: 'check_github_rate_limit' });
+      
+      if (limits.error) {
+        this.showTokenStatus(`❌ ${limits.error}`, 'error');
+        return;
+      }
+
+      const core = limits.core;
+      const remaining = core.remaining;
+      const limit = core.limit;
+      const resetTime = new Date(core.reset * 1000);
+      const isToken = limit === 15000;
+
+      const statusText = isToken
+        ? `✅ Token active: ${remaining.toLocaleString()} / ${limit.toLocaleString()} requests remaining`
+        : `⚠️ No token: ${remaining.toLocaleString()} / ${limit.toLocaleString()} requests remaining`;
+      
+      const resetText = `Resets at ${resetTime.toLocaleTimeString()}`;
+      
+      this.showTokenStatus(`${statusText}\n${resetText}`, isToken ? 'success' : 'info');
+    } catch (error) {
+      this.showTokenStatus(`❌ Error: ${error.message}`, 'error');
+    }
+  }
+
+  showTokenStatus(message, type) {
+    this.githubTokenStatus.textContent = message;
+    this.githubTokenStatus.className = `token-status show ${type}`;
+    
+    // Auto-hide after 5 seconds for success/error
+    if (type === 'success' || type === 'error') {
+      setTimeout(() => {
+        this.githubTokenStatus.classList.remove('show');
+      }, 5000);
+    }
   }
 
   // ========== GitHub Analysis ==========
@@ -377,17 +448,22 @@ class YavarSidePanel {
       return;
     }
 
+    // Show loading state
+    this.showNotification('🔄 Analyzing repository...');
+
     try {
       const repoData = await chrome.tabs.sendMessage(tab.id, { action: 'scrape_github' });
 
-      if (!repoData || !repoData.files) {
+      if (!repoData || !repoData.repoName) {
         this.showNotification('⚠️ Could not analyze repository');
         return;
       }
 
       const prompt = this.generateLearningPrompt(repoData);
       await navigator.clipboard.writeText(prompt);
-      this.showNotification('🚀 Learning prompt copied! Press Cmd+V in ChatGPT');
+      
+      const source = repoData.source === 'dom-fallback' ? ' (fallback mode)' : '';
+      this.showNotification(`🚀 Learning prompt copied${source}! Press Cmd+V in ChatGPT`);
 
     } catch (error) {
       console.error('[Yavar] GitHub analysis failed:', error);
@@ -396,14 +472,23 @@ class YavarSidePanel {
   }
 
   generateLearningPrompt(repoData) {
-    const files = repoData.files.slice(0, 15).join(', ') || 'Unknown files';
-    const readmeExcerpt = repoData.readme.slice(0, 500).replace(/\n/g, ' ');
-    const topics = repoData.topics.length > 0 ? repoData.topics.join(', ') : 'None';
+    // Handle both API and DOM response formats
+    const stars = repoData.stars?.toLocaleString?.() || repoData.stars || '0';
+    const forks = repoData.forks?.toLocaleString?.() || repoData.forks || '0';
+    const files = repoData.files?.slice(0, 15).join(', ') || 'Unknown files';
+    const topics = repoData.topics?.length > 0 ? repoData.topics.join(', ') : 'None';
+    
+    // Handle README from API (plain text) or DOM (already text)
+    const readmeFull = repoData.readme || 'No README available';
+    const readmeExcerpt = readmeFull.slice(0, 600).replace(/\n/g, ' ').trim();
+    
+    // Add language info if available (from API)
+    const languageInfo = repoData.language ? `\n   📦 Primary Language: ${repoData.language}` : '';
 
     return `🎓 LEARNING MODE: ${repoData.repoName}
 
 📊 Repository Stats:
-   ⭐ Stars: ${repoData.stars} | 🍴 Forks: ${repoData.forks}
+   ⭐ Stars: ${stars} | 🍴 Forks: ${forks}${languageInfo}
    🏷️ Topics: ${topics}
 
 📁 Key Files Identified:
@@ -553,19 +638,20 @@ As my Senior Coding Tutor, please help me learn this codebase:
 
   setupMessageListener() {
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-      console.log('[Yavar] Message received:', message.type);
+      console.log('[Yavar] Message received:', message.type || message.action);
 
-      switch (message.type) {
-        case 'TEXT_SELECTION':
-          this.handleTextSelection(message.text);
-          break;
-        case 'SCREENSHOT_CAPTURED':
-          this.capturedScreenshot = message.imageData;
-          this.showScreenshotPanel(message.imageData);
-          break;
-        case 'trigger_learn':
-          this.analyzeGitHubRepo();
-          break;
+      if (message.type === 'TEXT_SELECTION') {
+        this.handleTextSelection(message.text);
+      }
+      
+      if (message.type === 'SCREENSHOT_CAPTURED') {
+        this.capturedScreenshot = message.imageData;
+        this.showScreenshotPanel(message.imageData);
+      }
+      
+      if (message.action === 'trigger_learn') {
+        // Trigger GitHub analysis when keyboard shortcut is pressed
+        this.analyzeGitHubRepo();
       }
 
       sendResponse({ received: true });
