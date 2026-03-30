@@ -1,0 +1,73 @@
+/* AI Sidebar - Content Script Styles */
+
+.ai-sidebar-menu {
+  all: initial;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+}
+
+.ai-sidebar-menu * {
+  box-sizing: border-box;
+}
+
+.ai-sidebar-menu-content {
+  display: flex;
+  gap: 4px;
+  padding: 8px;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  border-radius: 12px;
+  box-shadow: 
+    0 10px 40px rgba(0, 0, 0, 0.3),
+    0 0 0 1px rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
+  animation: aiSlideUp 0.2s ease-out;
+}
+
+@keyframes aiSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.ai-menu-btn {
+  all: initial;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  color: #e0e0e0;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.ai-menu-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.3);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.ai-menu-btn:active {
+  transform: translateY(0);
+}
+
+.ai-menu-btn:first-child {
+  background: rgba(99, 102, 241, 0.3);
+  border-color: rgba(99, 102, 241, 0.5);
+}
+
+.ai-menu-btn:first-child:hover {
+  background: rgba(99, 102, 241, 0.6);
+}
+
+.ai-menu-btn svg {
+  pointer-events: none;
+}

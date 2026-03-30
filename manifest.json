@@ -1,0 +1,103 @@
+{
+  "manifest_version": 3,
+  "name": "AI Sidebar - ChatGPT, Gemini, Claude",
+  "version": "1.0.0",
+  "description": "Open any AI assistant (ChatGPT, Gemini, Claude) in a persistent sidebar. Smart text copy, screenshot capture, and keyboard shortcuts.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "permissions": [
+    "sidePanel",
+    "declarativeNetRequest",
+    "declarativeNetRequestWithHostAccess",
+    "contextMenus",
+    "scripting",
+    "activeTab",
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://chatgpt.com/*",
+    "https://chat.openai.com/*",
+    "https://gemini.google.com/*",
+    "https://claude.ai/*",
+    "https://www.bing.com/chat/*",
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "action": {
+    "default_title": "Open AI Sidebar",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["src/content.js"],
+      "css": ["src/styles/content.css"],
+      "run_at": "document_end"
+    },
+    {
+      "matches": ["https://github.com/*"],
+      "js": ["src/github-analyzer.js"],
+      "run_at": "document_end"
+    }
+  ],
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "csp_bypass_rules",
+        "enabled": true,
+        "path": "rules/csp-bypass.json"
+      }
+    ]
+  },
+  "commands": {
+    "toggle-sidebar": {
+      "suggested_key": {
+        "default": "Ctrl+Space",
+        "mac": "Command+Space"
+      },
+      "description": "Toggle AI Sidebar"
+    },
+    "copy-selection": {
+      "suggested_key": {
+        "default": "Ctrl+H",
+        "mac": "Command+H"
+      },
+      "description": "Copy selected text to sidebar"
+    },
+    "capture-screenshot": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+I",
+        "mac": "Command+Shift+I"
+      },
+      "description": "Capture screenshot for sidebar"
+    },
+    "trigger-learn": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+L",
+        "mac": "Command+Shift+L"
+      },
+      "description": "Analyze GitHub Repository"
+    }
+  },
+  "options_page": "options.html",
+  "web_accessible_resources": [
+    {
+      "resources": ["src/styles/*.css", "icons/*.png"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

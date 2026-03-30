@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Sidebar Settings</title>
+  <link rel="stylesheet" href="styles/options.css">
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <h1>AI Sidebar Settings</h1>
+      <p class="subtitle">Customize your AI assistant experience</p>
+    </header>
+
+    <main class="settings-container">
+      <!-- Default AI Service -->
+      <section class="settings-section">
+        <h2>Default AI Service</h2>
+        <div class="setting-item">
+          <label for="default-ai">Default AI:</label>
+          <select id="default-ai">
+            <option value="chatgpt">ChatGPT</option>
+            <option value="gemini">Google Gemini</option>
+            <option value="claude">Anthropic Claude</option>
+          </select>
+          <p class="help-text">This AI will be loaded by default when you open the sidebar</p>
+        </div>
+      </section>
+
+      <!-- Feature Toggles -->
+      <section class="settings-section">
+        <h2>Features</h2>
+        
+        <div class="setting-item">
+          <label class="toggle-label">
+            <span>Floating Menu on Text Selection</span>
+            <input type="checkbox" id="enable-floating-menu" checked>
+            <span class="toggle"></span>
+          </label>
+          <p class="help-text">Show a menu with AI actions when you select text on any page</p>
+        </div>
+      </section>
+
+      <!-- Keyboard Shortcuts -->
+      <section class="settings-section">
+        <h2>Keyboard Shortcuts</h2>
+        <div class="shortcuts-info">
+          <h3>Global Shortcuts</h3>
+          <p><strong>Toggle Sidebar:</strong> <kbd>Ctrl</kbd> + <kbd>Space</kbd> (or <kbd>Cmd</kbd> + <kbd>Space</kbd> on Mac)</p>
+          <p><strong>Copy Selected Text:</strong> <kbd>Ctrl</kbd> + <kbd>H</kbd> (or <kbd>Cmd</kbd> + <kbd>H</kbd> on Mac)</p>
+          <p><strong>Capture Screenshot:</strong> <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>I</kbd> (or <kbd>Cmd</kbd> + <kbd>Shift</kbd> + <kbd>I</kbd> on Mac)</p>
+        </div>
+        <button id="configure-shortcuts-btn" class="btn-secondary">Change Shortcuts in Chrome</button>
+      </section>
+
+      <!-- Site-specific Settings -->
+      <section class="settings-section">
+        <h2>Site-Specific Settings</h2>
+        <p class="help-text">Disable the sidebar or floating menu on specific websites</p>
+        
+        <div class="disabled-sites-input">
+          <input type="text" id="disabled-site" placeholder="Enter domain (e.g., github.com)">
+          <button id="add-site-btn" class="btn-primary">Add Site</button>
+        </div>
+
+        <div id="disabled-sites-list" class="disabled-sites-list">
+          <!-- Disabled sites will be listed here -->
+        </div>
+      </section>
+
+      <!-- Data Management -->
+      <section class="settings-section">
+        <h2>Data Management</h2>
+        <div class="data-actions">
+          <button id="export-settings-btn" class="btn-secondary">Export Settings</button>
+          <button id="import-settings-btn" class="btn-secondary">Import Settings</button>
+          <button id="reset-settings-btn" class="btn-danger">Reset to Defaults</button>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p>AI Sidebar v1.0.0</p>
+    </footer>
+  </div>
+
+  <input type="file" id="import-file" accept=".json" style="display: none;">
+
+  <script src="src/options.js" type="module"></script>
+</body>
+</html>
