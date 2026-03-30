@@ -1,7 +1,7 @@
 // Side Panel - Main Logic (2026 Redesign)
 // Full viewport chat with bottom navigation and model management
 
-class AISidePanel {
+class YavarSidePanel {
   constructor() {
     // Default AI models
     this.defaultModels = [
@@ -9,7 +9,7 @@ class AISidePanel {
       { id: 'chatgpt', name: 'ChatGPT', url: 'https://chatgpt.com', icon: '🤖', enabled: true, custom: false },
       { id: 'claude', name: 'Claude', url: 'https://claude.ai', icon: '🧠', enabled: true, custom: false }
     ];
-    
+
     this.models = [];
     this.currentModelId = 'gemini';
     this.capturedScreenshot = null;
@@ -88,7 +88,7 @@ class AISidePanel {
         this.currentModelId = currentResult.currentModelId;
       }
     } catch (error) {
-      console.error('[AI Sidebar] Failed to load models:', error);
+      console.error('[Yavar] Failed to load models:', error);
       this.models = [...this.defaultModels];
     }
   }
@@ -97,7 +97,7 @@ class AISidePanel {
     try {
       await chrome.storage.sync.set({ aiModels: this.models });
     } catch (error) {
-      console.error('[AI Sidebar] Failed to save models:', error);
+      console.error('[Yavar] Failed to save models:', error);
     }
   }
 
@@ -105,7 +105,7 @@ class AISidePanel {
     try {
       await chrome.storage.sync.set({ currentModelId: this.currentModelId });
     } catch (error) {
-      console.error('[AI Sidebar] Failed to save current model:', error);
+      console.error('[Yavar] Failed to save current model:', error);
     }
   }
 
@@ -390,7 +390,7 @@ class AISidePanel {
       this.showNotification('🚀 Learning prompt copied! Press Cmd+V in ChatGPT');
 
     } catch (error) {
-      console.error('[AI Sidebar] GitHub analysis failed:', error);
+      console.error('[Yavar] GitHub analysis failed:', error);
       this.showNotification('⚠️ Analysis failed. Make sure you\'re on a GitHub repo page.');
     }
   }
@@ -440,7 +440,7 @@ As my Senior Coding Tutor, please help me learn this codebase:
       this.showNotification('📸 Screenshot captured! Paste with Cmd+V in ChatGPT');
 
     } catch (error) {
-      console.error('[AI Sidebar] Screenshot capture failed:', error);
+      console.error('[Yavar] Screenshot capture failed:', error);
       this.showNotification('❌ Failed to capture screenshot.');
     }
   }
@@ -473,7 +473,7 @@ As my Senior Coding Tutor, please help me learn this codebase:
       this.dismissScreenshot();
 
     } catch (error) {
-      console.error('[AI Sidebar] Failed to copy screenshot:', error);
+      console.error('[Yavar] Failed to copy screenshot:', error);
       this.showNotification('❌ Failed to copy image.');
     }
   }
@@ -499,7 +499,7 @@ As my Senior Coding Tutor, please help me learn this codebase:
       }
 
     } catch (error) {
-      console.error('[AI Sidebar] Failed to copy page:', error);
+      console.error('[Yavar] Failed to copy page:', error);
       this.showNotification('❌ Failed to copy page content');
     }
   }
@@ -510,7 +510,7 @@ As my Senior Coding Tutor, please help me learn this codebase:
       await navigator.clipboard.writeText(tab.url);
       this.showNotification('🔗 URL copied to clipboard!');
     } catch (error) {
-      console.error('[AI Sidebar] Failed to copy link:', error);
+      console.error('[Yavar] Failed to copy link:', error);
     }
   }
 
@@ -553,7 +553,7 @@ As my Senior Coding Tutor, please help me learn this codebase:
 
   setupMessageListener() {
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-      console.log('[AI Sidebar] Message received:', message.type);
+      console.log('[Yavar] Message received:', message.type);
 
       switch (message.type) {
         case 'TEXT_SELECTION':
@@ -602,7 +602,7 @@ As my Senior Coding Tutor, please help me learn this codebase:
         await chrome.storage.session.remove('pendingScreenshot');
       }
     } catch (error) {
-      console.error('[AI Sidebar] Failed to check pending data:', error);
+      console.error('[Yavar] Failed to check pending data:', error);
     }
   }
 }
@@ -617,4 +617,4 @@ function extractPageContent() {
 }
 
 // Initialize panel
-const panel = new AISidePanel();
+const panel = new YavarSidePanel();

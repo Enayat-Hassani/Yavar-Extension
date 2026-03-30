@@ -1,11 +1,11 @@
 // GitHub Repo Analyzer - Smart Scraper
 // Runs only on GitHub.com to extract repo structure and code context
 
-class GitHubAnalyzer {
+class YavarGitHubAnalyzer {
   constructor() {
     this.isGitHub = window.location.hostname.includes('github.com');
     if (!this.isGitHub) return;
-    
+
     this.init();
   }
 
@@ -112,13 +112,13 @@ class GitHubAnalyzer {
 if (window.location.hostname.includes('github.com')) {
   // Wait for DOM to be ready (GitHub uses Turbo)
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => new GitHubAnalyzer());
+    document.addEventListener('DOMContentLoaded', () => new YavarGitHubAnalyzer());
   } else {
-    new GitHubAnalyzer();
+    new YavarGitHubAnalyzer();
   }
-  
+
   // Re-initialize on Turbo navigation
   document.addEventListener('turbo:load', () => {
-    new GitHubAnalyzer();
+    new YavarGitHubAnalyzer();
   });
 }

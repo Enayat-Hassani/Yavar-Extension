@@ -47,7 +47,7 @@ export const CommandHandler = {
       // Open sidebar
       await chrome.sidePanel.open({ windowId: tab.windowId });
     } catch (error) {
-      console.error('[AI Sidebar] Failed to copy selection:', error);
+      console.error('[Yavar] Failed to copy selection:', error);
     }
   },
 
@@ -67,7 +67,7 @@ export const CommandHandler = {
       // Open sidebar
       await chrome.sidePanel.open({ windowId: tab.windowId });
     } catch (error) {
-      console.error('[AI Sidebar] Screenshot capture failed:', error);
+      console.error('[Yavar] Screenshot capture failed:', error);
     }
   },
 
@@ -112,7 +112,7 @@ export const CommandHandler = {
         await chrome.runtime.sendMessage({ action: 'trigger_learn' });
       }, 300);
     } catch (error) {
-      console.error('[AI Sidebar] Trigger learn failed:', error);
+      console.error('[Yavar] Trigger learn failed:', error);
     }
   }
 };

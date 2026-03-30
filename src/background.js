@@ -7,7 +7,7 @@ import { MessageHandler } from './utils/messageHandler.js';
 
 // Initialize on install
 chrome.runtime.onInstalled.addListener(async (details) => {
-  console.log('[AI Sidebar] Extension installed:', details.reason);
+  console.log('[Yavar] Extension installed:', details.reason);
   
   // Initialize default settings
   const defaultSettings = {
@@ -76,11 +76,11 @@ chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
       
       sendResponse({ success: true, imageData: dataUrl });
     } catch (error) {
-      console.error('[AI Sidebar] Screenshot capture failed:', error);
+      console.error('[Yavar] Screenshot capture failed:', error);
       sendResponse({ success: false, error: error.message });
     }
     return true;
   }
 });
 
-console.log('[AI Sidebar] Background service worker initialized');
+console.log('[Yavar] Background service worker initialized');

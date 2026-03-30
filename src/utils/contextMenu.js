@@ -7,85 +7,90 @@ export const ContextMenuHandler = {
 
     // Create context menu items
     chrome.contextMenus.create({
-      id: 'ai-sidebar-selection',
-      title: 'Copy to AI Sidebar',
+      id: 'yavar-copy-selection',
+      title: 'Copy to Yavar',
       contexts: ['selection']
     });
 
     chrome.contextMenus.create({
-      id: 'ai-sidebar-copy-page',
-      title: 'Copy page content to AI',
+      id: 'yavar-copy-page',
+      title: 'Copy page content to Yavar',
       contexts: ['page']
     });
 
     chrome.contextMenus.create({
-      id: 'ai-sidebar-screenshot',
-      title: 'Capture screenshot for AI',
+      id: 'yavar-screenshot',
+      title: 'Capture screenshot for Yavar',
       contexts: ['page']
     });
 
-    // GitHub-specific: Explain code with AI
+    // GitHub-specific: Explain code with Guided Study mode
     chrome.contextMenus.create({
-      id: 'explain-code',
-      title: '🎓 Explain with AI',
-      contexts: ['selection']
+      id: 'yavar-explain-code',
+      title: '🎓 Explain Code with Yavar',
+      contexts: ['selection'],
+      documentUrlPatterns: ['https://github.com/*']
     });
   },
 
   async handleClick(info, tab) {
     switch (info.menuItemId) {
-      case 'ai-sidebar-selection':
-        await this.sendSelectionToSidebar(info.selectionText, tab);
+      case 'yavar-copy-selection':
+        await this.sendSelectionToYavar(info.selectionText, tab);
         break;
 
-      case 'ai-sidebar-copy-page':
-        await this.copyPageToSidebar(tab);
+      case 'yavar-copy-page':
+        await this.copyPageToYavar(tab);
         break;
 
-      case 'ai-sidebar-screenshot':
+      case 'yavar-screenshot':
         await this.captureAndSend(tab);
         break;
 
-      case 'explain-code':
-        await this.explainCode(info.selectionText, tab);
+      case 'yavar-explain-code':
+        await this.explainCodeWithGuidedStudy(info.selectionText, tab);
         break;
     }
   },
 
-  async explainCode(selectionText, tab) {
+  async explainCodeWithGuidedStudy(selectionText, tab) {
     try {
-      // Generate prompt for explaining code
-      const prompt = `Explain this code like I'm a beginner:\n\n${selectionText}`;
+      // Wrap code in Guided Study template
+      const prompt = `Explain this to me using your guided study mode:
 
-      // Copy to clipboard via sidebar
-      await chrome.storage.session.set({ 
+\`\`\`
+${selectionText}
+\`\`\``;
+
+      // Copy to clipboard via Yavar
+      await chrome.storage.session.set({
         pendingText: prompt,
-        pendingNotification: '✍️ Code copied! Press Cmd+V to explain.'
+        pendingNotification: '📋 Code copied! Press Cmd+V to paste into Yavar'
       });
 
-      // Open sidebar
+      // Open Yavar sidebar
       await chrome.sidePanel.open({ windowId: tab.windowId });
     } catch (error) {
-      console.error('[AI Sidebar] Explain code failed:', error);
+      console.error('[Yavar] Explain code failed:', error);
     }
   },
 
-  async sendSelectionToSidebar(text, tab) {
+  async sendSelectionToYavar(text, tab) {
     try {
       // Copy to clipboard
       await navigator.clipboard.writeText(text);
 
-      // Store for sidebar
+      // Store for Yavar
       await chrome.storage.session.set({ pendingText: text });
 
-      // Open sidebar
+      // Open Yavar sidebar
       await chrome.sidePanel.open({ windowId: tab.windowId });
     } catch (error) {
-      console.error('[AI Sidebar] Failed to send selection:', error);
+      console.error('[Yavar] Failed to send selection:', error);
     }
   },
 
-  async copyPageToSidebar(tab) {
+  async copyPageToYavar(tab) {
     try {
       // Execute script to extract page content
       const result = await chrome.scripting.executeScript({
@@ -106,7 +111,7 @@ export const ContextMenuHandler = {
         await chrome.sidePanel.open({ windowId: tab.windowId });
       }
     } catch (error) {
-      console.error('[AI Sidebar] Failed to copy page:', error);
+      console.error('[Yavar] Failed to copy page:', error);
     }
   },
 
@@ -118,13 +123,13 @@ export const ContextMenuHandler = {
         quality: 90
       });
 
-      // Store for sidebar
+      // Store for Yavar
       await chrome.storage.session.set({ pendingScreenshot: dataUrl });
 
-      // Open sidebar
+      // Open Yavar sidebar
       await chrome.sidePanel.open({ windowId: tab.windowId });
     } catch (error) {
-      console.error('[AI Sidebar] Screenshot capture failed:', error);
+      console.error('[Yavar] Screenshot capture failed:', error);
     }
   }
 };

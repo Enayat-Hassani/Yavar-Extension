@@ -1,7 +1,7 @@
 // Content Script - Text Selection & Keyboard Shortcuts
 // Runs on all pages to handle text selection and capture
 
-class ContentHandler {
+class YavarContentHandler {
   constructor() {
     this.floatingMenu = null;
     this.selectedText = '';
@@ -181,7 +181,7 @@ class ContentHandler {
     try {
       await chrome.runtime.sendMessage(message);
     } catch (error) {
-      console.log('[AI Sidebar] Could not send to sidebar:', error);
+      console.log('[Yavar] Could not send to sidebar:', error);
     }
   }
 
@@ -206,7 +206,7 @@ class ContentHandler {
       await chrome.storage.session.set({ pendingText: text });
       
     } catch (error) {
-      console.error('[AI Sidebar] Failed to copy:', error);
+      console.error('[Yavar] Failed to copy:', error);
     }
   }
 
@@ -215,7 +215,7 @@ class ContentHandler {
     try {
       await chrome.runtime.sendMessage({ type: 'CAPTURE_SCREENSHOT' });
     } catch (error) {
-      console.log('[AI Sidebar] Could not trigger screenshot:', error);
+      console.log('[Yavar] Could not trigger screenshot:', error);
     }
   }
 
@@ -251,7 +251,7 @@ class ContentHandler {
 
 // Initialize when DOM is ready
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => new ContentHandler());
+  document.addEventListener('DOMContentLoaded', () => new YavarContentHandler());
 } else {
-  new ContentHandler();
+  new YavarContentHandler();
 }
