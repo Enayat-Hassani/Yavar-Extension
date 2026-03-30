@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Icon Generator</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #1a1a2e;
+      color: white;
+      padding: 40px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 20px;
+    }
+    h1 { margin-bottom: 20px; }
+    .icons-container {
+      display: flex;
+      gap: 40px;
+      align-items: center;
+    }
+    .icon-wrapper {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+    }
+    canvas {
+      border: 2px solid #333;
+      border-radius: 12px;
+    }
+    button {
+      padding: 12px 24px;
+      background: #6366f1;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      cursor: pointer;
+      margin-top: 20px;
+    }
+    button:hover { background: #818cf8; }
+    .instructions {
+      background: #252542;
+      padding: 20px;
+      border-radius: 8px;
+      max-width: 500px;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+  <h1>AI Sidebar Icon Generator</h1>
+  
+  <div class="icons-container">
+    <div class="icon-wrapper">
+      <span>16x16</span>
+      <canvas id="canvas16" width="16" height="16"></canvas>
+    </div>
+    <div class="icon-wrapper">
+      <span>48x48</span>
+      <canvas id="canvas48" width="48" height="48"></canvas>
+    </div>
+    <div class="icon-wrapper">
+      <span>128x128</span>
+      <canvas id="canvas128" width="128" height="128"></canvas>
+    </div>
+  </div>
+  
+  <button onclick="downloadIcons()">Download All Icons</button>
+  
+  <div class="instructions">
+    <strong>Instructions:</strong>
+    <ol>
+      <li>Click "Download All Icons" button</li>
+      <li>Save the three PNG files to the <code>icons/</code> folder</li>
+      <li>Or right-click each canvas and "Save image as..."</li>
+    </ol>
+  </div>
+
+  <script>
+    function drawIcon(canvas) {
+      const ctx = canvas.getContext('2d');
+      const size = canvas.width;
+      
+      // Clear
+      ctx.clearRect(0, 0, size, size);
+      
+      // Background gradient
+      const gradient = ctx.createLinearGradient(0, 0, size, size);
+      gradient.addColorStop(0, '#6366f1');
+      gradient.addColorStop(1, '#4f46e5');
+      
+      // Rounded rectangle background
+      const radius = size * 0.2;
+      ctx.beginPath();
+      ctx.roundRect(0, 0, size, size, radius);
+      ctx.fillStyle = gradient;
+      ctx.fill();
+      
+      // AI spark/star shape
+      const center = size / 2;
+      const innerRadius = size * 0.15;
+      const outerRadius = size * 0.35;
+      
+      ctx.beginPath();
+      for (let i = 0; i < 8; i++) {
+        const angle = (i * Math.PI / 4) - Math.PI / 8;
+        const r = i % 2 === 0 ? outerRadius : innerRadius;
+        const x = center + Math.cos(angle) * r;
+        const y = center + Math.sin(angle) * r;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.fillStyle = 'white';
+      ctx.fill();
+      
+      // Add small dots around
+      const dotPositions = [
+        { x: size * 0.2, y: size * 0.2 },
+        { x: size * 0.8, y: size * 0.2 },
+        { x: size * 0.2, y: size * 0.8 },
+        { x: size * 0.8, y: size * 0.8 }
+      ];
+      
+      dotPositions.forEach(pos => {
+        ctx.beginPath();
+        ctx.arc(pos.x, pos.y, size * 0.08, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+        ctx.fill();
+      });
+    }
+    
+    // Draw all icons
+    drawIcon(document.getElementById('canvas16'));
+    drawIcon(document.getElementById('canvas48'));
+    drawIcon(document.getElementById('canvas128'));
+    
+    function downloadIcons() {
+      [16, 48, 128].forEach(size => {
+        const canvas = document.getElementById(`canvas${size}`);
+        const link = document.createElement('a');
+        link.download = `icon${size}.png`;
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+      });
+    }
+  </script>
+</body>
+</html>
