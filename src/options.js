@@ -66,7 +66,7 @@ class OptionsPage {
       this.settings = response.settings || this.getDefaultSettings();
       this.populateForm();
     } catch (error) {
-      console.error('[AI Sidebar] Failed to load settings:', error);
+      console.error('[Yavar] Failed to load settings:', error);
       this.settings = this.getDefaultSettings();
       this.populateForm();
     }
@@ -97,9 +97,9 @@ class OptionsPage {
         type: 'UPDATE_SETTINGS', 
         settings: this.settings 
       });
-      console.log('[AI Sidebar] Settings saved');
+      console.log('[Yavar] Settings saved');
     } catch (error) {
-      console.error('[AI Sidebar] Failed to save settings:', error);
+      console.error('[Yavar] Failed to save settings:', error);
     }
   }
 
@@ -133,7 +133,7 @@ class OptionsPage {
         this.disabledSiteInput.value = '';
         this.renderDisabledSites();
       } catch (error) {
-        console.error('[AI Sidebar] Failed to add disabled site:', error);
+        console.error('[Yavar] Failed to add disabled site:', error);
       }
     }
   }
@@ -148,7 +148,7 @@ class OptionsPage {
       });
       this.renderDisabledSites();
     } catch (error) {
-      console.error('[AI Sidebar] Failed to remove disabled site:', error);
+      console.error('[Yavar] Failed to remove disabled site:', error);
     }
   }
 
@@ -212,7 +212,7 @@ class OptionsPage {
       
       alert('Settings imported successfully!');
     } catch (error) {
-      console.error('[AI Sidebar] Failed to import settings:', error);
+      console.error('[Yavar] Failed to import settings:', error);
       alert('Failed to import settings. Please check the file format.');
     }
     
@@ -234,7 +234,7 @@ class OptionsPage {
       this.populateForm();
       this.renderDisabledSites();
     } catch (error) {
-      console.error('[AI Sidebar] Failed to reset settings:', error);
+      console.error('[Yavar] Failed to reset settings:', error);
     }
   }
 

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "AI Sidebar - ChatGPT, Gemini, Claude",
+  "name": "Yavar - The Sidekick AI Wrapper",
   "version": "1.0.0",
-  "description": "Open any AI assistant (ChatGPT, Gemini, Claude) in a persistent sidebar. Smart text copy, screenshot capture, and keyboard shortcuts.",
+  "description": "Your AI sidekick for ChatGPT, Gemini, and Claude. Smart code explanation, screenshot capture, and guided study mode.",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",

@@ -2,7 +2,7 @@
 
 export const MessageHandler = {
   async handle(message, sender, sendResponse) {
-    console.log('[AI Sidebar] Message received:', message.type);
+    console.log('[Yavar] Message received:', message.type);
     
     try {
       switch (message.type) {
@@ -39,7 +39,7 @@ export const MessageHandler = {
           sendResponse({ error: 'Unknown message type' });
       }
     } catch (error) {
-      console.error('[AI Sidebar] Message handler error:', error);
+      console.error('[Yavar] Message handler error:', error);
       sendResponse({ error: error.message });
     }
   },
