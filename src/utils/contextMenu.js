@@ -75,6 +75,8 @@ ${selectionText}
     }
   },
 
+
+
   async sendSelectionToYavar(text, tab) {
     try {
       // Copy to clipboard
@@ -103,6 +105,7 @@ ${selectionText}
           return document.body.innerText;
         }
       });
+
 
       const content = result[0]?.result || '';
 

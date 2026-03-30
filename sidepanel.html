@@ -96,6 +96,27 @@
             </div>
           </div>
         </div>
+
+        <div class="settings-section">
+          <h3>GitHub API (Optional)</h3>
+          <p class="settings-description">Add a GitHub token for more reliable repository analysis and higher rate limits</p>
+          
+          <div class="github-token-section">
+            <div class="form-group">
+              <label for="github-token-input">Personal Access Token</label>
+              <input type="password" id="github-token-input" placeholder="ghp_..." autocomplete="off">
+            </div>
+            <div class="token-actions">
+              <button id="btn-save-github-token" class="btn-primary btn-small">Save Token</button>
+              <button id="btn-check-rate-limit" class="btn-secondary btn-small">Check Rate Limit</button>
+            </div>
+            <div id="github-token-status" class="token-status"></div>
+            <p class="token-help">
+              <a href="https://github.com/settings/tokens" target="_blank">Create a token</a> with no permissions (public repo data only). 
+              Rate limit: 60/hr without token, 15,000/hr with token.
+            </p>
+          </div>
+        </div>
       </div>
     </div>
 
