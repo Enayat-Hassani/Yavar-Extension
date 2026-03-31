@@ -91,9 +91,14 @@ clipboard-*.png
 # Test/debug files
 test-*.js
 debug-*.js
+debug-*.md
 *_backup.js
 *_old.js
 test-*.py
+
+# Planning/notes
+rag_plan.md
+plans/
 
 # Output files from scripts
 *.xlsx
