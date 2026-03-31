@@ -120,3 +120,7 @@ screenshots/
 # Bundle artifacts (if you create single-file builds)
 bundle.html
 artifact.html
+
+
+# Misc
+rag_plan.md
