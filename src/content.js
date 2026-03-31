@@ -194,7 +194,7 @@ class YavarContentHandler {
       return;
     }
 
-    console.log('[Yavar] Handling action:', action, 'Text length:', this.currentText.length);
+    console.log('[Yavar Content] Button clicked:', action, 'Text length:', this.currentText.length);
 
     if (action === 'copy') {
       try {
@@ -208,28 +208,33 @@ class YavarContentHandler {
       }
     } else if (action === 'learn') {
       try {
-        // Build the guided study prompt
         const prompt = `Explain this to me using "Guided Learning" Mode:\n\n${this.currentText}`;
 
-        // Copy to clipboard locally
-        await navigator.clipboard.writeText(prompt);
+        // Check if extension context is still valid
+        if (!chrome.runtime?.id) {
+          console.warn('[Yavar Content] Extension context invalidated — reload the page');
+          this.showButtonFeedback('learn', '✗ Reload page');
+          return;
+        }
 
-        // Send to background to store in session (content scripts can't use chrome.storage.session directly)
+        // Show immediate feedback
+        this.showButtonFeedback('learn', '✓ Sending...');
+
+        // Send to background (this will open sidebar + trigger auto-submit)
         chrome.runtime.sendMessage({
-          action: 'store_pending_text',
-          text: prompt,
-          notification: '📋 Text ready! Press Cmd+V to paste into Yavar'
-        }, () => {
-          // Open sidebar after storing
-          chrome.runtime.sendMessage({ action: 'open_sidebar' });
+          action: 'trigger_auto_submit',
+          prompt: prompt
         });
 
-        this.showButtonFeedback('learn', '✓ Ready!');
         this.hideFloatingMenu();
-        console.log('[Yavar] Learn prompt prepared and sidebar opening');
+        console.log('[Yavar Content] Auto-submit triggered');
       } catch (err) {
-        console.error('[Yavar] Learn action failed:', err);
-        this.showButtonFeedback('learn', '✗ Failed');
+        console.error('[Yavar Content] Learn action failed:', err);
+        if (err.message?.includes('Extension context invalidated')) {
+          this.showButtonFeedback('learn', '✗ Reload page');
+        } else {
+          this.showButtonFeedback('learn', '✗ Failed');
+        }
       }
     }
   }
