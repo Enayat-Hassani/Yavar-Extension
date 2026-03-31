@@ -71,6 +71,38 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   
+  // Handle auto-submit: store prompt, open sidebar, notify sidepanel
+  if (message.action === 'trigger_auto_submit') {
+    const tabId = sender.tab?.id;
+    console.log('[Yavar BG] trigger_auto_submit received, prompt length:', message.prompt?.length);
+
+    // CRITICAL: Store prompt FIRST (sync-safe), then open panel SYNCHRONOUSLY
+    // sidePanel.open() must be called without any await before it to preserve user gesture
+    chrome.storage.session.set({
+      pendingAutoSubmit: message.prompt,
+      lastSubmitTime: Date.now()
+    });
+
+    // Open sidepanel synchronously — no await before this call
+    if (tabId) {
+      chrome.sidePanel.open({ tabId }).catch(err => {
+        console.error('[Yavar BG] sidePanel.open failed:', err);
+      });
+    }
+
+    // Staggered messages to sidepanel — it may not have its listener ready yet
+    const payload = { action: 'AUTO_SUBMIT_PROMPT', prompt: message.prompt };
+    const delays = [300, 800, 1500, 3000];
+    delays.forEach(delay => {
+      setTimeout(() => {
+        chrome.runtime.sendMessage(payload).catch(() => {});
+      }, delay);
+    });
+
+    sendResponse({ success: true });
+    return true;
+  }
+
   // Handle storing pending text (content scripts can't use chrome.storage.session)
   if (message.action === 'store_pending_text') {
     (async () => {
@@ -88,22 +120,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     })();
     return true;
   }
-  
-  // Handle opening sidebar
+
+  // Handle opening sidebar — must be synchronous to preserve user gesture
   if (message.action === 'open_sidebar') {
-    (async () => {
-      try {
-        const tab = sender.tab || await chrome.tabs.query({ active: true, currentWindow: true }).then(t => t[0]);
-        if (tab) {
-          await chrome.sidePanel.open({ windowId: tab.windowId });
-          console.log('[Background] Sidebar opened');
-        }
-        sendResponse({ success: true });
-      } catch (error) {
-        console.error('[Background] Failed to open sidebar:', error);
-        sendResponse({ success: false, error: error.message });
-      }
-    })();
+    const tabId = sender.tab?.id;
+    if (tabId) {
+      chrome.sidePanel.open({ tabId }).catch(err => {
+        console.error('[Background] Failed to open sidebar:', err);
+      });
+    }
+    sendResponse({ success: true });
     return true;
   }
   

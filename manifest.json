@@ -52,6 +52,17 @@
       "matches": ["https://github.com/*"],
       "js": ["src/github-analyzer.js"],
       "run_at": "document_end"
+    },
+    {
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*",
+        "https://claude.ai/*",
+        "https://gemini.google.com/*"
+      ],
+      "js": ["src/ai-bridge.js"],
+      "run_at": "document_idle",
+      "all_frames": true
     }
   ],
   "declarative_net_request": {

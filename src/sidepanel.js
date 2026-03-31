@@ -212,6 +212,10 @@ class YavarSidePanel {
     setTimeout(() => {
       this.loadingState.classList.add('hidden');
     }, 500);
+
+    // Retry any pending auto-submit after iframe loads
+    console.log('[Yavar Sidepanel] Iframe fully loaded:', this.aiFrame.src);
+    this.checkPendingAutoSubmit();
   }
 
   openNewChat() {
@@ -654,6 +658,11 @@ As my Senior Coding Tutor, please help me learn this codebase:
         this.analyzeGitHubRepo();
       }
 
+      if (message.action === 'AUTO_SUBMIT_PROMPT' && message.prompt) {
+        console.log('[Yavar Sidepanel] Received AUTO_SUBMIT_PROMPT, forwarding to iframe');
+        this.forwardToIframe(message);
+      }
+
       sendResponse({ received: true });
       return true;
     });
@@ -690,6 +699,43 @@ As my Senior Coding Tutor, please help me learn this codebase:
     } catch (error) {
       console.error('[Yavar] Failed to check pending data:', error);
     }
+
+    // Also check for pending auto-submit
+    this.checkPendingAutoSubmit();
+  }
+
+  async checkPendingAutoSubmit() {
+    try {
+      const result = await chrome.storage.session.get(['pendingAutoSubmit', 'lastSubmitTime']);
+      if (result.pendingAutoSubmit && Date.now() - result.lastSubmitTime < 120000) {
+        console.log('[Yavar Sidepanel] Found pending auto-submit prompt');
+        this.forwardToIframe({ prompt: result.pendingAutoSubmit });
+        await chrome.storage.session.remove(['pendingAutoSubmit', 'lastSubmitTime']);
+      }
+    } catch (error) {
+      console.error('[Yavar Sidepanel] Failed to check pending auto-submit:', error);
+    }
+  }
+
+  forwardToIframe(message) {
+    const payload = { action: 'AUTO_SUBMIT_PROMPT', prompt: message.prompt };
+
+    // Staggered sends — the iframe/bridge may not be fully interactive yet
+    const delays = [0, 400, 1200, 2500];
+    delays.forEach(delay => {
+      setTimeout(() => {
+        try {
+          if (this.aiFrame && this.aiFrame.contentWindow) {
+            console.log(`[Yavar Sidepanel] postMessage to iframe (delay=${delay}ms)`);
+            this.aiFrame.contentWindow.postMessage(payload, '*');
+          } else {
+            console.warn(`[Yavar Sidepanel] Iframe not ready at delay=${delay}ms`);
+          }
+        } catch (e) {
+          console.warn('[Yavar Sidepanel] postMessage failed:', e);
+        }
+      }, delay);
+    });
   }
 }
 
