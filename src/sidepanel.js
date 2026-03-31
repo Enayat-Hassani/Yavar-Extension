@@ -38,15 +38,16 @@ class YavarSidePanel {
     this.btnCopyScreenshot = document.getElementById('btn-copy-screenshot');
     this.btnDismissScreenshot = document.getElementById('btn-dismiss-screenshot');
 
-    // Bottom bar buttons
-    this.btnModelSwitcher = document.getElementById('btn-model-switcher');
-    this.btnAnalyzeRepo = document.getElementById('btn-analyze-repo');
-    this.btnScreenshot = document.getElementById('btn-screenshot');
-    this.btnCopyPage = document.getElementById('btn-copy-page');
-    this.btnCopyLink = document.getElementById('btn-copy-link');
-    this.btnNewChat = document.getElementById('btn-new-chat');
-    this.btnHelp = document.getElementById('btn-help');
-    this.btnSettings = document.getElementById('btn-settings');
+    // Right sidebar buttons
+    this.sidebarBtnModelSwitcher = document.getElementById('sidebar-btn-model-switcher');
+    this.sidebarBtnAnalyzeRepo = document.getElementById('sidebar-btn-analyze-repo');
+    this.sidebarBtnScreenshot = document.getElementById('sidebar-btn-screenshot');
+    this.sidebarBtnCopyPage = document.getElementById('sidebar-btn-copy-page');
+    this.sidebarBtnCopyLink = document.getElementById('sidebar-btn-copy-link');
+    this.sidebarBtnNewChat = document.getElementById('sidebar-btn-new-chat');
+    this.sidebarBtnHelp = document.getElementById('sidebar-btn-help');
+    this.sidebarBtnSettings = document.getElementById('sidebar-btn-settings');
+    this.rightSidebar = document.getElementById('right-sidebar');
 
     // Model switcher
     this.modelSwitcher = document.getElementById('model-switcher');
@@ -73,9 +74,6 @@ class YavarSidePanel {
     this.modelNameInput = document.getElementById('model-name');
     this.modelUrlInput = document.getElementById('model-url');
     this.modelEnabledCheckbox = document.getElementById('model-enabled');
-
-    // Help tooltip
-    this.helpTooltip = document.getElementById('help-tooltip');
   }
 
   async loadModels() {
@@ -120,56 +118,32 @@ class YavarSidePanel {
   }
 
   bindEvents() {
-    // Model switcher
-    this.btnModelSwitcher.addEventListener('click', (e) => {
+    // Sidebar buttons
+    this.sidebarBtnModelSwitcher.addEventListener('click', (e) => {
       e.stopPropagation();
       this.toggleModelSwitcher();
     });
-    
-    this.btnManageModels.addEventListener('click', () => {
-      this.hideModelSwitcher();
-      this.showSettings();
-    });
-    
+
+    this.sidebarBtnAnalyzeRepo.addEventListener('click', () => this.analyzeGitHubRepo());
+    this.sidebarBtnScreenshot.addEventListener('click', () => this.captureScreenshot());
+    this.sidebarBtnCopyPage.addEventListener('click', () => this.copyPageContent());
+    this.sidebarBtnCopyLink.addEventListener('click', () => this.copyLink());
+    this.sidebarBtnNewChat.addEventListener('click', () => this.openNewChat());
+    this.sidebarBtnSettings.addEventListener('click', () => this.showSettings());
+
     // Close model switcher when clicking outside
     document.addEventListener('click', (e) => {
-      if (!this.modelSwitcher.contains(e.target) && !this.btnModelSwitcher.contains(e.target)) {
+      if (!this.modelSwitcher.contains(e.target) && !this.sidebarBtnModelSwitcher.contains(e.target)) {
         this.hideModelSwitcher();
       }
     });
-    
-    // Analyze repo button (GitHub)
-    this.btnAnalyzeRepo.addEventListener('click', () => this.analyzeGitHubRepo());
-    
-    // Screenshot button
-    this.btnScreenshot.addEventListener('click', () => this.captureScreenshot());
-    
-    // Copy page content
-    this.btnCopyPage.addEventListener('click', () => this.copyPageContent());
-    
-    // Copy link
-    this.btnCopyLink.addEventListener('click', () => this.copyLink());
-    
-    // New chat - refresh iframe
-    this.btnNewChat.addEventListener('click', () => this.openNewChat());
-    
-    // Help button
-    this.btnHelp.addEventListener('mouseenter', () => this.showHelpTooltip());
-    this.btnHelp.addEventListener('mouseleave', () => this.hideHelpTooltip());
-    this.btnHelp.addEventListener('click', (e) => {
-      e.stopPropagation();
-      this.toggleHelpTooltip();
-    });
-    
-    // Settings button
-    this.btnSettings.addEventListener('click', () => this.showSettings());
-    
+
     // Close settings
     this.btnCloseSettings.addEventListener('click', () => this.hideSettings());
-    
+
     // Add model button
     this.btnAddModel.addEventListener('click', () => this.showAddModelModal());
-    
+
     // Modal buttons
     this.btnCloseModal.addEventListener('click', () => this.hideAddModelModal());
     this.btnCancelModel.addEventListener('click', () => this.hideAddModelModal());
@@ -616,26 +590,6 @@ As my Senior Coding Tutor, please help me learn this codebase:
 
   hideNotification() {
     this.notificationBar.classList.add('hidden');
-  }
-
-  // ========== Help Tooltip ==========
-
-  showHelpTooltip() {
-    this.helpTooltip.classList.remove('hidden');
-    setTimeout(() => this.helpTooltip.classList.add('visible'), 10);
-  }
-
-  hideHelpTooltip() {
-    this.helpTooltip.classList.remove('visible');
-    setTimeout(() => this.helpTooltip.classList.add('hidden'), 200);
-  }
-
-  toggleHelpTooltip() {
-    if (this.helpTooltip.classList.contains('visible')) {
-      this.hideHelpTooltip();
-    } else {
-      this.showHelpTooltip();
-    }
   }
 
   // ========== Message Listener ==========
