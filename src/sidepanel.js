@@ -23,6 +23,7 @@ class YavarSidePanel {
     this.bindEvents();
     this.loadCurrentAI();
     this.setupMessageListener();
+    this.setupStorageListener();
     this.checkPendingData();
   }
 
@@ -437,6 +438,7 @@ As my Senior Coding Tutor, please help me learn this codebase:
   }
 
   cropAndShowScreenshot(dataUrl, rect) {
+    console.log('[Yavar] cropAndShowScreenshot called with rect:', rect);
     const img = new Image();
     img.onload = () => {
       const canvas = document.createElement('canvas');
@@ -452,21 +454,57 @@ As my Senior Coding Tutor, please help me learn this codebase:
       const croppedUrl = canvas.toDataURL('image/png');
       this.capturedScreenshot = croppedUrl;
       this.showScreenshotPanel(croppedUrl);
-      this.autoCopyScreenshot(croppedUrl);
+      console.log('[Yavar] Calling autoPasteScreenshotToChat');
+      this.autoPasteScreenshotToChat(croppedUrl);
+    };
+    img.onerror = () => {
+      console.error('[Yavar] Failed to load screenshot image');
+      this.showNotification('❌ Failed to process screenshot');
     };
     img.src = dataUrl;
   }
 
-  async autoCopyScreenshot(dataUrl) {
+  async autoPasteScreenshotToChat(dataUrl) {
     try {
-      const response = await fetch(dataUrl);
-      const blob = await response.blob();
-      await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
-      this.showNotification('📸 Screenshot copied to clipboard! Paste with Cmd+V');
-    } catch (err) {
-      console.warn('[Yavar] Auto-copy failed:', err);
+      // Store screenshot for iframe to pick up
+      await chrome.storage.session.set({
+        pendingScreenshotPaste: dataUrl,
+        lastScreenshotTime: Date.now()
+      });
+      console.log('[Yavar] Stored pending screenshot paste in session');
+
+      // Notify iframe to paste the screenshot
+      this.forwardScreenshotToIframe(dataUrl);
+      this.showNotification('📸 Screenshot sent to chat!');
+      
+    } catch (error) {
+      console.error('[Yavar] Failed to send screenshot to chat:', error);
       this.showNotification('📸 Screenshot captured! Click "Copy Image" to copy');
     }
+  }
+
+  forwardScreenshotToIframe(screenshotDataUrl) {
+    const payload = { 
+      action: 'AUTO_PASTE_SCREENSHOT', 
+      imageData: screenshotDataUrl 
+    };
+
+    // Staggered sends — the iframe/bridge may not be fully interactive yet
+    const delays = [0, 400, 1200, 2500];
+    delays.forEach(delay => {
+      setTimeout(() => {
+        try {
+          if (this.aiFrame && this.aiFrame.contentWindow) {
+            console.log(`[Yavar Sidepanel] Sending screenshot to iframe (delay=${delay}ms)`);
+            this.aiFrame.contentWindow.postMessage(payload, '*');
+          } else {
+            console.warn(`[Yavar Sidepanel] Iframe not ready at delay=${delay}ms`);
+          }
+        } catch (e) {
+          console.warn('[Yavar Sidepanel] postMessage failed:', e);
+        }
+      }, delay);
+    });
   }
 
   dismissScreenshot() {
@@ -552,22 +590,25 @@ As my Senior Coding Tutor, please help me learn this codebase:
 
   setupMessageListener() {
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-      console.log('[Yavar] Message received:', message.type || message.action);
+      console.log('[Yavar Sidepanel] Message received:', message);
 
       if (message.type === 'TEXT_SELECTION') {
         this.handleTextSelection(message.text);
       }
-      
+
       if (message.type === 'SCREENSHOT_CAPTURED') {
+        console.log('[Yavar Sidepanel] SCREENSHOT_CAPTURED received, rect:', message.rect, 'imageData length:', message.imageData?.length);
         if (message.rect) {
           // Crop to selected area
+          console.log('[Yavar Sidepanel] Calling cropAndShowScreenshot');
           this.cropAndShowScreenshot(message.imageData, message.rect);
         } else {
+          console.log('[Yavar Sidepanel] No rect, showing full screenshot');
           this.capturedScreenshot = message.imageData;
           this.showScreenshotPanel(message.imageData);
         }
       }
-      
+
       if (message.action === 'trigger_learn') {
         // Trigger GitHub analysis when keyboard shortcut is pressed
         this.analyzeGitHubRepo();
@@ -591,9 +632,34 @@ As my Senior Coding Tutor, please help me learn this codebase:
     this.showNotification(`📋 "${preview}" copied!`);
   }
 
+  setupStorageListener() {
+    // Listen for screenshot data that arrives after sidepanel loads
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+      if (areaName !== 'session') return;
+
+      if (changes.pendingScreenshot) {
+        const { newValue, oldValue } = changes.pendingScreenshot;
+        if (newValue) {
+          console.log('[Yavar Sidepanel] Storage listener: screenshot arrived');
+          chrome.storage.session.get('pendingScreenshotRect').then(result => {
+            const rect = result?.pendingScreenshotRect;
+            if (rect) {
+              this.cropAndShowScreenshot(newValue, rect);
+              chrome.storage.session.remove('pendingScreenshotRect');
+            } else {
+              this.capturedScreenshot = newValue;
+              this.showScreenshotPanel(newValue);
+            }
+            chrome.storage.session.remove('pendingScreenshot');
+          });
+        }
+      }
+    });
+  }
+
   async checkPendingData() {
     try {
-      const result = await chrome.storage.session.get(['pendingText', 'pendingScreenshot', 'pendingNotification']);
+      const result = await chrome.storage.session.get(['pendingText', 'pendingScreenshot', 'pendingScreenshotRect', 'pendingNotification']);
 
       if (result.pendingText) {
         await navigator.clipboard.writeText(result.pendingText);
@@ -607,9 +673,16 @@ As my Senior Coding Tutor, please help me learn this codebase:
       }
 
       if (result.pendingScreenshot) {
-        this.capturedScreenshot = result.pendingScreenshot;
-        this.showScreenshotPanel(result.pendingScreenshot);
+        console.log('[Yavar Sidepanel] Found pending screenshot in storage, rect:', result.pendingScreenshotRect);
+        if (result.pendingScreenshotRect) {
+          // Crop to selected area
+          this.cropAndShowScreenshot(result.pendingScreenshot, result.pendingScreenshotRect);
+        } else {
+          this.capturedScreenshot = result.pendingScreenshot;
+          this.showScreenshotPanel(result.pendingScreenshot);
+        }
         await chrome.storage.session.remove('pendingScreenshot');
+        await chrome.storage.session.remove('pendingScreenshotRect');
       }
     } catch (error) {
       console.error('[Yavar] Failed to check pending data:', error);

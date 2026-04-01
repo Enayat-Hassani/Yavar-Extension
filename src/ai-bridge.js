@@ -120,6 +120,8 @@
   // Guard against duplicate submissions from retries
   let lastSubmittedPrompt = '';
   let lastSubmitTime = 0;
+  let lastScreenshotData = '';
+  let lastScreenshotTime = 0;
 
   function handleAutoSubmit(prompt) {
     const now = Date.now();
@@ -133,11 +135,85 @@
     autoSubmit(prompt);
   }
 
+  function handleAutoPasteScreenshot(imageDataUrl) {
+    const now = Date.now();
+    // Dedupe: ignore if same screenshot within 8 seconds (covers staggered retries)
+    if (imageDataUrl === lastScreenshotData && now - lastScreenshotTime < 8000) {
+      console.log('[Yavar Bridge] Ignoring duplicate screenshot paste');
+      return;
+    }
+    lastScreenshotData = imageDataUrl;
+    lastScreenshotTime = now;
+    
+    // Call the async function
+    (async () => {
+      const platform = detectPlatform();
+      if (!platform) {
+        console.warn('[Yavar Bridge] Unknown platform, cannot paste screenshot');
+        return;
+      }
+
+      console.log('[Yavar Bridge] handleAutoPasteScreenshot called on platform:', platform);
+
+      const selectors = SELECTORS[platform];
+
+      try {
+        // Convert data URL to blob
+        const response = await fetch(imageDataUrl);
+        const blob = await response.blob();
+        const file = new File([blob], 'screenshot.png', { type: 'image/png' });
+
+        console.log('[Yavar Bridge] Screenshot converted to blob, size:', blob.size);
+
+        // Get the input element
+        const inputEl = await waitForElement(selectors.input, 10000);
+        console.log('[Yavar Bridge] Input element found:', !!inputEl);
+
+        inputEl.focus();
+
+        // Create a paste event with the image file
+        const pasteEvent = new ClipboardEvent('paste', {
+          bubbles: true,
+          cancelable: true,
+          clipboardData: new DataTransfer()
+        });
+
+        // Add the image file to clipboard data
+        pasteEvent.clipboardData.items.add(file);
+
+        // Dispatch the paste event
+        inputEl.dispatchEvent(pasteEvent);
+        console.log('[Yavar Bridge] Screenshot pasted via paste event');
+
+        // Alternative method: Some platforms support direct file input
+        // Try creating a file input change event as fallback
+        setTimeout(() => {
+          try {
+            const fileChangeEvent = new Event('change', { bubbles: true });
+            // Some rich text editors listen for this
+            inputEl.dispatchEvent(fileChangeEvent);
+            console.log('[Yavar Bridge] Dispatched change event as fallback');
+          } catch (err) {
+            console.warn('[Yavar Bridge] Fallback event failed:', err);
+          }
+        }, 200);
+
+      } catch (err) {
+        console.error('[Yavar Bridge] handleAutoPasteScreenshot failed:', err);
+      }
+    })();
+  }
+
   // Listen for postMessage from sidepanel
   window.addEventListener('message', (event) => {
     if (event.data?.action === 'AUTO_SUBMIT_PROMPT' && event.data?.prompt) {
       console.log('[Yavar Bridge] Received AUTO_SUBMIT_PROMPT via postMessage');
       handleAutoSubmit(event.data.prompt);
+    }
+    
+    if (event.data?.action === 'AUTO_PASTE_SCREENSHOT' && event.data?.imageData) {
+      console.log('[Yavar Bridge] Received AUTO_PASTE_SCREENSHOT via postMessage');
+      handleAutoPasteScreenshot(event.data.imageData);
     }
   });
 
@@ -147,6 +223,11 @@
       if (message.action === 'AUTO_SUBMIT_PROMPT' && message.prompt) {
         console.log('[Yavar Bridge] Received AUTO_SUBMIT_PROMPT via runtime message');
         handleAutoSubmit(message.prompt);
+        sendResponse({ success: true });
+      }
+      if (message.action === 'AUTO_PASTE_SCREENSHOT' && message.imageData) {
+        console.log('[Yavar Bridge] Received AUTO_PASTE_SCREENSHOT via runtime message');
+        handleAutoPasteScreenshot(message.imageData);
         sendResponse({ success: true });
       }
       return true;
