@@ -60,12 +60,6 @@ class YavarSidePanel {
     this.modelsListContainer = document.getElementById('models-list-container');
     this.btnAddModel = document.getElementById('btn-add-model');
 
-    // GitHub token section
-    this.githubTokenInput = document.getElementById('github-token-input');
-    this.btnSaveToken = document.getElementById('btn-save-github-token');
-    this.btnCheckRateLimit = document.getElementById('btn-check-rate-limit');
-    this.githubTokenStatus = document.getElementById('github-token-status');
-
     // Add model modal
     this.addModelModal = document.getElementById('add-model-modal');
     this.btnCloseModal = document.getElementById('btn-close-modal');
@@ -157,10 +151,6 @@ class YavarSidePanel {
     // Screenshot panel buttons
     this.btnCopyScreenshot.addEventListener('click', () => this.copyScreenshot());
     this.btnDismissScreenshot.addEventListener('click', () => this.dismissScreenshot());
-
-    // GitHub token buttons
-    this.btnSaveToken.addEventListener('click', () => this.saveGitHubToken());
-    this.btnCheckRateLimit.addEventListener('click', () => this.checkRateLimit());
 
     // Iframe load handling
     this.aiFrame.addEventListener('load', () => this.handleFrameLoad());
@@ -355,67 +345,6 @@ class YavarSidePanel {
     this.renderModelsList();
   }
 
-  // ========== GitHub Token Management ==========
-
-  async saveGitHubToken() {
-    const token = this.githubTokenInput.value.trim();
-    
-    if (!token) {
-      this.showTokenStatus('Please enter a token', 'error');
-      return;
-    }
-
-    try {
-      // Save to local storage
-      await chrome.storage.local.set({ githubToken: token });
-      this.showTokenStatus('✅ Token saved! Rate limit: 15,000 requests/hour', 'success');
-      this.githubTokenInput.value = '';
-    } catch (error) {
-      this.showTokenStatus('❌ Failed to save token', 'error');
-    }
-  }
-
-  async checkRateLimit() {
-    try {
-      this.showTokenStatus('⏳ Checking rate limit...', 'info');
-      
-      const limits = await chrome.runtime.sendMessage({ action: 'check_github_rate_limit' });
-      
-      if (limits.error) {
-        this.showTokenStatus(`❌ ${limits.error}`, 'error');
-        return;
-      }
-
-      const core = limits.core;
-      const remaining = core.remaining;
-      const limit = core.limit;
-      const resetTime = new Date(core.reset * 1000);
-      const isToken = limit === 15000;
-
-      const statusText = isToken
-        ? `✅ Token active: ${remaining.toLocaleString()} / ${limit.toLocaleString()} requests remaining`
-        : `⚠️ No token: ${remaining.toLocaleString()} / ${limit.toLocaleString()} requests remaining`;
-      
-      const resetText = `Resets at ${resetTime.toLocaleTimeString()}`;
-      
-      this.showTokenStatus(`${statusText}\n${resetText}`, isToken ? 'success' : 'info');
-    } catch (error) {
-      this.showTokenStatus(`❌ Error: ${error.message}`, 'error');
-    }
-  }
-
-  showTokenStatus(message, type) {
-    this.githubTokenStatus.textContent = message;
-    this.githubTokenStatus.className = `token-status show ${type}`;
-    
-    // Auto-hide after 5 seconds for success/error
-    if (type === 'success' || type === 'error') {
-      setTimeout(() => {
-        this.githubTokenStatus.classList.remove('show');
-      }, 5000);
-    }
-  }
-
   // ========== GitHub Analysis ==========
 
   async analyzeGitHubRepo() {
@@ -430,7 +359,11 @@ class YavarSidePanel {
     this.showNotification('🔄 Analyzing repository...');
 
     try {
-      const repoData = await chrome.tabs.sendMessage(tab.id, { action: 'scrape_github' });
+      // Try plugin system first
+      const repoData = await chrome.tabs.sendMessage(tab.id, { 
+        action: 'scrape_github',
+        plugin: 'GitHub Analyzer'
+      });
 
       if (!repoData || !repoData.repoName) {
         this.showNotification('⚠️ Could not analyze repository');
@@ -439,9 +372,9 @@ class YavarSidePanel {
 
       const prompt = this.generateLearningPrompt(repoData);
       await navigator.clipboard.writeText(prompt);
-      
-      const source = repoData.source === 'dom-fallback' ? ' (fallback mode)' : '';
-      this.showNotification(`🚀 Learning prompt copied${source}! Press Cmd+V in ChatGPT`);
+
+      const pluginInfo = repoData.plugin ? ` (${repoData.plugin})` : '';
+      this.showNotification(`🚀 Learning prompt copied${pluginInfo}! Press Cmd+V in ChatGPT`);
 
     } catch (error) {
       console.error('[Yavar] GitHub analysis failed:', error);
@@ -450,27 +383,26 @@ class YavarSidePanel {
   }
 
   generateLearningPrompt(repoData) {
-    // Handle both API and DOM response formats
-    const stars = repoData.stars?.toLocaleString?.() || repoData.stars || '0';
-    const forks = repoData.forks?.toLocaleString?.() || repoData.forks || '0';
-    const files = repoData.files?.slice(0, 15).join(', ') || 'Unknown files';
+    // Handle dynamic scanner response format with metadata
+    const stars = repoData.stars || '0';
+    const forks = repoData.forks || '0';
     const topics = repoData.topics?.length > 0 ? repoData.topics.join(', ') : 'None';
     
-    // Handle README from API (plain text) or DOM (already text)
+    // Use fileStructure from scanner (already includes PROJECT, DESC, STARS header)
+    const fileStructure = repoData.fileStructure || 'No file structure available';
+    
+    // Handle README from scanner (already cleaned)
     const readmeFull = repoData.readme || 'No README available';
     const readmeExcerpt = readmeFull.slice(0, 600).replace(/\n/g, ' ').trim();
-    
-    // Add language info if available (from API)
-    const languageInfo = repoData.language ? `\n   📦 Primary Language: ${repoData.language}` : '';
 
     return `🎓 LEARNING MODE: ${repoData.repoName}
 
 📊 Repository Stats:
-   ⭐ Stars: ${stars} | 🍴 Forks: ${forks}${languageInfo}
+   ⭐ Stars: ${stars} | 🍴 Forks: ${forks}
    🏷️ Topics: ${topics}
 
-📁 Key Files Identified:
-   ${files}
+📂 Repository Structure:
+${fileStructure}
 
 📖 README Context:
    ${readmeExcerpt}
@@ -491,17 +423,8 @@ As my Senior Coding Tutor, please help me learn this codebase:
 
   async captureScreenshot() {
     try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-
-      const dataUrl = await chrome.tabs.captureVisibleTab(null, {
-        format: 'png',
-        quality: 90
-      });
-
-      this.capturedScreenshot = dataUrl;
-      this.showScreenshotPanel(dataUrl);
-      this.showNotification('📸 Screenshot captured! Paste with Cmd+V in ChatGPT');
-
+      // Ask background to inject area selection overlay on the active tab
+      chrome.runtime.sendMessage({ action: 'start_area_select' });
     } catch (error) {
       console.error('[Yavar] Screenshot capture failed:', error);
       this.showNotification('❌ Failed to capture screenshot.');
@@ -511,6 +434,39 @@ As my Senior Coding Tutor, please help me learn this codebase:
   showScreenshotPanel(dataUrl) {
     this.screenshotImg.src = dataUrl;
     this.screenshotPanel.classList.remove('hidden');
+  }
+
+  cropAndShowScreenshot(dataUrl, rect) {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = rect.width * rect.dpr;
+      canvas.height = rect.height * rect.dpr;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img,
+        rect.x * rect.dpr, rect.y * rect.dpr,
+        rect.width * rect.dpr, rect.height * rect.dpr,
+        0, 0,
+        rect.width * rect.dpr, rect.height * rect.dpr
+      );
+      const croppedUrl = canvas.toDataURL('image/png');
+      this.capturedScreenshot = croppedUrl;
+      this.showScreenshotPanel(croppedUrl);
+      this.autoCopyScreenshot(croppedUrl);
+    };
+    img.src = dataUrl;
+  }
+
+  async autoCopyScreenshot(dataUrl) {
+    try {
+      const response = await fetch(dataUrl);
+      const blob = await response.blob();
+      await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+      this.showNotification('📸 Screenshot copied to clipboard! Paste with Cmd+V');
+    } catch (err) {
+      console.warn('[Yavar] Auto-copy failed:', err);
+      this.showNotification('📸 Screenshot captured! Click "Copy Image" to copy');
+    }
   }
 
   dismissScreenshot() {
@@ -603,8 +559,13 @@ As my Senior Coding Tutor, please help me learn this codebase:
       }
       
       if (message.type === 'SCREENSHOT_CAPTURED') {
-        this.capturedScreenshot = message.imageData;
-        this.showScreenshotPanel(message.imageData);
+        if (message.rect) {
+          // Crop to selected area
+          this.cropAndShowScreenshot(message.imageData, message.rect);
+        } else {
+          this.capturedScreenshot = message.imageData;
+          this.showScreenshotPanel(message.imageData);
+        }
       }
       
       if (message.action === 'trigger_learn') {

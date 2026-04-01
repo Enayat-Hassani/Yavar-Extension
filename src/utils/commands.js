@@ -53,19 +53,16 @@ export const CommandHandler = {
 
   async captureScreenshot(tab) {
     if (!tab) return;
-    
+
     try {
-      // Capture visible tab
-      const dataUrl = await chrome.tabs.captureVisibleTab(null, {
-        format: 'png',
-        quality: 90
+      // Inject area selection overlay — background handles the rest
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => {
+          // Trigger the same area selector injection via message
+          chrome.runtime.sendMessage({ action: 'start_area_select' });
+        }
       });
-      
-      // Store for sidebar
-      await chrome.storage.session.set({ pendingScreenshot: dataUrl });
-      
-      // Open sidebar
-      await chrome.sidePanel.open({ windowId: tab.windowId });
     } catch (error) {
       console.error('[Yavar] Screenshot capture failed:', error);
     }

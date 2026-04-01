@@ -4,7 +4,6 @@
 import { ContextMenuHandler } from './utils/contextMenu.js';
 import { CommandHandler } from './utils/commands.js';
 import { MessageHandler } from './utils/messageHandler.js';
-import { githubAPI } from './github-api.js';
 
 // Initialize on install
 chrome.runtime.onInstalled.addListener(async (details) => {
@@ -46,31 +45,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ pong: true });
     return true;
   }
-  
-  // Handle GitHub API fetch request (MUST be before MessageHandler)
-  if (message.action === 'fetch_github_data') {
-    console.log('[Background] Fetching GitHub data for:', message.owner, message.repo);
-    
-    githubAPI.fetchAllData(message.owner, message.repo)
-      .then(data => {
-        console.log('[Background] GitHub API response:', data.success ? 'success' : 'failed', data);
-        sendResponse(data);
-      })
-      .catch(err => {
-        console.error('[Background] GitHub API error:', err);
-        sendResponse({ success: false, error: err.message });
-      });
-    return true; // Keep channel open for async response
-  }
-  
-  // Handle rate limit check
-  if (message.action === 'check_github_rate_limit') {
-    githubAPI.checkRateLimit()
-      .then(limits => sendResponse(limits))
-      .catch(err => sendResponse({ error: err.message }));
-    return true;
-  }
-  
+
   // Handle auto-submit: store prompt, open sidebar, notify sidepanel
   if (message.action === 'trigger_auto_submit') {
     const tabId = sender.tab?.id;
@@ -100,6 +75,56 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     });
 
     sendResponse({ success: true });
+    return true;
+  }
+
+  // Handle area selection request from sidepanel
+  if (message.action === 'start_area_select') {
+    (async () => {
+      try {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (!tab) { sendResponse({ success: false }); return; }
+
+        // Inject the area selection overlay into the active tab
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: injectAreaSelector
+        });
+        sendResponse({ success: true });
+      } catch (error) {
+        console.error('[Yavar BG] Failed to inject area selector:', error);
+        sendResponse({ success: false, error: error.message });
+      }
+    })();
+    return true;
+  }
+
+  // Handle area selected — capture tab then send cropped rect to sidepanel
+  if (message.action === 'area_selected') {
+    (async () => {
+      try {
+        const tab = sender.tab;
+        // Small delay to let the overlay removal render
+        await new Promise(r => setTimeout(r, 80));
+
+        const dataUrl = await chrome.tabs.captureVisibleTab(null, {
+          format: 'png',
+          quality: 100
+        });
+
+        // Forward full image + rect to sidepanel for cropping
+        chrome.runtime.sendMessage({
+          type: 'SCREENSHOT_CAPTURED',
+          imageData: dataUrl,
+          rect: message.rect
+        }).catch(() => {});
+
+        sendResponse({ success: true });
+      } catch (error) {
+        console.error('[Yavar BG] Screenshot after selection failed:', error);
+        sendResponse({ success: false, error: error.message });
+      }
+    })();
     return true;
   }
 
@@ -185,5 +210,98 @@ chrome.action.onClicked.addListener(async (tab) => {
 
 // Set side panel behavior
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+
+// Injected into the active tab to let the user draw a selection rectangle
+function injectAreaSelector() {
+  // Prevent double-injection
+  if (document.getElementById('yavar-area-overlay')) return;
+
+  const overlay = document.createElement('div');
+  overlay.id = 'yavar-area-overlay';
+  overlay.style.cssText = `
+    position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+    z-index: 2147483647; cursor: crosshair;
+    background: rgba(0, 0, 0, 0.3);
+  `;
+
+  const selection = document.createElement('div');
+  selection.style.cssText = `
+    position: absolute; border: 2px solid #0071e3;
+    background: rgba(0, 113, 227, 0.08);
+    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.35);
+    border-radius: 4px; display: none;
+  `;
+  overlay.appendChild(selection);
+
+  const hint = document.createElement('div');
+  hint.textContent = 'Drag to select area — press Esc to cancel';
+  hint.style.cssText = `
+    position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
+    padding: 8px 16px; background: rgba(0, 0, 0, 0.7); color: white;
+    border-radius: 8px; font: 13px -apple-system, BlinkMacSystemFont, sans-serif;
+    pointer-events: none; white-space: nowrap;
+  `;
+  overlay.appendChild(hint);
+
+  let startX, startY, dragging = false;
+
+  function cleanup() {
+    overlay.remove();
+  }
+
+  overlay.addEventListener('mousedown', (e) => {
+    startX = e.clientX;
+    startY = e.clientY;
+    dragging = true;
+    selection.style.display = 'block';
+    selection.style.left = startX + 'px';
+    selection.style.top = startY + 'px';
+    selection.style.width = '0';
+    selection.style.height = '0';
+    hint.style.display = 'none';
+  });
+
+  overlay.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    const x = Math.min(e.clientX, startX);
+    const y = Math.min(e.clientY, startY);
+    const w = Math.abs(e.clientX - startX);
+    const h = Math.abs(e.clientY - startY);
+    selection.style.left = x + 'px';
+    selection.style.top = y + 'px';
+    selection.style.width = w + 'px';
+    selection.style.height = h + 'px';
+  });
+
+  overlay.addEventListener('mouseup', (e) => {
+    if (!dragging) return;
+    dragging = false;
+    const x = Math.min(e.clientX, startX);
+    const y = Math.min(e.clientY, startY);
+    const w = Math.abs(e.clientX - startX);
+    const h = Math.abs(e.clientY - startY);
+
+    // Ignore tiny selections (accidental clicks)
+    if (w < 10 || h < 10) {
+      cleanup();
+      return;
+    }
+
+    const rect = { x, y, width: w, height: h, dpr: window.devicePixelRatio || 1 };
+    cleanup();
+
+    // Tell background we have our selection
+    chrome.runtime.sendMessage({ action: 'area_selected', rect });
+  });
+
+  document.addEventListener('keydown', function escHandler(e) {
+    if (e.key === 'Escape') {
+      cleanup();
+      document.removeEventListener('keydown', escHandler);
+    }
+  });
+
+  document.body.appendChild(overlay);
+}
 
 console.log('[Yavar] Background service worker initialized');
