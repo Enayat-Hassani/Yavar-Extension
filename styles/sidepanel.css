@@ -281,12 +281,14 @@ html, body {
   opacity: 1;
   transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.15s cubic-bezier(0.4, 0, 0.2, 1);
   z-index: 501;
-  pointer-events: none;
+  pointer-events: auto;
 }
 
 .right-sidebar:not(:hover) .sidebar-panel {
   transform: translateX(100%);
   opacity: 0;
+  pointer-events: none;
+  transition-delay: 0.3s;
 }
 
 .sidebar-icons {
@@ -774,91 +776,6 @@ html, body {
 
 /* ========== Help Tooltip ========== */
 /* Removed - sidebar icons use native title tooltips */
-
-/* ========== GitHub Token Section ========== */
-.github-token-section {
-  background: rgba(255, 255, 255, 0.4);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 16px;
-}
-
-.github-token-section .form-group {
-  margin-bottom: 12px;
-}
-
-.github-token-section input[type="password"],
-.github-token-section input[type="text"] {
-  width: 100%;
-  padding: 10px 12px;
-  background: rgba(255, 255, 255, 0.6);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  color: var(--text-primary);
-  font-size: 13px;
-  font-family: monospace;
-  transition: border-color 0.15s;
-}
-
-.github-token-section input:focus {
-  outline: none;
-  border-color: var(--accent);
-}
-
-.token-actions {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
-.token-actions .btn-small {
-  flex: 1;
-}
-
-.token-status {
-  font-size: 12px;
-  padding: 10px 12px;
-  border-radius: 8px;
-  margin-bottom: 12px;
-  display: none;
-}
-
-.token-status.show {
-  display: block;
-}
-
-.token-status.success {
-  background: rgba(52, 199, 89, 0.15);
-  border: 1px solid var(--success);
-  color: var(--success);
-}
-
-.token-status.error {
-  background: rgba(255, 59, 48, 0.15);
-  border: 1px solid var(--danger);
-  color: var(--danger);
-}
-
-.token-status.info {
-  background: rgba(0, 113, 227, 0.15);
-  border: 1px solid var(--accent);
-  color: var(--accent);
-}
-
-.token-help {
-  font-size: 11px;
-  color: var(--text-secondary);
-  line-height: 1.5;
-}
-
-.token-help a {
-  color: var(--accent);
-  text-decoration: none;
-}
-
-.token-help a:hover {
-  text-decoration: underline;
-}
 
 /* ========== Scrollbar ========== */
 ::-webkit-scrollbar {

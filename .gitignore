@@ -108,6 +108,11 @@ plans/
 # Qwen/OpenCode specific
 .qwen/
 .output/
+QWEN.md
+
+# Claude specific
+.claude/
+CLAUDE.md
 
 # Reference/example code (not your own work)
 an_example.js
