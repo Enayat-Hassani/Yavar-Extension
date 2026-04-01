@@ -101,23 +101,45 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   // Handle area selected — capture tab then send cropped rect to sidepanel
   if (message.action === 'area_selected') {
+    console.log('[Yavar BG] area_selected received, rect:', message.rect);
     (async () => {
       try {
         const tab = sender.tab;
+        console.log('[Yavar BG] Tab:', tab?.id);
         // Small delay to let the overlay removal render
         await new Promise(r => setTimeout(r, 80));
 
+        console.log('[Yavar BG] Capturing visible tab...');
         const dataUrl = await chrome.tabs.captureVisibleTab(null, {
           format: 'png',
           quality: 100
         });
+        console.log('[Yavar BG] Captured, length:', dataUrl?.length);
 
-        // Forward full image + rect to sidepanel for cropping
-        chrome.runtime.sendMessage({
+        // Store in session storage for sidepanel to pick up (more reliable than sendMessage)
+        await chrome.storage.session.set({
+          pendingScreenshot: dataUrl,
+          pendingScreenshotRect: message.rect
+        });
+        console.log('[Yavar BG] Stored screenshot in session storage');
+
+        // Open sidebar to show the screenshot
+        const tabId = sender.tab?.id;
+        if (tabId) {
+          chrome.sidePanel.open({ tabId }).catch(err => {
+            console.error('[Yavar BG] sidePanel.open failed:', err);
+          });
+        }
+
+        // Also try to notify sidepanel directly (if it's already open)
+        const payload = {
           type: 'SCREENSHOT_CAPTURED',
           imageData: dataUrl,
           rect: message.rect
-        }).catch(() => {});
+        };
+        chrome.runtime.sendMessage(payload).catch((err) => {
+          console.log('[Yavar BG] Sidepanel not ready, will use storage fallback');
+        });
 
         sendResponse({ success: true });
       } catch (error) {
