@@ -1,10 +1,6 @@
 // Content Script - Text Selection & Keyboard Shortcuts
 // Runs on all pages to handle text selection and capture
 
-// TEMPORARILY DISABLED: Plugin system - uncomment when ready to debug
-// import { pluginManager } from './plugins/plugin-manager.js';
-// import { GitHubAnalyzerPlugin } from './plugins/github-analyzer-plugin.js';
-
 class YavarContentHandler {
   constructor() {
     this.floatingMenu = null;
@@ -26,25 +22,6 @@ class YavarContentHandler {
       console.log('[Yavar] Content handler disabled for this site');
     }
 
-    // TEMPORARILY DISABLED: Plugin initialization
-    // await this.initializePlugins();
-  }
-
-  async initializePlugins() {
-    try {
-      // Register all available plugins
-      pluginManager.register(new GitHubAnalyzerPlugin());
-      
-      // Initialize plugins that match current URL
-      await pluginManager.initializeAll();
-      
-      const activePlugin = pluginManager.getActivePlugin();
-      if (activePlugin) {
-        console.log(`[Yavar] Active plugin: ${activePlugin.name}`);
-      }
-    } catch (error) {
-      console.error('[Yavar] Plugin initialization failed:', error);
-    }
   }
 
   async loadSettings() {
@@ -457,19 +434,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
-  // Handle plugin-specific messages (e.g., scrape_github)
-  if (request.action === 'scrape_github' || request.plugin) {
-    const activePlugin = pluginManager.getActivePlugin();
-    if (activePlugin && typeof activePlugin.handleMessage === 'function') {
-      activePlugin.handleMessage(request)
-        .then(data => sendResponse(data))
-        .catch(error => sendResponse({ success: false, error: error.message }));
-      return true; // Keep channel open for async response
-    } else {
-      sendResponse({ success: false, error: 'No active plugin available' });
-      return true;
-    }
-  }
 });
 
 console.log('[Yavar] Content script loaded');
