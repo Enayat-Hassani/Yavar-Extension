@@ -432,68 +432,117 @@ class YavarSidePanel {
       return;
     }
 
-    // Show loading state
+    // Extract owner/repo from tab URL
+    const url = new URL(tab.url);
+    const pathParts = url.pathname.split('/').filter(Boolean);
+    if (pathParts.length < 2) {
+      this.showNotification('⚠️ Navigate to a GitHub repository page');
+      return;
+    }
+    const [owner, repo] = pathParts;
+
     this.showNotification('🔄 Analyzing repository...');
 
     try {
-      // Try plugin system first
-      const repoData = await chrome.tabs.sendMessage(tab.id, { 
-        action: 'scrape_github',
-        plugin: 'GitHub Analyzer'
-      });
+      const scanResult = await this.scanRepoRobust(owner, repo);
 
-      if (!repoData || !repoData.repoName) {
-        this.showNotification('⚠️ Could not analyze repository');
-        return;
+      // Auto-submit to AI chat
+      const { autoPaste, autoSubmit } = await this.getAutoPasteSettings();
+      if (autoPaste) {
+        this.forwardToIframe({ prompt: scanResult, autoSubmit });
       }
 
-      const prompt = this.generateLearningPrompt(repoData);
-      await navigator.clipboard.writeText(prompt);
-
-      const pluginInfo = repoData.plugin ? ` (${repoData.plugin})` : '';
-      this.showNotification(`🚀 Learning prompt copied${pluginInfo}! Press Cmd+V in ChatGPT`);
+      // Also copy to clipboard as fallback
+      await navigator.clipboard.writeText(scanResult);
+      this.showNotification('🚀 Repo analysis sent to chat & copied to clipboard!');
 
     } catch (error) {
       console.error('[Yavar] GitHub analysis failed:', error);
-      this.showNotification('⚠️ Analysis failed. Make sure you\'re on a GitHub repo page.');
+      this.showNotification('⚠️ Analysis failed: ' + error.message);
     }
   }
 
-  generateLearningPrompt(repoData) {
-    // Handle dynamic scanner response format with metadata
-    const stars = repoData.stars || '0';
-    const forks = repoData.forks || '0';
-    const topics = repoData.topics?.length > 0 ? repoData.topics.join(', ') : 'None';
-    
-    // Use fileStructure from scanner (already includes PROJECT, DESC, STARS header)
-    const fileStructure = repoData.fileStructure || 'No file structure available';
-    
-    // Handle README from scanner (already cleaned)
-    const readmeFull = repoData.readme || 'No README available';
-    const readmeExcerpt = readmeFull.slice(0, 600).replace(/\n/g, ' ').trim();
+  async scanRepoRobust(owner, repo) {
+    const SAFE_FILE_LIMIT = 300;
 
-    return `🎓 LEARNING MODE: ${repoData.repoName}
+    const fetchJSON = async (url) => {
+      const res = await fetch(url, { headers: { 'Accept': 'application/vnd.github.v3+json' } });
+      if (!res.ok) throw new Error(`GitHub API ${res.status}`);
+      return res.json();
+    };
 
-📊 Repository Stats:
-   ⭐ Stars: ${stars} | 🍴 Forks: ${forks}
-   🏷️ Topics: ${topics}
+    const repoInfo = await fetchJSON(`https://api.github.com/repos/${owner}/${repo}`);
+    const branch = repoInfo.default_branch;
 
-📂 Repository Structure:
-${fileStructure}
+    const [treeData, readmeData] = await Promise.all([
+      fetchJSON(`https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`),
+      fetchJSON(`https://api.github.com/repos/${owner}/${repo}/readme`).catch(() => ({ content: null }))
+    ]);
 
-📖 README Context:
-   ${readmeExcerpt}
+    // --- DEP-SNIFFER: Extract dependency/tech stack info ---
+    let depContext = 'DEPENDENCIES / TECH STACK\n========================\n';
+    const manifestFiles = treeData.tree.filter(f =>
+      ['package.json', 'pyproject.toml', 'requirements.txt', 'go.mod', 'Cargo.toml'].includes(f.path.split('/').pop())
+    ).slice(0, 3);
 
+    for (const file of manifestFiles) {
+      try {
+        const contentData = await fetchJSON(file.url);
+        const raw = atob(contentData.content);
+        const lines = raw.split('\n').filter(l => /^[ \t]*["\w\-_]+[:==]/.test(l)).join('\n');
+        depContext += `FILE: ${file.path}\n${lines}\n\n`;
+      } catch (e) { /* skip unreadable manifests */ }
+    }
+
+    // --- README: Preserve code blocks, filter fluff ---
+    let semanticContext = `PROJECT: ${owner}/${repo}\n========================\n`;
+    if (readmeData.content) {
+      const rawReadme = atob(readmeData.content.replace(/\s/g, ''));
+      const sections = rawReadme.match(/(##|###).*?(?=(##|###)|$)/gs) || [rawReadme.substring(0, 2000)];
+      sections.forEach(section => {
+        if (/Community|License|Sponsors|Star|Latest/i.test(section)) return;
+        semanticContext += section
+          .replace(/!\[.*?\]\(.*?\)/g, '')
+          .replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1')
+          .trim() + '\n\n';
+      });
+    }
+
+    // --- LOGIC TREE: Filter to meaningful source files ---
+    const logicExtensions = ['.py', '.go', '.js', '.ts', '.java', '.cpp', '.rs', '.rb', '.php', '.cs'];
+    const baselineExclude = ['node_modules', '.github', 'dist', 'vendor', 'build'];
+
+    let validFiles = treeData.tree.filter(item => {
+      const parts = item.path.split('/');
+      const name = parts[parts.length - 1];
+      if (baselineExclude.some(d => parts.includes(d)) || name.startsWith('.')) return false;
+      if (!logicExtensions.some(ext => name.endsWith(ext)) && item.type !== 'tree') return false;
+      return parts.length <= 5;
+    });
+
+    if (validFiles.filter(i => i.type !== 'tree').length > SAFE_FILE_LIMIT) {
+      validFiles = validFiles.filter(item => !['tests', 'docs', 'assets'].some(d => item.path.includes(d)));
+    }
+
+    let treeMap = 'LOGIC TREE\n==========\n';
+    validFiles.slice(0, SAFE_FILE_LIMIT + 50).forEach(item => {
+      const parts = item.path.split('/');
+      treeMap += '  '.repeat(parts.length - 1) + (item.type === 'tree' ? '📂 ' : '📄 ') + parts.pop() + '\n';
+    });
+
+    const learningPrompt = `
 ---
-As my Senior Coding Tutor, please help me learn this codebase:
+Act as a Senior Software Architect and Coding Mentor. Using the DEPENDENCIES/TECH STACK, PROJECT/README, and LOGIC TREE above, guide my learning of this codebase.
 
-1. 🚪 ENTRY POINT: Which file should I read first to understand where the logic starts?
+Your Rules:
+- Do not explain everything at once. Start by explaining the core "Mental Model" of how the system moves from a request to a response in this specific project.
+- Use a "Socratic" approach: explain a concept, show a file path from the tree as an example, then ask me a question to verify my understanding.
+- After each milestone, give me a tiny "Build Challenge" (3-5 lines of code) to implement a basic feature using the existing abstractions.
+- Keep explanations grounded in the actual file structure provided.
 
-2. 📚 READING ORDER: Give me a 3-step sequence to understand how data flows through this project.
+First Task: Based on the tree and tech stack, what is the single most important directory I should look at first to understand how the core logic works, and why?`;
 
-3. 🎯 DESIGN PATTERNS: What patterns/concepts should I pay attention to? Explain like I'm a junior developer.
-
-4. ⚡ QUICK WIN: What's one small feature I could trace through the codebase to learn the architecture?`;
+    return depContext + '\n' + semanticContext + '\n' + treeMap + learningPrompt;
   }
 
   // ========== Screenshot Functions ==========
