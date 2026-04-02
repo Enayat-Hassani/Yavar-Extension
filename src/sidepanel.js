@@ -236,13 +236,73 @@ class YavarSidePanel {
 
   // ========== Settings Panel ==========
 
-  showSettings() {
-    this.renderModelsList();
+  async showSettings() {
+    await this.renderModelsList();
+    await this.loadAutoPasteSettings();
     this.settingsPanel.classList.remove('hidden');
   }
 
   hideSettings() {
     this.settingsPanel.classList.add('hidden');
+  }
+
+  async loadAutoPasteSettings() {
+    try {
+      const { settings } = await chrome.storage.sync.get('settings');
+      const autoPaste = settings?.autoPaste ?? true;
+      const autoSubmit = settings?.autoSubmit ?? false;
+
+      // Update toggle switches
+      const autoPasteToggle = document.getElementById('setting-auto-paste-toggle');
+      const autoSubmitToggle = document.getElementById('setting-auto-submit-toggle');
+
+      if (autoPasteToggle) autoPasteToggle.checked = autoPaste;
+      if (autoSubmitToggle) autoSubmitToggle.checked = autoSubmit;
+
+      // Add event listeners if not already added
+      if (!this.settingsListenersAdded) {
+        autoPasteToggle?.addEventListener('change', (e) => this.saveAutoPasteSetting(e.target.checked));
+        autoSubmitToggle?.addEventListener('change', (e) => this.saveAutoSubmitSetting(e.target.checked));
+        this.settingsListenersAdded = true;
+      }
+    } catch (error) {
+      console.error('[Yavar] Failed to load auto-paste settings:', error);
+    }
+  }
+
+  async saveAutoPasteSetting(enabled) {
+    try {
+      const { settings } = await chrome.storage.sync.get('settings') || {};
+      const newSettings = { ...settings, autoPaste: enabled };
+      await chrome.storage.sync.set({ settings: newSettings });
+      console.log('[Yavar] Auto-paste setting saved:', enabled);
+    } catch (error) {
+      console.error('[Yavar] Failed to save auto-paste setting:', error);
+    }
+  }
+
+  async saveAutoSubmitSetting(enabled) {
+    try {
+      const { settings } = await chrome.storage.sync.get('settings') || {};
+      const newSettings = { ...settings, autoSubmit: enabled };
+      await chrome.storage.sync.set({ settings: newSettings });
+      console.log('[Yavar] Auto-submit setting saved:', enabled);
+    } catch (error) {
+      console.error('[Yavar] Failed to save auto-submit setting:', error);
+    }
+  }
+
+  async getAutoPasteSettings() {
+    try {
+      const { settings } = await chrome.storage.sync.get('settings');
+      return {
+        autoPaste: settings?.autoPaste ?? true,
+        autoSubmit: settings?.autoSubmit ?? false
+      };
+    } catch (error) {
+      console.error('[Yavar] Failed to get auto-paste settings:', error);
+      return { autoPaste: true, autoSubmit: false };
+    }
   }
 
   renderModelsList() {
@@ -615,8 +675,17 @@ As my Senior Coding Tutor, please help me learn this codebase:
       }
 
       if (message.action === 'AUTO_SUBMIT_PROMPT' && message.prompt) {
-        console.log('[Yavar Sidepanel] Received AUTO_SUBMIT_PROMPT, forwarding to iframe');
-        this.forwardToIframe(message);
+        // Only forward if we haven't already handled this prompt via checkPendingAutoSubmit
+        // The background sends staggered retries — only honor the first one
+        if (!this._lastForwardedPrompt || this._lastForwardedPrompt !== message.prompt ||
+            Date.now() - (this._lastForwardedTime || 0) > 8000) {
+          console.log('[Yavar Sidepanel] Received AUTO_SUBMIT_PROMPT, forwarding to iframe');
+          this._lastForwardedPrompt = message.prompt;
+          this._lastForwardedTime = Date.now();
+          this.forwardToIframe(message);
+        } else {
+          console.log('[Yavar Sidepanel] Ignoring duplicate AUTO_SUBMIT_PROMPT from staggered retry');
+        }
       }
 
       sendResponse({ received: true });
@@ -693,12 +762,37 @@ As my Senior Coding Tutor, please help me learn this codebase:
   }
 
   async checkPendingAutoSubmit() {
+    console.log('[Yavar Sidepanel] checkPendingAutoSubmit called');
     try {
       const result = await chrome.storage.session.get(['pendingAutoSubmit', 'lastSubmitTime']);
+      console.log('[Yavar Sidepanel] checkPendingAutoSubmit result:', result);
       if (result.pendingAutoSubmit && Date.now() - result.lastSubmitTime < 120000) {
-        console.log('[Yavar Sidepanel] Found pending auto-submit prompt');
-        this.forwardToIframe({ prompt: result.pendingAutoSubmit });
+        console.log('[Yavar Sidepanel] Found pending auto-submit prompt, length:', result.pendingAutoSubmit?.length);
+        
+        // Check settings
+        const { autoPaste, autoSubmit } = await this.getAutoPasteSettings();
+        
+        if (autoPaste) {
+          // Only forward if message listener hasn't already handled this prompt
+          if (this._lastForwardedPrompt === result.pendingAutoSubmit &&
+              Date.now() - (this._lastForwardedTime || 0) < 8000) {
+            console.log('[Yavar Sidepanel] Skipping checkPending — already forwarded by message listener');
+          } else {
+            this._lastForwardedPrompt = result.pendingAutoSubmit;
+            this._lastForwardedTime = Date.now();
+            this.forwardToIframe({ prompt: result.pendingAutoSubmit, autoSubmit: autoSubmit });
+            console.log('[Yavar Sidepanel] Forwarding to iframe (autoSubmit:', autoSubmit + ')');
+          }
+        } else {
+          // Just notify user
+          this.showNotification('📋 Text ready - click to paste manually');
+          console.log('[Yavar Sidepanel] Auto-paste disabled, showing notification');
+        }
+        
         await chrome.storage.session.remove(['pendingAutoSubmit', 'lastSubmitTime']);
+        console.log('[Yavar Sidepanel] Cleared pending auto-submit');
+      } else {
+        console.log('[Yavar Sidepanel] No valid pending auto-submit (expired or missing)');
       }
     } catch (error) {
       console.error('[Yavar Sidepanel] Failed to check pending auto-submit:', error);
@@ -706,7 +800,13 @@ As my Senior Coding Tutor, please help me learn this codebase:
   }
 
   forwardToIframe(message) {
-    const payload = { action: 'AUTO_SUBMIT_PROMPT', prompt: message.prompt };
+    const { prompt, autoSubmit } = message;
+    const payload = { 
+      action: autoSubmit ? 'AUTO_SUBMIT_PROMPT' : 'AUTO_PASTE_PROMPT',
+      prompt: prompt
+    };
+
+    console.log('[Yavar Sidepanel] forwardToIframe:', payload.action);
 
     // Staggered sends — the iframe/bridge may not be fully interactive yet
     const delays = [0, 400, 1200, 2500];
