@@ -4,6 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Yavar</title>
+  <link rel="stylesheet" href="lib/codemirror/codemirror.min.css">
+  <link rel="stylesheet" href="lib/codemirror/material-darker.min.css">
   <link rel="stylesheet" href="styles/sidepanel.css">
 </head>
 <body>
@@ -46,6 +48,22 @@
         allow="clipboard-write; microphone; camera"
       ></iframe>
     </main>
+
+    <!-- Notes Panel -->
+    <div id="notes-panel" class="notes-panel hidden">
+      <div class="notes-header">
+        <span class="notes-title">Notes</span>
+        <div class="notes-actions">
+          <button id="btn-clear-notes" class="notes-action-btn" title="Clear notes">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+          </button>
+          <button id="btn-copy-notes" class="notes-action-btn" title="Copy notes">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+          </button>
+        </div>
+      </div>
+      <div id="notes-editor"></div>
+    </div>
 
     <!-- Model Switcher Popover -->
     <div id="model-switcher" class="model-switcher hidden">
@@ -182,6 +200,13 @@
     <aside id="right-sidebar" class="right-sidebar">
       <div class="sidebar-panel">
         <div class="sidebar-icons">
+          <!-- Notes -->
+          <button class="sidebar-icon-btn" id="sidebar-btn-notes" title="Notes (Ctrl+N)">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path>
+            </svg>
+          </button>
+
           <!-- Model Switcher -->
           <button class="sidebar-icon-btn" id="sidebar-btn-model-switcher" title="Switch AI Model">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -252,6 +277,12 @@
     </aside>
   </div>
 
+  <script src="lib/codemirror/codemirror.min.js"></script>
+  <script src="lib/codemirror/xml.min.js"></script>
+  <script src="lib/codemirror/css.min.js"></script>
+  <script src="lib/codemirror/javascript.min.js"></script>
+  <script src="lib/codemirror/python.min.js"></script>
+  <script src="lib/codemirror/htmlmixed.min.js"></script>
   <script src="src/sidepanel.js" type="module"></script>
 </body>
 </html>
