@@ -251,18 +251,22 @@ class YavarSidePanel {
       const { settings } = await chrome.storage.sync.get('settings');
       const autoPaste = settings?.autoPaste ?? true;
       const autoSubmit = settings?.autoSubmit ?? false;
+      const showScreenshotPreview = settings?.showScreenshotPreview ?? false;
 
       // Update toggle switches
       const autoPasteToggle = document.getElementById('setting-auto-paste-toggle');
       const autoSubmitToggle = document.getElementById('setting-auto-submit-toggle');
+      const screenshotPreviewToggle = document.getElementById('setting-screenshot-preview-toggle');
 
       if (autoPasteToggle) autoPasteToggle.checked = autoPaste;
       if (autoSubmitToggle) autoSubmitToggle.checked = autoSubmit;
+      if (screenshotPreviewToggle) screenshotPreviewToggle.checked = showScreenshotPreview;
 
       // Add event listeners if not already added
       if (!this.settingsListenersAdded) {
         autoPasteToggle?.addEventListener('change', (e) => this.saveAutoPasteSetting(e.target.checked));
         autoSubmitToggle?.addEventListener('change', (e) => this.saveAutoSubmitSetting(e.target.checked));
+        screenshotPreviewToggle?.addEventListener('change', (e) => this.saveScreenshotPreviewSetting(e.target.checked));
         this.settingsListenersAdded = true;
       }
     } catch (error) {
@@ -292,16 +296,28 @@ class YavarSidePanel {
     }
   }
 
+  async saveScreenshotPreviewSetting(enabled) {
+    try {
+      const { settings } = await chrome.storage.sync.get('settings') || {};
+      const newSettings = { ...settings, showScreenshotPreview: enabled };
+      await chrome.storage.sync.set({ settings: newSettings });
+      console.log('[Yavar] Screenshot preview setting saved:', enabled);
+    } catch (error) {
+      console.error('[Yavar] Failed to save screenshot preview setting:', error);
+    }
+  }
+
   async getAutoPasteSettings() {
     try {
       const { settings } = await chrome.storage.sync.get('settings');
       return {
         autoPaste: settings?.autoPaste ?? true,
-        autoSubmit: settings?.autoSubmit ?? false
+        autoSubmit: settings?.autoSubmit ?? false,
+        showScreenshotPreview: settings?.showScreenshotPreview ?? false
       };
     } catch (error) {
       console.error('[Yavar] Failed to get auto-paste settings:', error);
-      return { autoPaste: true, autoSubmit: false };
+      return { autoPaste: true, autoSubmit: false, showScreenshotPreview: false };
     }
   }
 
@@ -497,7 +513,7 @@ As my Senior Coding Tutor, please help me learn this codebase:
     this.screenshotPanel.classList.remove('hidden');
   }
 
-  cropAndShowScreenshot(dataUrl, rect) {
+  async cropAndShowScreenshot(dataUrl, rect) {
     console.log('[Yavar] cropAndShowScreenshot called with rect:', rect);
     const img = new Image();
     img.onload = () => {
@@ -513,7 +529,14 @@ As my Senior Coding Tutor, please help me learn this codebase:
       );
       const croppedUrl = canvas.toDataURL('image/png');
       this.capturedScreenshot = croppedUrl;
-      this.showScreenshotPanel(croppedUrl);
+      
+      // Check showScreenshotPreview setting before showing panel
+      this.getAutoPasteSettings().then(({ showScreenshotPreview }) => {
+        if (showScreenshotPreview) {
+          this.showScreenshotPanel(croppedUrl);
+        }
+      });
+      
       console.log('[Yavar] Calling autoPasteScreenshotToChat');
       this.autoPasteScreenshotToChat(croppedUrl);
     };
@@ -535,8 +558,7 @@ As my Senior Coding Tutor, please help me learn this codebase:
 
       // Notify iframe to paste the screenshot
       this.forwardScreenshotToIframe(dataUrl);
-      this.showNotification('📸 Screenshot sent to chat!');
-      
+
     } catch (error) {
       console.error('[Yavar] Failed to send screenshot to chat:', error);
       this.showNotification('📸 Screenshot captured! Click "Copy Image" to copy');
