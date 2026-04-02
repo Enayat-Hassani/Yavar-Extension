@@ -49,17 +49,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Handle auto-submit: store prompt, open sidebar, notify sidepanel
   if (message.action === 'trigger_auto_submit') {
     const tabId = sender.tab?.id;
-    console.log('[Yavar BG] trigger_auto_submit received, prompt length:', message.prompt?.length);
+    console.log('[Yavar BG] trigger_auto_submit received from tab:', tabId, 'prompt length:', message.prompt?.length);
 
     // CRITICAL: Store prompt FIRST (sync-safe), then open panel SYNCHRONOUSLY
     // sidePanel.open() must be called without any await before it to preserve user gesture
+    console.log('[Yavar BG] Storing pendingAutoSubmit in session storage');
     chrome.storage.session.set({
       pendingAutoSubmit: message.prompt,
       lastSubmitTime: Date.now()
+    }, () => {
+      console.log('[Yavar BG] Stored in session storage');
     });
 
     // Open sidepanel synchronously — no await before this call
     if (tabId) {
+      console.log('[Yavar BG] Opening sidepanel for tab:', tabId);
       chrome.sidePanel.open({ tabId }).catch(err => {
         console.error('[Yavar BG] sidePanel.open failed:', err);
       });
@@ -68,12 +72,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // Staggered messages to sidepanel — it may not have its listener ready yet
     const payload = { action: 'AUTO_SUBMIT_PROMPT', prompt: message.prompt };
     const delays = [300, 800, 1500, 3000];
-    delays.forEach(delay => {
+    delays.forEach((delay, i) => {
       setTimeout(() => {
-        chrome.runtime.sendMessage(payload).catch(() => {});
+        chrome.runtime.sendMessage(payload).catch((err) => {
+          console.log(`[Yavar BG] Staggered message ${i+1} failed (sidepanel may not be ready):`, err.message);
+        });
       }, delay);
     });
 
+    console.log('[Yavar BG] Sending response to content script');
     sendResponse({ success: true });
     return true;
   }

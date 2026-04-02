@@ -1,9 +1,9 @@
 // Content Script - Text Selection & Keyboard Shortcuts
 // Runs on all pages to handle text selection and capture
-// Also loads and manages plugins for specific websites
 
-import { pluginManager } from './plugins/plugin-manager.js';
-import { GitHubAnalyzerPlugin } from './plugins/github-analyzer-plugin.js';
+// TEMPORARILY DISABLED: Plugin system - uncomment when ready to debug
+// import { pluginManager } from './plugins/plugin-manager.js';
+// import { GitHubAnalyzerPlugin } from './plugins/github-analyzer-plugin.js';
 
 class YavarContentHandler {
   constructor() {
@@ -26,8 +26,8 @@ class YavarContentHandler {
       console.log('[Yavar] Content handler disabled for this site');
     }
 
-    // Initialize plugins for this site
-    await this.initializePlugins();
+    // TEMPORARILY DISABLED: Plugin initialization
+    // await this.initializePlugins();
   }
 
   async initializePlugins() {
@@ -77,9 +77,6 @@ class YavarContentHandler {
     menu.style.zIndex = '2147483647';
     menu.style.userSelect = 'none';
     menu.style.pointerEvents = 'auto';
-    
-    // OBVIOUS DEBUG: Make menu bright pink to verify code is running
-    menu.style.border = '3px solid hotpink';
 
     // Inline critical styles to ensure they work
     const menuContentDiv = document.createElement('div');
@@ -97,64 +94,59 @@ class YavarContentHandler {
       pointer-events: auto;
     `;
 
-    // Create Copy button
-    const copyBtn = document.createElement('button');
-    copyBtn.className = 'yavar-menu-btn';
-    copyBtn.dataset.action = 'copy';
-    copyBtn.title = 'Copy to clipboard';
-    copyBtn.style.cssText = `
+    // Create Send button (icon only) - sends text as-is
+    const sendBtn = document.createElement('button');
+    sendBtn.className = 'yavar-menu-btn';
+    sendBtn.dataset.action = 'send';
+    sendBtn.title = 'Send to AI';
+    sendBtn.style.cssText = `
       display: flex;
       align-items: center;
-      gap: 6px;
-      padding: 8px 12px;
+      justify-content: center;
+      padding: 6px;
       background: transparent;
       border: 1px solid transparent;
-      border-radius: 8px;
+      border-radius: 6px;
       color: #1d1d1f;
-      font-size: 13px;
-      font-weight: 500;
       cursor: pointer;
       transition: all 0.12s ease;
       pointer-events: auto;
     `;
-    copyBtn.innerHTML = `
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="pointer-events: none;">
-        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+    sendBtn.innerHTML = `
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="pointer-events: none;">
+        <path d="M22 2L11 13"></path>
+        <path d="M22 2L15 22L11 13L2 9L22 2Z"></path>
       </svg>
-      <span style="pointer-events: none;">Copy</span>
     `;
 
-    // Create Learn button
-    const learnBtn = document.createElement('button');
-    learnBtn.className = 'yavar-menu-btn primary';
-    learnBtn.dataset.action = 'learn';
-    learnBtn.title = 'Learn it with AI';
-    learnBtn.style.cssText = `
+    // Create Explain button (icon only) - sends with guided learning prompt
+    const explainBtn = document.createElement('button');
+    explainBtn.className = 'yavar-menu-btn primary';
+    explainBtn.dataset.action = 'explain';
+    explainBtn.title = 'Explain with Guided Learning';
+    explainBtn.style.cssText = `
       display: flex;
       align-items: center;
-      gap: 6px;
-      padding: 8px 12px;
+      justify-content: center;
+      padding: 6px;
       background: rgba(0, 113, 227, 0.15);
       border: 1px solid rgba(0, 113, 227, 0.3);
-      border-radius: 8px;
+      border-radius: 6px;
       color: #1d1d1f;
-      font-size: 13px;
-      font-weight: 500;
       cursor: pointer;
       transition: all 0.12s ease;
       pointer-events: auto;
     `;
-    learnBtn.innerHTML = `
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="pointer-events: none;">
-        <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
-        <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
+    explainBtn.innerHTML = `
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="pointer-events: none;">
+        <circle cx="12" r="10"></circle>
+        <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+        <line x1="12" y1="17" x2="12.01" y2="17"></line>
       </svg>
-      <span style="pointer-events: none;">Learn it with AI</span>
     `;
 
-    menuContentDiv.appendChild(copyBtn);
-    menuContentDiv.appendChild(learnBtn);
+    menuContentDiv.appendChild(sendBtn);
+    menuContentDiv.appendChild(explainBtn);
     menu.appendChild(menuContentDiv);
 
     document.body.appendChild(menu);
@@ -288,9 +280,9 @@ class YavarContentHandler {
       const range = selection.getRangeAt(0);
       const rect = range.getBoundingClientRect();
 
-      // Menu dimensions
-      const menuHeight = 56;
-      const menuWidth = 220;
+      // Menu dimensions (smaller for icon-only buttons)
+      const menuHeight = 40;
+      const menuWidth = 80;
 
       // Calculate position - use viewport coordinates directly
       let top = rect.top - menuHeight - 10;
@@ -315,9 +307,8 @@ class YavarContentHandler {
       this.floatingMenu.style.top = `${Math.round(top)}px`;
       this.floatingMenu.style.left = `${Math.round(left)}px`;
       this.floatingMenu.style.display = 'block';
-      
-      // OBVIOUS DEBUG: Alert when menu shows
-      console.log('🔴 YAVAR DEBUG: Menu is now VISIBLE at position', top, left);
+
+      console.log('[Yavar] Menu is now VISIBLE at position', top, left);
     } catch (error) {
       console.error('[Yavar] Error positioning menu:', error);
     }
@@ -348,44 +339,70 @@ class YavarContentHandler {
 
     console.log('[Yavar Content] Button clicked:', action, 'Text length:', this.currentText.length);
 
-    if (action === 'copy') {
+    if (action === 'send') {
+      // Send text as-is to AI
       try {
-        await navigator.clipboard.writeText(this.currentText);
-        this.showButtonFeedback('copy', '✓ Copied!');
+        const prompt = this.currentText;
+
+        // Check if extension context is still valid
+        if (!chrome.runtime?.id) {
+          console.warn('[Yavar Content] Extension context invalidated — reload the page');
+          this.showButtonFeedback('send', '✗ Reload page');
+          return;
+        }
+
+        // Show immediate feedback
+        this.showButtonFeedback('send', '✓ Sending...');
+
+        // Send to background (this will open sidebar + trigger auto-submit)
+        chrome.runtime.sendMessage({
+          action: 'trigger_auto_submit',
+          prompt: prompt
+        }, (response) => {
+          console.log('[Yavar Content] Background responded:', response);
+        });
+
         this.hideFloatingMenu();
-        console.log('[Yavar] Text copied to clipboard');
+        console.log('[Yavar Content] Send triggered');
       } catch (err) {
-        console.error('[Yavar] Copy failed:', err);
-        this.showButtonFeedback('copy', '✗ Failed');
+        console.error('[Yavar Content] Send action failed:', err);
+        if (err.message?.includes('Extension context invalidated')) {
+          this.showButtonFeedback('send', '✗ Reload page');
+        } else {
+          this.showButtonFeedback('send', '✗ Failed');
+        }
       }
-    } else if (action === 'learn') {
+    } else if (action === 'explain') {
+      // Send with Guided Learning prompt
       try {
         const prompt = `Explain this to me using "Guided Learning" Mode:\n\n${this.currentText}`;
 
         // Check if extension context is still valid
         if (!chrome.runtime?.id) {
           console.warn('[Yavar Content] Extension context invalidated — reload the page');
-          this.showButtonFeedback('learn', '✗ Reload page');
+          this.showButtonFeedback('explain', '✗ Reload page');
           return;
         }
 
         // Show immediate feedback
-        this.showButtonFeedback('learn', '✓ Sending...');
+        this.showButtonFeedback('explain', '✓ Sending...');
 
         // Send to background (this will open sidebar + trigger auto-submit)
         chrome.runtime.sendMessage({
           action: 'trigger_auto_submit',
           prompt: prompt
+        }, (response) => {
+          console.log('[Yavar Content] Background responded:', response);
         });
 
         this.hideFloatingMenu();
-        console.log('[Yavar Content] Auto-submit triggered');
+        console.log('[Yavar Content] Explain triggered');
       } catch (err) {
-        console.error('[Yavar Content] Learn action failed:', err);
+        console.error('[Yavar Content] Explain action failed:', err);
         if (err.message?.includes('Extension context invalidated')) {
-          this.showButtonFeedback('learn', '✗ Reload page');
+          this.showButtonFeedback('explain', '✗ Reload page');
         } else {
-          this.showButtonFeedback('learn', '✗ Failed');
+          this.showButtonFeedback('explain', '✗ Failed');
         }
       }
     }
