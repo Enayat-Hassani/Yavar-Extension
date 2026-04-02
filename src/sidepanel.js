@@ -24,6 +24,7 @@ class YavarSidePanel {
     this.loadCurrentAI();
     this.setupMessageListener();
     this.setupStorageListener();
+    this.initCodeMirror();
     this.checkPendingData();
   }
 
@@ -39,7 +40,15 @@ class YavarSidePanel {
     this.btnCopyScreenshot = document.getElementById('btn-copy-screenshot');
     this.btnDismissScreenshot = document.getElementById('btn-dismiss-screenshot');
 
+    // Notes panel
+    this.notesPanel = document.getElementById('notes-panel');
+    this.notesEditorContainer = document.getElementById('notes-editor');
+    this.btnClearNotes = document.getElementById('btn-clear-notes');
+    this.btnCopyNotes = document.getElementById('btn-copy-notes');
+    this.notesOpen = false;
+
     // Right sidebar buttons
+    this.sidebarBtnNotes = document.getElementById('sidebar-btn-notes');
     this.sidebarBtnModelSwitcher = document.getElementById('sidebar-btn-model-switcher');
     this.sidebarBtnAnalyzeRepo = document.getElementById('sidebar-btn-analyze-repo');
     this.sidebarBtnScreenshot = document.getElementById('sidebar-btn-screenshot');
@@ -119,6 +128,7 @@ class YavarSidePanel {
       this.toggleModelSwitcher();
     });
 
+    this.sidebarBtnNotes.addEventListener('click', () => this.toggleNotes());
     this.sidebarBtnAnalyzeRepo.addEventListener('click', () => this.analyzeGitHubRepo());
     this.sidebarBtnScreenshot.addEventListener('click', () => this.captureScreenshot());
     this.sidebarBtnCopyPage.addEventListener('click', () => this.copyPageContent());
@@ -149,12 +159,24 @@ class YavarSidePanel {
     // Notification dismiss
     this.notificationDismiss.addEventListener('click', () => this.hideNotification());
 
+    // Notes panel buttons
+    this.btnClearNotes.addEventListener('click', () => this.clearNotes());
+    this.btnCopyNotes.addEventListener('click', () => this.copyNotes());
+
     // Screenshot panel buttons
     this.btnCopyScreenshot.addEventListener('click', () => this.copyScreenshot());
     this.btnDismissScreenshot.addEventListener('click', () => this.dismissScreenshot());
 
     // Iframe load handling
     this.aiFrame.addEventListener('load', () => this.handleFrameLoad());
+
+    // Keyboard shortcut: Ctrl+N to toggle notes
+    document.addEventListener('keydown', (e) => {
+      if (e.ctrlKey && e.key === 'n') {
+        e.preventDefault();
+        this.toggleNotes();
+      }
+    });
   }
 
   loadCurrentAI() {
@@ -663,6 +685,64 @@ First Task: Based on the tree and tech stack, what is the single most important 
     } catch (error) {
       console.error('[Yavar] Failed to copy screenshot:', error);
       this.showNotification('❌ Failed to copy image.');
+    }
+  }
+
+  // ========== Notes Panel ==========
+
+  initCodeMirror() {
+    this.cmEditor = CodeMirror(this.notesEditorContainer, {
+      mode: 'javascript',
+      theme: 'material-darker',
+      lineNumbers: true,
+      lineWrapping: true,
+      tabSize: 2,
+      indentWithTabs: false,
+      placeholder: 'Write notes, code snippets, ideas...',
+      autofocus: false
+    });
+    this.cmEditor.on('change', () => this.saveNotes());
+  }
+
+  toggleNotes() {
+    this.notesOpen = !this.notesOpen;
+    if (this.notesOpen) {
+      this.notesPanel.classList.remove('hidden');
+      this.sidebarBtnNotes.classList.add('sidebar-btn-active');
+      this.loadNotes();
+      this.cmEditor.refresh();
+      this.cmEditor.focus();
+    } else {
+      this.notesPanel.classList.add('hidden');
+      this.sidebarBtnNotes.classList.remove('sidebar-btn-active');
+      this.saveNotes();
+    }
+  }
+
+  async loadNotes() {
+    try {
+      const { yavarNotes } = await chrome.storage.local.get('yavarNotes');
+      this.cmEditor.setValue(yavarNotes || '');
+    } catch (e) {
+      console.error('[Yavar] Failed to load notes:', e);
+    }
+  }
+
+  saveNotes() {
+    chrome.storage.local.set({ yavarNotes: this.cmEditor.getValue() });
+  }
+
+  clearNotes() {
+    this.cmEditor.setValue('');
+    this.saveNotes();
+  }
+
+  async copyNotes() {
+    try {
+      await navigator.clipboard.writeText(this.cmEditor.getValue());
+      this.showNotification('Copied notes to clipboard!');
+    } catch (e) {
+      console.error('[Yavar] Failed to copy notes:', e);
     }
   }
 
