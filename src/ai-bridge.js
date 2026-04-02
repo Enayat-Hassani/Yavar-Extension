@@ -49,6 +49,38 @@
     });
   }
 
+  function insertTextIntoInput(inputEl, text) {
+    if (inputEl.tagName === 'TEXTAREA' || inputEl.tagName === 'INPUT') {
+      // For textarea/input elements, set value directly via native setter
+      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+        window.HTMLTextAreaElement.prototype, 'value'
+      ).set;
+      nativeInputValueSetter.call(inputEl, text);
+      inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+      console.log('[Yavar Bridge] Text set via native value setter');
+    } else if (inputEl.contentEditable === 'true') {
+      // For contenteditable elements (ChatGPT, Claude, Gemini use these)
+      inputEl.focus();
+
+      // Try execCommand first — most reliable for contenteditable
+      const success = document.execCommand('insertText', false, text);
+      if (success) {
+        console.log('[Yavar Bridge] Text inserted via execCommand');
+        return;
+      }
+
+      // Fallback: clipboard paste event with text data (NOT file)
+      const pasteEvent = new ClipboardEvent('paste', {
+        bubbles: true,
+        cancelable: true,
+        clipboardData: new DataTransfer()
+      });
+      pasteEvent.clipboardData.items.add(text, 'text/plain');
+      inputEl.dispatchEvent(pasteEvent);
+      console.log('[Yavar Bridge] Text inserted via paste event');
+    }
+  }
+
   async function autoSubmit(prompt) {
     const platform = detectPlatform();
     if (!platform) {
@@ -62,28 +94,10 @@
 
     try {
       const inputEl = await waitForElement(selectors.input, 10000);
-      console.log('[Yavar Bridge] inputEl found:', !!inputEl);
+      console.log('[Yavar Bridge] Input element found:', !!inputEl, 'tagName:', inputEl?.tagName);
 
-      // Set the text
-      if (inputEl.tagName === 'TEXTAREA') {
-        // For textarea elements (ChatGPT sometimes uses this)
-        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-          window.HTMLTextAreaElement.prototype, 'value'
-        ).set;
-        nativeInputValueSetter.call(inputEl, prompt);
-        inputEl.dispatchEvent(new Event('input', { bubbles: true }));
-      } else if (inputEl.contentEditable === 'true') {
-        // For contenteditable divs (Claude, Gemini, ChatGPT ProseMirror)
-        inputEl.focus();
-        inputEl.innerHTML = '';
-
-        // Use execCommand for better compatibility with rich text editors
-        document.execCommand('insertText', false, prompt);
-
-        // Also dispatch input event
-        inputEl.dispatchEvent(new Event('input', { bubbles: true }));
-        inputEl.dispatchEvent(new Event('change', { bubbles: true }));
-      }
+      inputEl.focus();
+      insertTextIntoInput(inputEl, prompt);
 
       console.log('[Yavar Bridge] Text inserted, waiting before submit...');
 
@@ -133,6 +147,44 @@
     lastSubmittedPrompt = prompt;
     lastSubmitTime = now;
     autoSubmit(prompt);
+  }
+
+  let lastPastedPrompt = '';
+  let lastPasteTime = 0;
+
+  function handleAutoPasteOnly(prompt) {
+    const now = Date.now();
+    // Dedupe: ignore if same prompt within 8 seconds (covers staggered retries)
+    if (prompt === lastPastedPrompt && now - lastPasteTime < 8000) {
+      console.log('[Yavar Bridge] Ignoring duplicate paste');
+      return;
+    }
+    lastPastedPrompt = prompt;
+    lastPasteTime = now;
+
+    const platform = detectPlatform();
+    if (!platform) {
+      console.warn('[Yavar Bridge] Unknown platform, cannot paste');
+      return;
+    }
+
+    console.log('[Yavar Bridge] handleAutoPasteOnly called on platform:', platform, 'prompt length:', prompt?.length);
+
+    const selectors = SELECTORS[platform];
+
+    (async () => {
+      try {
+        const inputEl = await waitForElement(selectors.input, 10000);
+        console.log('[Yavar Bridge] Input element found:', !!inputEl);
+
+        inputEl.focus();
+        insertTextIntoInput(inputEl, prompt);
+        console.log('[Yavar Bridge] Text pasted (no auto-submit)');
+
+      } catch (err) {
+        console.error('[Yavar Bridge] handleAutoPasteOnly failed:', err);
+      }
+    })();
   }
 
   function handleAutoPasteScreenshot(imageDataUrl) {
@@ -207,10 +259,15 @@
   // Listen for postMessage from sidepanel
   window.addEventListener('message', (event) => {
     if (event.data?.action === 'AUTO_SUBMIT_PROMPT' && event.data?.prompt) {
-      console.log('[Yavar Bridge] Received AUTO_SUBMIT_PROMPT via postMessage');
+      console.log('[Yavar Bridge] Received AUTO_SUBMIT_PROMPT via postMessage (paste + submit)');
       handleAutoSubmit(event.data.prompt);
     }
-    
+
+    if (event.data?.action === 'AUTO_PASTE_PROMPT' && event.data?.prompt) {
+      console.log('[Yavar Bridge] Received AUTO_PASTE_PROMPT via postMessage (paste only)');
+      handleAutoPasteOnly(event.data.prompt);
+    }
+
     if (event.data?.action === 'AUTO_PASTE_SCREENSHOT' && event.data?.imageData) {
       console.log('[Yavar Bridge] Received AUTO_PASTE_SCREENSHOT via postMessage');
       handleAutoPasteScreenshot(event.data.imageData);
