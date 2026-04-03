@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Icon Generator</title>
+  <title>Yavar Icon Generator</title>
   <style>
     body {
       font-family: system-ui, -apple-system, sans-serif;
@@ -31,7 +31,7 @@
     }
     button {
       padding: 12px 24px;
-      background: #6366f1;
+      background: #0071e3;
       color: white;
       border: none;
       border-radius: 8px;
@@ -39,7 +39,7 @@
       cursor: pointer;
       margin-top: 20px;
     }
-    button:hover { background: #818cf8; }
+    button:hover { background: #0077ED; }
     .instructions {
       background: #252542;
       padding: 20px;
@@ -51,8 +51,8 @@
   </style>
 </head>
 <body>
-  <h1>AI Sidebar Icon Generator</h1>
-  
+  <h1>Yavar — Icon Generator</h1>
+
   <div class="icons-container">
     <div class="icon-wrapper">
       <span>16x16</span>
@@ -67,9 +67,9 @@
       <canvas id="canvas128" width="128" height="128"></canvas>
     </div>
   </div>
-  
+
   <button onclick="downloadIcons()">Download All Icons</button>
-  
+
   <div class="instructions">
     <strong>Instructions:</strong>
     <ol>
@@ -82,62 +82,83 @@
   <script>
     function drawIcon(canvas) {
       const ctx = canvas.getContext('2d');
-      const size = canvas.width;
-      
-      // Clear
-      ctx.clearRect(0, 0, size, size);
-      
-      // Background gradient
-      const gradient = ctx.createLinearGradient(0, 0, size, size);
-      gradient.addColorStop(0, '#6366f1');
-      gradient.addColorStop(1, '#4f46e5');
-      
-      // Rounded rectangle background
-      const radius = size * 0.2;
+      const s = canvas.width;
+
+      ctx.clearRect(0, 0, s, s);
+
+      // --- Background: dark rounded square ---
+      const radius = s * 0.22;
       ctx.beginPath();
-      ctx.roundRect(0, 0, size, size, radius);
-      ctx.fillStyle = gradient;
+      ctx.roundRect(0, 0, s, s, radius);
+      const bg = ctx.createLinearGradient(0, 0, s, s);
+      bg.addColorStop(0, '#0a0a0a');
+      bg.addColorStop(1, '#1a1a1a');
+      ctx.fillStyle = bg;
       ctx.fill();
-      
-      // AI spark/star shape
-      const center = size / 2;
-      const innerRadius = size * 0.15;
-      const outerRadius = size * 0.35;
-      
+
+      // --- "Y" lettermark ---
+      const cx = s / 2;
+      const cy = s / 2;
+
+      // Scale-aware stroke
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+
+      // Y shape — two arms meeting at center, one stem going down
+      const armTop = s * 0.22;     // top of arms
+      const armSpread = s * 0.24;  // how wide the arms go
+      const meetY = s * 0.52;      // where arms meet
+      const stemBottom = s * 0.78; // bottom of stem
+
+      // Draw Y with gradient stroke
+      const yGrad = ctx.createLinearGradient(cx - armSpread, armTop, cx + armSpread, stemBottom);
+      yGrad.addColorStop(0, '#38bdf8');   // sky blue
+      yGrad.addColorStop(0.5, '#0071e3'); // Yavar blue
+      yGrad.addColorStop(1, '#6366f1');   // indigo
+
+      ctx.strokeStyle = yGrad;
+      ctx.lineWidth = Math.max(s * 0.09, 1.5);
+
+      // Left arm
       ctx.beginPath();
-      for (let i = 0; i < 8; i++) {
-        const angle = (i * Math.PI / 4) - Math.PI / 8;
-        const r = i % 2 === 0 ? outerRadius : innerRadius;
-        const x = center + Math.cos(angle) * r;
-        const y = center + Math.sin(angle) * r;
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-      }
-      ctx.closePath();
-      ctx.fillStyle = 'white';
+      ctx.moveTo(cx - armSpread, armTop);
+      ctx.lineTo(cx, meetY);
+      ctx.stroke();
+
+      // Right arm
+      ctx.beginPath();
+      ctx.moveTo(cx + armSpread, armTop);
+      ctx.lineTo(cx, meetY);
+      ctx.stroke();
+
+      // Stem
+      ctx.beginPath();
+      ctx.moveTo(cx, meetY);
+      ctx.lineTo(cx, stemBottom);
+      ctx.stroke();
+
+      // --- Accent dot (AI sparkle) ---
+      const dotRadius = s * 0.045;
+      const dotX = cx + armSpread + s * 0.04;
+      const dotY = armTop - s * 0.01;
+
+      ctx.beginPath();
+      ctx.arc(dotX, dotY, dotRadius, 0, Math.PI * 2);
+      ctx.fillStyle = '#38bdf8';
       ctx.fill();
-      
-      // Add small dots around
-      const dotPositions = [
-        { x: size * 0.2, y: size * 0.2 },
-        { x: size * 0.8, y: size * 0.2 },
-        { x: size * 0.2, y: size * 0.8 },
-        { x: size * 0.8, y: size * 0.8 }
-      ];
-      
-      dotPositions.forEach(pos => {
-        ctx.beginPath();
-        ctx.arc(pos.x, pos.y, size * 0.08, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
-        ctx.fill();
-      });
+
+      // Subtle glow behind dot
+      ctx.beginPath();
+      ctx.arc(dotX, dotY, dotRadius * 2.5, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(56, 189, 248, 0.15)';
+      ctx.fill();
     }
-    
-    // Draw all icons
+
+    // Draw all sizes
     drawIcon(document.getElementById('canvas16'));
     drawIcon(document.getElementById('canvas48'));
     drawIcon(document.getElementById('canvas128'));
-    
+
     function downloadIcons() {
       [16, 48, 128].forEach(size => {
         const canvas = document.getElementById(`canvas${size}`);

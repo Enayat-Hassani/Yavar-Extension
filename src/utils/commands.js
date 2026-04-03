@@ -8,14 +8,14 @@ export const CommandHandler = {
       case 'toggle-sidebar':
         await this.toggleSidebar(tab);
         break;
-      case 'copy-selection':
-        await this.copySelection(tab);
-        break;
       case 'capture-screenshot':
         await this.captureScreenshot(tab);
         break;
       case 'trigger-learn':
         await this.triggerLearn(tab);
+        break;
+      case 'toggle-notes':
+        await this.toggleNotes(tab);
         break;
     }
   },
@@ -23,31 +23,6 @@ export const CommandHandler = {
   async toggleSidebar(tab) {
     if (tab) {
       await chrome.sidePanel.open({ windowId: tab.windowId });
-    }
-  },
-
-  async copySelection(tab) {
-    if (!tab) return;
-    
-    try {
-      // Execute script to get selection and copy it
-      await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        func: () => {
-          const selection = window.getSelection();
-          const text = selection.toString().trim();
-          if (text) {
-            navigator.clipboard.writeText(text);
-            return { success: true, text: text.substring(0, 50) };
-          }
-          return { success: false, error: 'No selection' };
-        }
-      });
-      
-      // Open sidebar
-      await chrome.sidePanel.open({ windowId: tab.windowId });
-    } catch (error) {
-      console.error('[Yavar] Failed to copy selection:', error);
     }
   },
 
@@ -65,6 +40,18 @@ export const CommandHandler = {
       });
     } catch (error) {
       console.error('[Yavar] Screenshot capture failed:', error);
+    }
+  },
+
+  async toggleNotes(tab) {
+    if (!tab) return;
+    try {
+      await chrome.sidePanel.open({ windowId: tab.windowId });
+      setTimeout(() => {
+        chrome.runtime.sendMessage({ action: 'toggle_notes' });
+      }, 300);
+    } catch (error) {
+      console.error('[Yavar] Toggle notes failed:', error);
     }
   },
 

@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Yavar - The Sidekick AI Wrapper",
+  "name": "Yavar - Your AI Sidekick",
   "version": "1.0.2",
   "description": "Your AI sidekick for ChatGPT, Gemini, and Claude. Smart code explanation, screenshot capture, and guided study mode.",
   "icons": {
@@ -78,13 +78,6 @@
       },
       "description": "Toggle AI Sidebar"
     },
-    "copy-selection": {
-      "suggested_key": {
-        "default": "Ctrl+H",
-        "mac": "Command+H"
-      },
-      "description": "Copy selected text to sidebar"
-    },
     "capture-screenshot": {
       "suggested_key": {
         "default": "Ctrl+Shift+I",
@@ -98,6 +91,13 @@
         "mac": "Command+Shift+L"
       },
       "description": "Analyze GitHub Repository"
+    },
+    "toggle-notes": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+N",
+        "mac": "Command+Shift+O"
+      },
+      "description": "Toggle Notes Panel"
     }
   },
   "options_page": "options.html",

@@ -329,7 +329,7 @@ class YavarContentHandler {
         }
 
         // Show immediate feedback
-        this.showButtonFeedback('send', '✓ Sending...');
+        this.showButtonFeedback('send', '✓ ...');
 
         // Send to background (this will open sidebar + trigger auto-submit)
         chrome.runtime.sendMessage({
@@ -362,7 +362,7 @@ class YavarContentHandler {
         }
 
         // Show immediate feedback
-        this.showButtonFeedback('explain', '✓ Sending...');
+        this.showButtonFeedback('explain', '✓ ...');
 
         // Send to background (this will open sidebar + trigger auto-submit)
         chrome.runtime.sendMessage({
