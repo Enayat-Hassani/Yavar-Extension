@@ -213,7 +213,7 @@
         // Convert data URL to blob
         const response = await fetch(imageDataUrl);
         const blob = await response.blob();
-        const file = new File([blob], 'screenshot.png', { type: 'image/png' });
+        const file = new File([blob], 'screenshot_' + Date.now() + '.png', { type: 'image/png' });
 
         console.log('[Yavar Bridge] Screenshot converted to blob, size:', blob.size);
 

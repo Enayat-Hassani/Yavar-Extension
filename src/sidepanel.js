@@ -821,8 +821,11 @@ First Task: Based on the tree and tech stack, what is the single most important 
       }
 
       if (message.action === 'trigger_learn') {
-        // Trigger GitHub analysis when keyboard shortcut is pressed
         this.analyzeGitHubRepo();
+      }
+
+      if (message.action === 'toggle_notes') {
+        this.toggleNotes();
       }
 
       if (message.action === 'AUTO_SUBMIT_PROMPT' && message.prompt) {
