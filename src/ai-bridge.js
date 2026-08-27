@@ -452,6 +452,57 @@
     })();
   }
 
+  // Attach a text file (e.g. a big source file as .md) to the chat input.
+  // Web UIs accept far larger content as an attachment than as pasted text.
+  let lastAttachKey = '';
+  let lastAttachTime = 0;
+
+  function handleAttachFile(filename, content, mime) {
+    const now = Date.now();
+    const key = filename + '|' + (content ? content.length : 0);
+    if (key === lastAttachKey && now - lastAttachTime < 6000) {
+      console.log('[Yavar Bridge] Ignoring duplicate attach');
+      return;
+    }
+    lastAttachKey = key;
+    lastAttachTime = now;
+
+    const platform = detectPlatform();
+    if (!platform) { console.warn('[Yavar Bridge] Unknown platform, cannot attach'); return; }
+    const selectors = SELECTORS[platform];
+
+    (async () => {
+      try {
+        const inputEl = await waitForElement(selectors.input, 10000);
+        inputEl.focus();
+
+        const file = new File([content], filename, { type: mime || 'text/markdown' });
+
+        // Primary: paste the file (works like the screenshot attach)
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        inputEl.dispatchEvent(new ClipboardEvent('paste', {
+          bubbles: true, cancelable: true, clipboardData: dt
+        }));
+        console.log('[Yavar Bridge] Attached file via paste:', filename);
+
+        // Fallback: also try a drop event (some UIs only accept files via drop)
+        setTimeout(() => {
+          try {
+            const dt2 = new DataTransfer();
+            dt2.items.add(new File([content], filename, { type: mime || 'text/markdown' }));
+            const rect = inputEl.getBoundingClientRect();
+            const opts = { bubbles: true, cancelable: true, clientX: rect.left + 10, clientY: rect.top + 10 };
+            inputEl.dispatchEvent(new DragEvent('dragover', { ...opts, dataTransfer: dt2 }));
+            inputEl.dispatchEvent(new DragEvent('drop', { ...opts, dataTransfer: dt2 }));
+          } catch (e) { /* paste probably already worked */ }
+        }, 300);
+      } catch (err) {
+        console.error('[Yavar Bridge] handleAttachFile failed:', err);
+      }
+    })();
+  }
+
   // Listen for postMessage from sidepanel
   window.addEventListener('message', (event) => {
     if (event.data?.action === 'AUTO_SUBMIT_PROMPT' && event.data?.prompt) {
@@ -493,6 +544,11 @@
       } catch (e) {
         console.warn('[Yavar Bridge] Failed to post answer to parent:', e);
       }
+    }
+
+    if (event.data?.action === 'AUTO_ATTACH_FILE' && event.data?.content) {
+      console.log('[Yavar Bridge] Received AUTO_ATTACH_FILE');
+      handleAttachFile(event.data.filename || 'file.md', event.data.content, event.data.mime);
     }
 
     if (event.data?.action === 'WATCH_FOR_ANSWER') {

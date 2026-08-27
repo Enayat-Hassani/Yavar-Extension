@@ -118,6 +118,29 @@
       <div id="history-list" class="history-list"></div>
     </div>
 
+    <!-- Left tab: repo file browser (only shown on GitHub repo pages) -->
+    <button id="files-rail" class="files-rail hidden" title="Browse repo files">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+      </svg>
+      <span class="files-rail-label">Files</span>
+    </button>
+
+    <!-- Repo File Browser Panel -->
+    <div id="files-panel" class="files-panel hidden">
+      <div class="files-header">
+        <span class="files-title">Repo Files</span>
+        <div class="files-header-actions">
+          <button id="btn-refresh-files" class="history-action-btn" title="Reload tree">⟳</button>
+          <button id="btn-close-files" class="history-action-btn" title="Close">✕</button>
+        </div>
+      </div>
+      <div class="files-search-wrap">
+        <input id="files-search" type="text" class="files-search" placeholder="Filter files…">
+      </div>
+      <div id="files-tree" class="files-tree"></div>
+    </div>
+
     <!-- Deep-Dive Lens Picker Popover -->
     <div id="lens-picker" class="lens-picker hidden">
       <div class="lens-picker-header">Deep-dive lens</div>
