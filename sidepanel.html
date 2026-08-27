@@ -118,13 +118,34 @@
       <div id="history-list" class="history-list"></div>
     </div>
 
-    <!-- Left tab: repo file browser (only shown on GitHub repo pages) -->
-    <button id="files-rail" class="files-rail hidden" title="Browse repo files">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
-      </svg>
-      <span class="files-rail-label">Files</span>
-    </button>
+    <!-- Left dock: repo file tools, tucked into the edge; slides out on hover.
+         Only shown on GitHub repo pages. -->
+    <div id="files-rail-group" class="files-rail-group hidden">
+      <!-- One-click "add the file open in the GitHub tab" (only when viewing a file) -->
+      <button id="files-quick-add" class="files-quick-add hidden" title="Add the file open in your GitHub tab">
+        <span class="files-stack" aria-hidden="true">
+          <span class="sheet sheet-1"></span>
+          <span class="sheet sheet-2"></span>
+          <span class="sheet sheet-3"></span>
+        </span>
+        <span class="files-quick-plus" aria-hidden="true">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round">
+            <path d="M12 5v14M5 12h14"></path>
+          </svg>
+        </span>
+        <span class="files-tab-label files-quick-name"></span>
+      </button>
+
+      <!-- Browse the repo file tree -->
+      <button id="files-rail" class="files-rail" title="Browse repo files">
+        <span class="files-stack" aria-hidden="true">
+          <span class="sheet sheet-1"></span>
+          <span class="sheet sheet-2"></span>
+          <span class="sheet sheet-3"></span>
+        </span>
+        <span class="files-tab-label">Files</span>
+      </button>
+    </div>
 
     <!-- Repo File Browser Panel -->
     <div id="files-panel" class="files-panel hidden">
