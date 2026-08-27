@@ -1,28 +1,48 @@
 # Yavar - Your AI Sidekick
 
-A Chrome extension sidekick for ChatGPT, Claude, and Gemini. Select any text on any page for quick actions, capture areas of the screen, analyze GitHub repositories, and send anything straight to your AI.
+A Chrome extension that embeds ChatGPT, Claude, and Gemini in a sidebar — so you can select anything on any page and route it to the AI, capture screenshots, analyze GitHub repositories with a deep-dive agent, run a web research agent, and keep your AI answers in a searchable history.
 
 ## What it does
+
+**AI sidebar** — opens `gemini.google.com`, `chatgpt.com`, or `claude.ai` in a full-viewport sidebar, with a model switcher (and support for adding your own custom models). Send selected text, screenshots, or whole-page content straight to the model.
 
 **Floating menu** — select text on any page and a small action menu appears:
 
 - **Send** — send the selection straight to your default AI platform.
 - **Explain** — send it wrapped in a "Guided Learning" prompt.
 
-**Keyboard shortcuts** (rebind at `chrome://extensions/shortcuts`):
+**GitHub analysis** — on any GitHub repository, generate a structured learning prompt with the file tree and README context. Unauthenticated by default; optionally add a GitHub token in Settings to lift the 60 req/hr rate limit.
 
-| Shortcut (Mac / Win) | Action |
-|---------------------|--------|
-| `Cmd+Space` / `Ctrl+Space` | Toggle sidebar |
-| `Cmd+Shift+I` / `Ctrl+Shift+I` | Capture screenshot (area select) |
-| `Cmd+Shift+L` / `Ctrl+Shift+L` | Analyze current GitHub repository |
-| `Cmd+Shift+O` / `Ctrl+Shift+N` | Toggle notes panel |
+**GitHub deep-dive agent** — pick a repository to scan, then ask questions about it. The agent reads the codebase and answers with file references, with a live working-status bar.
 
-**GitHub analysis** — on any GitHub repository, press `Cmd+Shift+L` to generate a structured learning prompt. It scans the repository structure and README, then builds a formatted prompt with the file tree and context — no API token required.
+**Web research agent** — research any topic: the agent performs **SEARCH + READ** across the web and synthesizes an answer in the sidebar. Toggle **Deep research mode** in Settings for deeper coverage.
+
+**Repo file browser** — browse any GitHub repository's file tree right in the sidebar, search/filter it, and jump to (or quick-add) the active file.
+
+**Architecture diagrams** — generate a Mermaid **architecture diagram** of the current repository, rendered interactively in the sidebar.
+
+**History & saved answers** — capture the AI's last answer and keep it in a saved-answers history panel you can return to, copy, or clear.
 
 **Notes panel** — a built-in CodeMirror-powered scratchpad inside the sidebar, toggled with the notes shortcut.
 
 **Auto-submit & auto-paste** — send selected text, or paste a screenshot, directly into ChatGPT, Claude, or Gemini.
+
+### Keyboard shortcuts
+
+Chrome commands (rebind at `chrome://extensions/shortcuts`):
+
+| Shortcut (Mac / Win) | Action |
+|----------------------|--------|
+| `Cmd+Space` / `Ctrl+Space` | Toggle sidebar |
+| `Cmd+Shift+I` / `Ctrl+Shift+I` | Capture screenshot (area select) |
+| `Cmd+Shift+L` / `Ctrl+Shift+L` | Analyze current GitHub repository (learning prompt) |
+| `Cmd+Shift+O` / `Ctrl+Shift+N` | Toggle notes panel |
+
+In-sidebar keybinding (when the sidebar is focused):
+
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl+Shift+S` | Save the AI's last answer to history |
 
 ## AI platforms supported
 
@@ -48,13 +68,17 @@ Yavar-Extension/
 ├── src/
 │   ├── content.js        # Content script: floating menu + text selection
 │   ├── background.js     # Service worker (lifecycle, screenshot, routing)
-│   ├── sidepanel.js      # Sidebar UI
-│   ├── ai-bridge.js      # Auto-submit / auto-paste on AI platforms
+│   ├── sidepanel.js      # Sidebar UI: chat, agents, repo browser, history,
+│   │                     #   diagrams, notes, model management, settings
+│   ├── ai-bridge.js      # Auto-submit / auto-paste / answer capture on AI platforms
 │   ├── options.js        # Settings page
 │   └── utils/
 │       ├── commands.js   # Keyboard shortcut handlers
 │       ├── messageHandler.js
 │       └── contextMenu.js
+├── lib/
+│   ├── codemirror/       # CodeMirror (notes panel)
+│   └── mermaid/          # Mermaid (architecture diagrams)
 ├── styles/
 ├── rules/
 │   └── csp-bypass.json   # Declarative Net Request rules (see below)
