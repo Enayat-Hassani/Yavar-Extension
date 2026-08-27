@@ -19,12 +19,107 @@
     }
   };
 
+  // Selectors for reading the assistant's response back out of the page.
+  // These are best-effort and may need updating as the AI sites change their DOM.
+  const RESPONSE_SELECTORS = {
+    chatgpt: {
+      message: 'div[data-message-author-role="assistant"]',
+      content: '.markdown, .prose'
+    },
+    claude: {
+      message: 'div.font-claude-message, [data-testid="assistant-message"]',
+      content: null
+    },
+    gemini: {
+      message: 'message-content, .model-response-text',
+      content: null
+    }
+  };
+
+  // Present while a response is still streaming (used to warn about partial captures)
+  const STOP_SELECTORS = 'button[data-testid="stop-button"], button[aria-label*="Stop generating" i], button[aria-label*="Stop response" i], button[aria-label="Stop"]';
+
   function detectPlatform() {
     const host = window.location.hostname;
     if (host.includes('chatgpt.com') || host.includes('chat.openai.com')) return 'chatgpt';
     if (host.includes('claude.ai')) return 'claude';
     if (host.includes('gemini.google.com')) return 'gemini';
     return null;
+  }
+
+  // Convert a response DOM subtree into readable Markdown. Handles the common
+  // cases (headings, lists, code blocks, inline emphasis/links) and falls back
+  // to text content for anything unrecognised.
+  function nodeToMarkdown(el) {
+    let out = '';
+    el.childNodes.forEach((node) => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        out += node.textContent;
+        return;
+      }
+      if (node.nodeType !== Node.ELEMENT_NODE) return;
+
+      const tag = node.tagName.toLowerCase();
+
+      if (tag === 'pre') {
+        const codeEl = node.querySelector('code');
+        const codeText = (codeEl || node).innerText.replace(/\n+$/, '');
+        let lang = '';
+        if (codeEl) {
+          const m = (codeEl.className || '').match(/language-([\w+-]+)/);
+          if (m) lang = m[1];
+        }
+        out += `\n\n\`\`\`${lang}\n${codeText}\n\`\`\`\n\n`;
+      } else if (/^h[1-6]$/.test(tag)) {
+        out += `\n\n${'#'.repeat(Number(tag[1]))} ${node.innerText.trim()}\n\n`;
+      } else if (tag === 'ul' || tag === 'ol') {
+        out += '\n';
+        const ordered = tag === 'ol';
+        let i = 1;
+        node.querySelectorAll(':scope > li').forEach((li) => {
+          const prefix = ordered ? `${i++}. ` : '- ';
+          out += `${prefix}${nodeToMarkdown(li).trim()}\n`;
+        });
+        out += '\n';
+      } else if (tag === 'p' || tag === 'li') {
+        out += `\n\n${nodeToMarkdown(node).trim()}\n\n`;
+      } else if (tag === 'br') {
+        out += '\n';
+      } else if (tag === 'code') {
+        out += '`' + node.innerText + '`';
+      } else if (tag === 'strong' || tag === 'b') {
+        out += '**' + nodeToMarkdown(node).trim() + '**';
+      } else if (tag === 'em' || tag === 'i') {
+        out += '*' + nodeToMarkdown(node).trim() + '*';
+      } else if (tag === 'a') {
+        out += `[${node.innerText}](${node.getAttribute('href') || ''})`;
+      } else {
+        out += nodeToMarkdown(node);
+      }
+    });
+    return out;
+  }
+
+  function cleanMarkdown(s) {
+    return s.replace(/\n{3,}/g, '\n\n').replace(/[ \t]+\n/g, '\n').trim();
+  }
+
+  function extractLastAnswer() {
+    const platform = detectPlatform();
+    if (!platform) return { ok: false, reason: 'unknown-platform' };
+
+    const sel = RESPONSE_SELECTORS[platform];
+    const nodes = document.querySelectorAll(sel.message);
+    if (!nodes.length) return { ok: false, reason: 'no-messages' };
+
+    const last = nodes[nodes.length - 1];
+    const contentEl = sel.content ? (last.querySelector(sel.content) || last) : last;
+
+    let md = cleanMarkdown(nodeToMarkdown(contentEl));
+    if (!md) md = (contentEl.innerText || '').trim();
+    if (!md) return { ok: false, reason: 'empty' };
+
+    return { ok: true, text: md, platform, generating: !!document.querySelector(STOP_SELECTORS) };
   }
 
   function waitForElement(selector, timeout = 10000) {
@@ -271,6 +366,32 @@
     if (event.data?.action === 'AUTO_PASTE_SCREENSHOT' && event.data?.imageData) {
       console.log('[Yavar Bridge] Received AUTO_PASTE_SCREENSHOT via postMessage');
       handleAutoPasteScreenshot(event.data.imageData);
+    }
+
+    if (event.data?.action === 'CAPTURE_LAST_ANSWER') {
+      console.log('[Yavar Bridge] Received CAPTURE_LAST_ANSWER');
+      const result = extractLastAnswer();
+      const reply = result.ok
+        ? {
+            action: 'ANSWER_CAPTURED',
+            text: result.text,
+            platform: result.platform,
+            generating: result.generating,
+            url: window.location.href,
+            requestId: event.data.requestId
+          }
+        : {
+            action: 'ANSWER_CAPTURE_FAILED',
+            reason: result.reason,
+            platform: detectPlatform(),
+            requestId: event.data.requestId
+          };
+      try {
+        window.parent.postMessage(reply, '*');
+        console.log('[Yavar Bridge] Sent', reply.action, 'to parent');
+      } catch (e) {
+        console.warn('[Yavar Bridge] Failed to post answer to parent:', e);
+      }
     }
   });
 

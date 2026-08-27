@@ -1,6 +1,6 @@
 # Yavar - Your AI Sidekick
 
-A Chrome extension sidekick for ChatGPT, Claude, Gemini, and Bing Chat. Select any text on any page for quick actions, capture areas of the screen, analyze GitHub repositories, and send anything straight to your favourite AI — all with keyboard shortcuts and no build step.
+A Chrome extension sidekick for ChatGPT, Claude, and Gemini. Select any text on any page for quick actions, capture areas of the screen, analyze GitHub repositories, and send anything straight to your AI.
 
 ## What it does
 
@@ -20,9 +20,9 @@ A Chrome extension sidekick for ChatGPT, Claude, Gemini, and Bing Chat. Select a
 
 **GitHub analysis** — on any GitHub repository, press `Cmd+Shift+L` to generate a structured learning prompt. It scans the repository structure and README, then builds a formatted prompt with the file tree and context — no API token required.
 
-**Notes panel** — a built-in CodeMirror-powered scratchpad you can toggle over any page.
+**Notes panel** — a built-in CodeMirror-powered scratchpad inside the sidebar, toggled with the notes shortcut.
 
-**Auto-submit & auto-paste** — send selected text, or paste a screenshot, directly into ChatGPT, Claude, Gemini, or Bing Chat.
+**Auto-submit & auto-paste** — send selected text, or paste a screenshot, directly into ChatGPT, Claude, or Gemini.
 
 ## AI platforms supported
 
@@ -31,7 +31,6 @@ A Chrome extension sidekick for ChatGPT, Claude, Gemini, and Bing Chat. Select a
 | ChatGPT | `https://chatgpt.com` | ✅ |
 | Claude | `https://claude.ai` | ✅ |
 | Gemini | `https://gemini.google.com` | ✅ |
-| Bing Chat | `https://www.bing.com/chat` | ✅ |
 
 ## Installation
 
@@ -69,7 +68,7 @@ Yavar-Extension/
 Yavar asks for broad permissions to do its job. Here's what they are and why:
 
 - **`<all_urls>`** — the floating text-selection menu needs to run on every page. This is the widest possible ask; you can review exactly what the content script does in `src/content.js`.
-- **Declarative Net Request (CSP bypass)** — to inject and auto-submit prompts on ChatGPT, Claude, Gemini, and Bing, the extension strips `Content-Security-Policy` and `X-Frame-Options` response headers **only on those four chat sites** (see `rules/csp-bypass.json`). It does not touch any other site. This is required to iframe the AI frontends; know that it weakens those sites' own headers while Yavar is installed.
+- **Declarative Net Request (CSP bypass)** — to inject and auto-submit prompts on ChatGPT, Claude, and Gemini, the extension strips `Content-Security-Policy` and `X-Frame-Options` response headers **only on those chat sites** (see `rules/csp-bypass.json`). It does not touch any other site. This is required to iframe the AI frontends; know that it weakens those sites' own headers while Yavar is installed.
 
 ## Configuration
 

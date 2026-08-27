@@ -23,6 +23,7 @@ class YavarSidePanel {
     this.bindEvents();
     this.loadCurrentAI();
     this.setupMessageListener();
+    this.setupIframeMessageListener();
     this.setupStorageListener();
     this.initCodeMirror();
     this.checkPendingData();
@@ -47,8 +48,17 @@ class YavarSidePanel {
     this.btnCopyNotes = document.getElementById('btn-copy-notes');
     this.notesOpen = false;
 
+    // History panel (captured AI answers)
+    this.historyPanel = document.getElementById('history-panel');
+    this.historyList = document.getElementById('history-list');
+    this.historySearch = document.getElementById('history-search');
+    this.btnClearHistory = document.getElementById('btn-clear-history');
+    this.btnCloseHistory = document.getElementById('btn-close-history');
+
     // Right sidebar buttons
     this.sidebarBtnNotes = document.getElementById('sidebar-btn-notes');
+    this.sidebarBtnSaveAnswer = document.getElementById('sidebar-btn-save-answer');
+    this.sidebarBtnHistory = document.getElementById('sidebar-btn-history');
     this.sidebarBtnModelSwitcher = document.getElementById('sidebar-btn-model-switcher');
     this.sidebarBtnAnalyzeRepo = document.getElementById('sidebar-btn-analyze-repo');
     this.sidebarBtnScreenshot = document.getElementById('sidebar-btn-screenshot');
@@ -129,6 +139,8 @@ class YavarSidePanel {
     });
 
     this.sidebarBtnNotes.addEventListener('click', () => this.toggleNotes());
+    this.sidebarBtnSaveAnswer.addEventListener('click', () => this.captureLastAnswer());
+    this.sidebarBtnHistory.addEventListener('click', () => this.toggleHistory());
     this.sidebarBtnAnalyzeRepo.addEventListener('click', () => this.analyzeGitHubRepo());
     this.sidebarBtnScreenshot.addEventListener('click', () => this.captureScreenshot());
     this.sidebarBtnCopyPage.addEventListener('click', () => this.copyPageContent());
@@ -167,14 +179,25 @@ class YavarSidePanel {
     this.btnCopyScreenshot.addEventListener('click', () => this.copyScreenshot());
     this.btnDismissScreenshot.addEventListener('click', () => this.dismissScreenshot());
 
+    // History panel buttons
+    this.btnCloseHistory.addEventListener('click', () => this.historyPanel.classList.add('hidden'));
+    this.btnClearHistory.addEventListener('click', () => this.handleClearHistoryClick());
+    this.historySearch.addEventListener('input', () => this.renderHistory());
+    this.historyList.addEventListener('click', (e) => this.handleHistoryListClick(e));
+
     // Iframe load handling
     this.aiFrame.addEventListener('load', () => this.handleFrameLoad());
 
-    // Keyboard shortcut: Ctrl+N to toggle notes
+    // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
       if (e.ctrlKey && e.key === 'n') {
         e.preventDefault();
         this.toggleNotes();
+      }
+      // Ctrl+Shift+S — capture the AI's last answer to history
+      if (e.ctrlKey && e.shiftKey && (e.key === 'S' || e.key === 's')) {
+        e.preventDefault();
+        this.captureLastAnswer();
       }
     });
   }
@@ -686,6 +709,234 @@ First Task: Based on the tree and tech stack, what is the single most important 
       console.error('[Yavar] Failed to copy screenshot:', error);
       this.showNotification('❌ Failed to copy image.');
     }
+  }
+
+  // ========== Answer Capture & History ==========
+
+  // Ask the AI iframe (via ai-bridge) to hand back its most recent answer.
+  captureLastAnswer() {
+    if (!this.aiFrame || !this.aiFrame.contentWindow) {
+      this.showNotification('⚠️ No AI chat loaded to capture from');
+      return;
+    }
+
+    const requestId = 'cap_' + Date.now();
+    this._pendingCaptureId = requestId;
+
+    clearTimeout(this._captureTimeout);
+    this._captureTimeout = setTimeout(() => {
+      if (this._pendingCaptureId === requestId) {
+        this._pendingCaptureId = null;
+        this.showNotification('⚠️ Could not read the answer. Let it finish, then retry.');
+      }
+    }, 4000);
+
+    this.aiFrame.contentWindow.postMessage({ action: 'CAPTURE_LAST_ANSWER', requestId }, '*');
+    this.showNotification('⏳ Capturing answer…');
+  }
+
+  // Receive answers posted back from the iframe (ai-bridge → window.parent).
+  setupIframeMessageListener() {
+    window.addEventListener('message', (event) => {
+      const data = event.data;
+      if (!data || typeof data !== 'object') return;
+
+      if (data.action === 'ANSWER_CAPTURED') {
+        if (this._pendingCaptureId && data.requestId && data.requestId !== this._pendingCaptureId) return;
+        clearTimeout(this._captureTimeout);
+        this._pendingCaptureId = null;
+        this.handleAnswerCaptured(data);
+      }
+
+      if (data.action === 'ANSWER_CAPTURE_FAILED') {
+        if (this._pendingCaptureId && data.requestId && data.requestId !== this._pendingCaptureId) return;
+        clearTimeout(this._captureTimeout);
+        this._pendingCaptureId = null;
+        const msg = data.reason === 'no-messages'
+          ? 'No answer found yet — ask something first'
+          : 'Could not read the answer';
+        this.showNotification('⚠️ ' + msg);
+      }
+    });
+  }
+
+  async handleAnswerCaptured(data) {
+    const model = this.getCurrentModel();
+
+    let answer = (data.text || '').trim();
+    if (!answer) {
+      this.showNotification('⚠️ The answer looked empty');
+      return;
+    }
+    if (answer.length > 100000) answer = answer.slice(0, 100000) + '\n\n…[truncated]';
+
+    // Pair with the last prompt we forwarded, if it was recent (< 15 min)
+    const prompt = (this._lastForwardedPrompt && Date.now() - (this._lastForwardedTime || 0) < 900000)
+      ? this._lastForwardedPrompt
+      : '';
+
+    const entry = {
+      id: 'h_' + Date.now(),
+      ts: Date.now(),
+      platform: data.platform || model?.name || 'AI',
+      url: data.url || '',
+      prompt,
+      answer
+    };
+
+    await this.addHistoryEntry(entry);
+    this._lastCapturedEntry = entry;
+
+    const note = data.generating ? ' (still generating — may be partial)' : '';
+    this.showNotification('💾 Answer saved to history' + note);
+
+    if (this.historyPanel && !this.historyPanel.classList.contains('hidden')) {
+      this.renderHistory();
+    }
+  }
+
+  // ----- History storage (chrome.storage.local) -----
+
+  async getHistory() {
+    try {
+      const { yavarHistory } = await chrome.storage.local.get('yavarHistory');
+      return Array.isArray(yavarHistory) ? yavarHistory : [];
+    } catch (e) {
+      console.error('[Yavar] Failed to load history:', e);
+      return [];
+    }
+  }
+
+  async addHistoryEntry(entry) {
+    const history = await this.getHistory();
+    history.unshift(entry);
+    if (history.length > 200) history.length = 200; // keep the 200 most recent
+    await chrome.storage.local.set({ yavarHistory: history });
+  }
+
+  async deleteHistoryEntry(id) {
+    const history = (await this.getHistory()).filter(e => e.id !== id);
+    await chrome.storage.local.set({ yavarHistory: history });
+    this.renderHistory();
+  }
+
+  async clearHistory() {
+    await chrome.storage.local.set({ yavarHistory: [] });
+    this.renderHistory();
+  }
+
+  handleClearHistoryClick() {
+    // Two-click confirm (window.confirm can be unreliable inside side panels)
+    if (this._clearArmed) {
+      clearTimeout(this._clearTimer);
+      this._clearArmed = false;
+      this.clearHistory();
+      this.showNotification('🗑️ History cleared');
+      return;
+    }
+    this._clearArmed = true;
+    this.showNotification('Click clear again to confirm');
+    this._clearTimer = setTimeout(() => { this._clearArmed = false; }, 3000);
+  }
+
+  // ----- History panel UI -----
+
+  toggleHistory() {
+    if (this.historyPanel.classList.contains('hidden')) {
+      this.renderHistory();
+      this.historyPanel.classList.remove('hidden');
+      this.historySearch.focus();
+    } else {
+      this.historyPanel.classList.add('hidden');
+    }
+  }
+
+  async renderHistory() {
+    const history = await this.getHistory();
+    const q = (this.historySearch?.value || '').toLowerCase().trim();
+    const filtered = q
+      ? history.filter(e =>
+          (e.answer || '').toLowerCase().includes(q) ||
+          (e.prompt || '').toLowerCase().includes(q) ||
+          (e.platform || '').toLowerCase().includes(q))
+      : history;
+
+    if (!filtered.length) {
+      this.historyList.innerHTML = `<div class="history-empty">${
+        history.length
+          ? 'No matches.'
+          : 'No saved answers yet.<br>Open an AI chat, then click <strong>Save answer</strong> (or press Ctrl+Shift+S).'
+      }</div>`;
+      return;
+    }
+
+    this.historyList.innerHTML = filtered.map(e => {
+      const date = new Date(e.ts).toLocaleString();
+      const answer = e.answer || '';
+      const preview = this.escapeHtml(answer.slice(0, 240)) + (answer.length > 240 ? '…' : '');
+      const promptLine = e.prompt
+        ? `<div class="history-prompt" title="${this.escapeHtml(e.prompt)}">${this.escapeHtml(e.prompt.slice(0, 140))}</div>`
+        : '';
+      return `
+        <div class="history-item" data-id="${e.id}">
+          <div class="history-meta">
+            <span class="history-platform">${this.escapeHtml(e.platform || 'AI')}</span>
+            <span class="history-date">${date}</span>
+          </div>
+          ${promptLine}
+          <div class="history-answer">${preview}</div>
+          <div class="history-item-actions">
+            <button class="history-btn" data-act="copy" data-id="${e.id}">Copy</button>
+            <button class="history-btn" data-act="notes" data-id="${e.id}">→ Notes</button>
+            <button class="history-btn history-btn-danger" data-act="delete" data-id="${e.id}">Delete</button>
+          </div>
+        </div>`;
+    }).join('');
+  }
+
+  handleHistoryListClick(e) {
+    const btn = e.target.closest('.history-btn');
+    if (!btn) return;
+    const { act, id } = btn.dataset;
+    if (act === 'copy') this.copyHistoryEntry(id);
+    else if (act === 'notes') this.insertHistoryToNotes(id);
+    else if (act === 'delete') this.deleteHistoryEntry(id);
+  }
+
+  async copyHistoryEntry(id) {
+    const entry = (await this.getHistory()).find(x => x.id === id);
+    if (!entry) return;
+    try {
+      await navigator.clipboard.writeText(entry.answer || '');
+      this.showNotification('📋 Answer copied to clipboard');
+    } catch (err) {
+      console.error('[Yavar] Failed to copy history entry:', err);
+    }
+  }
+
+  async insertHistoryToNotes(id) {
+    const entry = (await this.getHistory()).find(x => x.id === id);
+    if (!entry) return;
+    this.appendToNotes(entry);
+    this.showNotification('📝 Added to notes');
+  }
+
+  // Append a captured answer to the Notes doc (works even if notes is closed).
+  appendToNotes(entry) {
+    const stamp = new Date(entry.ts).toLocaleString();
+    const promptBlock = entry.prompt ? `**Prompt:** ${entry.prompt}\n\n` : '';
+    const block = `\n\n---\n### ${entry.platform} · ${stamp}\n${promptBlock}${entry.answer || ''}\n`;
+    const current = this.cmEditor.getValue();
+    this.cmEditor.setValue(current ? current + block : block.trimStart());
+    this.saveNotes();
+  }
+
+  escapeHtml(s) {
+    return (s || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
   }
 
   // ========== Notes Panel ==========
