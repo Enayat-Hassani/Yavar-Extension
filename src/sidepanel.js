@@ -55,10 +55,17 @@ class YavarSidePanel {
     this.btnClearHistory = document.getElementById('btn-clear-history');
     this.btnCloseHistory = document.getElementById('btn-close-history');
 
+    // Deep-dive agent
+    this.agent = null;
+    this.agentBar = document.getElementById('agent-bar');
+    this.agentStatus = document.getElementById('agent-status');
+    this.btnStopAgent = document.getElementById('btn-stop-agent');
+
     // Right sidebar buttons
     this.sidebarBtnNotes = document.getElementById('sidebar-btn-notes');
     this.sidebarBtnSaveAnswer = document.getElementById('sidebar-btn-save-answer');
     this.sidebarBtnHistory = document.getElementById('sidebar-btn-history');
+    this.sidebarBtnRepoAgent = document.getElementById('sidebar-btn-repo-agent');
     this.sidebarBtnModelSwitcher = document.getElementById('sidebar-btn-model-switcher');
     this.sidebarBtnAnalyzeRepo = document.getElementById('sidebar-btn-analyze-repo');
     this.sidebarBtnScreenshot = document.getElementById('sidebar-btn-screenshot');
@@ -142,6 +149,8 @@ class YavarSidePanel {
     this.sidebarBtnSaveAnswer.addEventListener('click', () => this.captureLastAnswer());
     this.sidebarBtnHistory.addEventListener('click', () => this.toggleHistory());
     this.sidebarBtnAnalyzeRepo.addEventListener('click', () => this.analyzeGitHubRepo());
+    this.sidebarBtnRepoAgent.addEventListener('click', () => this.startRepoAgent());
+    this.btnStopAgent.addEventListener('click', () => this.stopRepoAgent());
     this.sidebarBtnScreenshot.addEventListener('click', () => this.captureScreenshot());
     this.sidebarBtnCopyPage.addEventListener('click', () => this.copyPageContent());
     this.sidebarBtnCopyLink.addEventListener('click', () => this.copyLink());
@@ -508,6 +517,27 @@ class YavarSidePanel {
   }
 
   async scanRepoRobust(owner, repo) {
+    const { text } = await this.buildRepoContext(owner, repo);
+
+    const learningPrompt = `
+---
+Act as a Senior Software Architect and Coding Mentor. Using the DEPENDENCIES/TECH STACK, PROJECT/README, and LOGIC TREE above, guide my learning of this codebase.
+
+Your Rules:
+- Do not explain everything at once. Start by explaining the core "Mental Model" of how the system moves from a request to a response in this specific project.
+- Use a "Socratic" approach: explain a concept, show a file path from the tree as an example, then ask me a question to verify my understanding.
+- After each milestone, give me a tiny "Build Challenge" (3-5 lines of code) to implement a basic feature using the existing abstractions.
+- Keep explanations grounded in the actual file structure provided.
+
+First Task: Based on the tree and tech stack, what is the single most important directory I should look at first to understand how the core logic works, and why?`;
+
+    return text + learningPrompt;
+  }
+
+  // Scan a repo into a text context block (deps + README + logic tree).
+  // Returned separately from any trailing instructions so both the one-shot
+  // learning prompt and the deep-dive agent can reuse it.
+  async buildRepoContext(owner, repo) {
     const SAFE_FILE_LIMIT = 300;
 
     const fetchJSON = async (url) => {
@@ -575,19 +605,221 @@ class YavarSidePanel {
       treeMap += '  '.repeat(parts.length - 1) + (item.type === 'tree' ? '📂 ' : '📄 ') + parts.pop() + '\n';
     });
 
-    const learningPrompt = `
----
-Act as a Senior Software Architect and Coding Mentor. Using the DEPENDENCIES/TECH STACK, PROJECT/README, and LOGIC TREE above, guide my learning of this codebase.
+    return { text: depContext + '\n' + semanticContext + '\n' + treeMap, branch };
+  }
 
-Your Rules:
-- Do not explain everything at once. Start by explaining the core "Mental Model" of how the system moves from a request to a response in this specific project.
-- Use a "Socratic" approach: explain a concept, show a file path from the tree as an example, then ask me a question to verify my understanding.
-- After each milestone, give me a tiny "Build Challenge" (3-5 lines of code) to implement a basic feature using the existing abstractions.
-- Keep explanations grounded in the actual file structure provided.
+  // Fetch a single file's contents from a repo via the GitHub Contents API.
+  async fetchRepoFile(owner, repo, path, branch) {
+    const cleanPath = path.replace(/^\.?\//, '');
+    const encoded = cleanPath.split('/').map(encodeURIComponent).join('/');
+    const url = `https://api.github.com/repos/${owner}/${repo}/contents/${encoded}?ref=${encodeURIComponent(branch)}`;
 
-First Task: Based on the tree and tech stack, what is the single most important directory I should look at first to understand how the core logic works, and why?`;
+    const res = await fetch(url, { headers: { 'Accept': 'application/vnd.github.v3+json' } });
+    if (!res.ok) {
+      if (res.status === 403) throw new Error('rate limited (GitHub allows ~60 requests/hour without a token)');
+      throw new Error(`GitHub ${res.status}`);
+    }
+    const data = await res.json();
+    if (Array.isArray(data)) throw new Error('path is a directory');
+    if (!data.content) throw new Error('no content (file may be too large)');
 
-    return depContext + '\n' + semanticContext + '\n' + treeMap + learningPrompt;
+    let text = atob(data.content.replace(/\s/g, ''));
+    const MAX = 30000;
+    if (text.length > MAX) text = text.slice(0, MAX) + '\n… [truncated]';
+    return text;
+  }
+
+  // ========== GitHub Deep-Dive Agent ==========
+  // Closes the loop: scan repo → AI requests files (FETCH:) → Yavar fetches them
+  // via the GitHub API → feeds them back → repeat, until the AI has enough to
+  // explain the codebase. Read-only and bounded by turn/file limits.
+
+  async startRepoAgent() {
+    if (this.agent?.active) {
+      this.showNotification('⚠️ Deep-dive already running — Stop it first');
+      return;
+    }
+
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab || !tab.url.includes('github.com')) {
+      this.showNotification('⚠️ Open a GitHub repository to use the deep-dive agent');
+      return;
+    }
+    const parts = new URL(tab.url).pathname.split('/').filter(Boolean);
+    if (parts.length < 2) {
+      this.showNotification('⚠️ Navigate to a GitHub repository page');
+      return;
+    }
+    const [owner, repo] = parts;
+
+    this.showNotification('🔄 Scanning repository for deep-dive…');
+    let ctx;
+    try {
+      ctx = await this.buildRepoContext(owner, repo);
+    } catch (error) {
+      console.error('[Yavar] Deep-dive scan failed:', error);
+      this.showNotification('⚠️ Scan failed: ' + error.message);
+      return;
+    }
+
+    this.agent = {
+      active: true,
+      owner,
+      repo,
+      branch: ctx.branch,
+      turn: 0,
+      maxTurns: 8,
+      files: 0,
+      maxFiles: 20,
+      fetched: new Set()
+    };
+    this.showAgentBar();
+
+    const prompt = ctx.text + '\n' + this.agentInstructions();
+    this.runAgentTurn(prompt);
+  }
+
+  agentInstructions() {
+    return `---
+You are exploring this GitHub repository together with me. You have ONE tool: to read the full contents of a file, output a line EXACTLY in this format, on its own line, with nothing else around it:
+
+FETCH: relative/path/to/file.ext
+
+Rules:
+- Request up to 5 files per message. I will reply with their contents, then you continue.
+- Only FETCH files that appear in the LOGIC TREE above, using their exact path.
+- Start with the 2-4 files most critical to the core logic. Say briefly why, then FETCH them.
+- After I return contents, explain what they do, then FETCH more only if you still need them.
+- When you can explain the architecture end-to-end (entry point → core flow → key modules), STOP requesting files and give a clear, concise walkthrough that cites the files you read.
+
+Begin: state a one-line plan, then FETCH the first files you need.`;
+  }
+
+  runAgentTurn(prompt) {
+    if (!this.agent?.active) return;
+
+    this.agent.turn++;
+    this.updateAgentBar();
+
+    if (this.agent.turn > this.agent.maxTurns) {
+      this.finishAgent('Reached the turn limit — ask a follow-up to continue.');
+      return;
+    }
+    if (!this.aiFrame || !this.aiFrame.contentWindow) {
+      this.finishAgent('No AI chat loaded.');
+      return;
+    }
+
+    const send = () => {
+      // The agent may have been stopped during the delay
+      if (!this.agent?.active || !this.aiFrame?.contentWindow) return;
+      const requestId = 'agent_' + Date.now();
+      this._agentRequestId = requestId;
+      // Arm the answer-watch BEFORE sending so we catch the reply as it settles
+      this.aiFrame.contentWindow.postMessage({ action: 'WATCH_FOR_ANSWER', requestId }, '*');
+      this.forwardToIframe({ prompt, autoSubmit: true });
+    };
+
+    // Brief pause before follow-up turns so the AI's input can re-enable and the
+    // DOM can settle after the previous reply (more reliable, and easier to watch).
+    if (this.agent.turn > 1) {
+      setTimeout(send, 1500);
+    } else {
+      send();
+    }
+  }
+
+  async onAgentAnswer(data) {
+    if (!this.agent?.active) return;
+
+    const answer = data.text || '';
+    const requests = [...new Set(
+      [...answer.matchAll(/FETCH:\s*([^\n`*]+)/gi)]
+        .map(m => m[1].trim().replace(/[)\].,'"]+$/, '').replace(/^\.?\//, ''))
+        .filter(Boolean)
+    )].slice(0, 5);
+
+    if (!requests.length) {
+      this.finishAgent('Analysis complete.');
+      return;
+    }
+
+    // Genuine cap on total files read this run
+    if (this.agent.files >= this.agent.maxFiles) {
+      this.finishAgent(`Read the file limit (${this.agent.maxFiles}) — ask a follow-up in the chat to keep going.`);
+      return;
+    }
+
+    // The AI re-requested only files it already has → don't stop; nudge it forward
+    const newOnes = requests.filter(p => !this.agent.fetched.has(p));
+    if (newOnes.length === 0) {
+      this.agent.staleTurns = (this.agent.staleTurns || 0) + 1;
+      if (this.agent.staleTurns >= 2) {
+        this.finishAgent('The AI kept asking for files it already has — stopped. Ask it to summarize what it found.');
+        return;
+      }
+      const nudge = `You already have the contents of: ${requests.join(', ')}. Do NOT request those again. Either FETCH different files from the LOGIC TREE that you have not read yet, or give your final architecture walkthrough now using what you've read.`;
+      this.runAgentTurn(nudge);
+      return;
+    }
+    this.agent.staleTurns = 0;
+
+    const toFetch = [];
+    for (const p of newOnes) {
+      if (this.agent.files >= this.agent.maxFiles) break;
+      toFetch.push(p);
+    }
+
+    this.showNotification(`📥 Fetching ${toFetch.length} file(s)…`);
+
+    let payload = 'FILES REQUESTED\n===============\n\n';
+    for (const path of toFetch) {
+      this.agent.fetched.add(path);
+      this.agent.files++;
+      try {
+        const content = await this.fetchRepoFile(this.agent.owner, this.agent.repo, path, this.agent.branch);
+        payload += `FILE: ${path}\n\`\`\`\n${content}\n\`\`\`\n\n`;
+      } catch (error) {
+        payload += `FILE: ${path}\n(could not fetch — ${error.message})\n\n`;
+      }
+    }
+    payload += `You have now read ${this.agent.files}/${this.agent.maxFiles} files. Continue: explain what you just read, then FETCH more files if needed, or give your final walkthrough if you have enough.`;
+
+    this.updateAgentBar();
+    this.runAgentTurn(payload);
+  }
+
+  stopRepoAgent() {
+    if (!this.agent?.active) return;
+    this.agent.active = false;
+    this._agentRequestId = null;
+    this.aiFrame?.contentWindow?.postMessage({ action: 'STOP_WATCH' }, '*');
+    this.hideAgentBar();
+    this.showNotification('⏹️ Deep-dive stopped');
+  }
+
+  finishAgent(message) {
+    if (this.agent) this.agent.active = false;
+    this._agentRequestId = null;
+    this.aiFrame?.contentWindow?.postMessage({ action: 'STOP_WATCH' }, '*');
+    this.hideAgentBar();
+    this.showNotification('✅ ' + (message || 'Deep-dive finished'));
+  }
+
+  showAgentBar() {
+    if (!this.agentBar) return;
+    this.updateAgentBar();
+    this.agentBar.classList.remove('hidden');
+  }
+
+  updateAgentBar() {
+    if (!this.agentStatus || !this.agent) return;
+    this.agentStatus.textContent =
+      `Deep-dive · turn ${Math.min(this.agent.turn, this.agent.maxTurns)}/${this.agent.maxTurns} · ${this.agent.files}/${this.agent.maxFiles} files`;
+  }
+
+  hideAgentBar() {
+    if (this.agentBar) this.agentBar.classList.add('hidden');
   }
 
   // ========== Screenshot Functions ==========
@@ -756,6 +988,22 @@ First Task: Based on the tree and tech stack, what is the single most important 
           ? 'No answer found yet — ask something first'
           : 'Could not read the answer';
         this.showNotification('⚠️ ' + msg);
+      }
+
+      // ----- Deep-dive agent watch replies -----
+      if (data.action === 'ANSWER_SETTLED') {
+        if (this._agentRequestId && data.requestId === this._agentRequestId) {
+          this._agentRequestId = null;
+          this.onAgentAnswer(data);
+        }
+      }
+
+      if (data.action === 'ANSWER_WATCH_TIMEOUT') {
+        if (this.agent?.active) this.finishAgent('Timed out waiting for the AI to reply.');
+      }
+
+      if (data.action === 'ANSWER_WATCH_FAILED') {
+        if (this.agent?.active) this.finishAgent('Answer-reading is not supported on this model.');
       }
     });
   }

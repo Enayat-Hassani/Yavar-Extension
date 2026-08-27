@@ -122,6 +122,80 @@
     return { ok: true, text: md, platform, generating: !!document.querySelector(STOP_SELECTORS) };
   }
 
+  // ---- Auto-watch: wait for a NEW response to finish streaming, then post it ----
+  // Used by the deep-dive agent so it can read replies without a manual click.
+  let watchObserver = null;
+  let watchTimer = null;
+  let watchRequestId = null;
+  let watchSafetyTimer = null;
+
+  function stopAnswerWatch() {
+    if (watchObserver) { watchObserver.disconnect(); watchObserver = null; }
+    if (watchTimer) { clearTimeout(watchTimer); watchTimer = null; }
+    if (watchSafetyTimer) { clearTimeout(watchSafetyTimer); watchSafetyTimer = null; }
+    watchRequestId = null;
+  }
+
+  function startAnswerWatch(requestId) {
+    stopAnswerWatch();
+    const platform = detectPlatform();
+    if (!platform) {
+      try { window.parent.postMessage({ action: 'ANSWER_WATCH_FAILED', reason: 'unknown-platform', requestId }, '*'); } catch (e) {}
+      return;
+    }
+    watchRequestId = requestId;
+
+    const startCount = document.querySelectorAll(RESPONSE_SELECTORS[platform].message).length;
+    let sawGenerating = false;
+    const SETTLE_MS = 1500;
+
+    const evaluate = () => {
+      if (watchRequestId !== requestId) return;
+      if (document.querySelector(STOP_SELECTORS)) sawGenerating = true;
+
+      clearTimeout(watchTimer);
+      watchTimer = setTimeout(() => {
+        if (watchRequestId !== requestId) return;
+        if (document.querySelector(STOP_SELECTORS)) return; // still streaming; wait for more mutations
+
+        const currentCount = document.querySelectorAll(RESPONSE_SELECTORS[platform].message).length;
+        // Only settle once a genuinely new/finished response is present
+        if (!sawGenerating && currentCount <= startCount) return;
+
+        const result = extractLastAnswer();
+        if (result.ok && result.text) {
+          const rid = requestId;
+          stopAnswerWatch();
+          try {
+            window.parent.postMessage({
+              action: 'ANSWER_SETTLED',
+              text: result.text,
+              platform: result.platform,
+              url: window.location.href,
+              requestId: rid
+            }, '*');
+            console.log('[Yavar Bridge] ANSWER_SETTLED sent to parent');
+          } catch (e) {
+            console.warn('[Yavar Bridge] Failed to post settled answer:', e);
+          }
+        }
+      }, SETTLE_MS);
+    };
+
+    watchObserver = new MutationObserver(evaluate);
+    watchObserver.observe(document.body, { childList: true, subtree: true, characterData: true });
+
+    // Give up after 120s so a stuck reply doesn't hang the agent forever
+    watchSafetyTimer = setTimeout(() => {
+      if (watchRequestId === requestId) {
+        stopAnswerWatch();
+        try { window.parent.postMessage({ action: 'ANSWER_WATCH_TIMEOUT', requestId }, '*'); } catch (e) {}
+      }
+    }, 120000);
+
+    evaluate(); // in case it already settled
+  }
+
   function waitForElement(selector, timeout = 10000) {
     return new Promise((resolve, reject) => {
       const el = document.querySelector(selector);
@@ -392,6 +466,16 @@
       } catch (e) {
         console.warn('[Yavar Bridge] Failed to post answer to parent:', e);
       }
+    }
+
+    if (event.data?.action === 'WATCH_FOR_ANSWER') {
+      console.log('[Yavar Bridge] Received WATCH_FOR_ANSWER');
+      startAnswerWatch(event.data.requestId);
+    }
+
+    if (event.data?.action === 'STOP_WATCH') {
+      console.log('[Yavar Bridge] Received STOP_WATCH');
+      stopAnswerWatch();
     }
   });
 
