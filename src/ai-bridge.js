@@ -476,27 +476,14 @@
         const inputEl = await waitForElement(selectors.input, 10000);
         inputEl.focus();
 
-        const file = new File([content], filename, { type: mime || 'text/markdown' });
-
-        // Primary: paste the file (works like the screenshot attach)
+        // Paste the file as an attachment (same mechanism as the screenshot attach)
+        const file = new File([content], filename, { type: mime || 'text/plain' });
         const dt = new DataTransfer();
         dt.items.add(file);
         inputEl.dispatchEvent(new ClipboardEvent('paste', {
           bubbles: true, cancelable: true, clipboardData: dt
         }));
-        console.log('[Yavar Bridge] Attached file via paste:', filename);
-
-        // Fallback: also try a drop event (some UIs only accept files via drop)
-        setTimeout(() => {
-          try {
-            const dt2 = new DataTransfer();
-            dt2.items.add(new File([content], filename, { type: mime || 'text/markdown' }));
-            const rect = inputEl.getBoundingClientRect();
-            const opts = { bubbles: true, cancelable: true, clientX: rect.left + 10, clientY: rect.top + 10 };
-            inputEl.dispatchEvent(new DragEvent('dragover', { ...opts, dataTransfer: dt2 }));
-            inputEl.dispatchEvent(new DragEvent('drop', { ...opts, dataTransfer: dt2 }));
-          } catch (e) { /* paste probably already worked */ }
-        }, 300);
+        console.log('[Yavar Bridge] Attached file via paste:', filename, content.length, 'chars');
       } catch (err) {
         console.error('[Yavar Bridge] handleAttachFile failed:', err);
       }
