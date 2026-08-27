@@ -123,15 +123,15 @@
   }
 
   // ---- Auto-watch: wait for a NEW response to finish streaming, then post it ----
-  // Used by the deep-dive agent so it can read replies without a manual click.
-  let watchObserver = null;
-  let watchTimer = null;
+  // Poll-based (NOT mutation-debounce): the AI sites mutate the DOM constantly
+  // even when idle, which made a "wait for DOM silence" approach hang forever.
+  // Instead we poll on a fixed cadence and settle when the answer TEXT is stable.
+  let watchInterval = null;
   let watchRequestId = null;
   let watchSafetyTimer = null;
 
   function stopAnswerWatch() {
-    if (watchObserver) { watchObserver.disconnect(); watchObserver = null; }
-    if (watchTimer) { clearTimeout(watchTimer); watchTimer = null; }
+    if (watchInterval) { clearInterval(watchInterval); watchInterval = null; }
     if (watchSafetyTimer) { clearTimeout(watchSafetyTimer); watchSafetyTimer = null; }
     watchRequestId = null;
   }
@@ -145,55 +145,73 @@
     }
     watchRequestId = requestId;
 
-    const startCount = document.querySelectorAll(RESPONSE_SELECTORS[platform].message).length;
+    const sel = RESPONSE_SELECTORS[platform];
+    const baselineCount = document.querySelectorAll(sel.message).length;
+    const preArm = extractLastAnswer();
+    const preArmText = preArm.ok ? preArm.text : '';
+
+    const TICK = 600;
+    const STABLE_TICKS = 3;      // ~1.8s of unchanged text after generation stops
+    const STALL_MS = 22000;      // no generation + no new answer → the submit likely failed
+    const HARD_TIMEOUT_MS = 90000;
+
     let sawGenerating = false;
-    const SETTLE_MS = 1500;
+    let lastText = '';
+    let stableTicks = 0;
+    let elapsed = 0;
 
-    const evaluate = () => {
-      if (watchRequestId !== requestId) return;
-      if (document.querySelector(STOP_SELECTORS)) sawGenerating = true;
-
-      clearTimeout(watchTimer);
-      watchTimer = setTimeout(() => {
-        if (watchRequestId !== requestId) return;
-        if (document.querySelector(STOP_SELECTORS)) return; // still streaming; wait for more mutations
-
-        const currentCount = document.querySelectorAll(RESPONSE_SELECTORS[platform].message).length;
-        // Only settle once a genuinely new/finished response is present
-        if (!sawGenerating && currentCount <= startCount) return;
-
-        const result = extractLastAnswer();
-        if (result.ok && result.text) {
-          const rid = requestId;
-          stopAnswerWatch();
-          try {
-            window.parent.postMessage({
-              action: 'ANSWER_SETTLED',
-              text: result.text,
-              platform: result.platform,
-              url: window.location.href,
-              requestId: rid
-            }, '*');
-            console.log('[Yavar Bridge] ANSWER_SETTLED sent to parent');
-          } catch (e) {
-            console.warn('[Yavar Bridge] Failed to post settled answer:', e);
-          }
-        }
-      }, SETTLE_MS);
+    const settle = (text) => {
+      const rid = requestId;
+      stopAnswerWatch();
+      try {
+        window.parent.postMessage({
+          action: 'ANSWER_SETTLED', text, platform, url: window.location.href, requestId: rid
+        }, '*');
+        console.log('[Yavar Bridge] ANSWER_SETTLED sent to parent');
+      } catch (e) {
+        console.warn('[Yavar Bridge] Failed to post settled answer:', e);
+      }
     };
 
-    watchObserver = new MutationObserver(evaluate);
-    watchObserver.observe(document.body, { childList: true, subtree: true, characterData: true });
+    const emit = (action) => {
+      const rid = requestId;
+      stopAnswerWatch();
+      try { window.parent.postMessage({ action, requestId: rid }, '*'); } catch (e) {}
+    };
 
-    // Give up after 120s so a stuck reply doesn't hang the agent forever
-    watchSafetyTimer = setTimeout(() => {
-      if (watchRequestId === requestId) {
-        stopAnswerWatch();
-        try { window.parent.postMessage({ action: 'ANSWER_WATCH_TIMEOUT', requestId }, '*'); } catch (e) {}
+    watchInterval = setInterval(() => {
+      if (watchRequestId !== requestId) return;
+      elapsed += TICK;
+
+      // Still generating → keep waiting, reset stability
+      if (document.querySelector(STOP_SELECTORS)) {
+        sawGenerating = true;
+        stableTicks = 0;
+        return;
       }
-    }, 120000);
 
-    evaluate(); // in case it already settled
+      const cur = extractLastAnswer();
+      const curCount = document.querySelectorAll(sel.message).length;
+      const isNewAnswer = curCount > baselineCount || (cur.ok && cur.text && cur.text !== preArmText);
+
+      if (cur.ok && cur.text && isNewAnswer) {
+        if (cur.text === lastText) {
+          if (++stableTicks >= STABLE_TICKS) settle(cur.text);
+        } else {
+          lastText = cur.text;
+          stableTicks = 0;
+        }
+      } else if (!sawGenerating && elapsed >= STALL_MS) {
+        // Never saw generation and no new answer appeared — the message probably
+        // never sent. Tell the agent so it can retry rather than hang.
+        console.warn('[Yavar Bridge] Watch stalled — no reply detected');
+        emit('ANSWER_WATCH_STALLED');
+      }
+    }, TICK);
+
+    watchSafetyTimer = setTimeout(() => {
+      if (watchRequestId === requestId) emit('ANSWER_WATCH_TIMEOUT');
+    }, HARD_TIMEOUT_MS);
   }
 
   function waitForElement(selector, timeout = 10000) {
@@ -268,32 +286,41 @@
       inputEl.focus();
       insertTextIntoInput(inputEl, prompt);
 
-      console.log('[Yavar Bridge] Text inserted, waiting before submit...');
+      console.log('[Yavar Bridge] Text inserted, submitting (with retries)...');
 
-      // Wait for the send button to become active
-      setTimeout(async () => {
-        try {
-          const submitBtn = document.querySelector(selectors.button);
-          console.log('[Yavar Bridge] submitBtn found:', !!submitBtn, 'disabled:', submitBtn?.disabled);
+      // Retry the submit until the input actually clears (message sent).
+      // A single click often fails on ChatGPT when the send button isn't ready yet.
+      const MAX_ATTEMPTS = 6;
+      const currentInputText = () => {
+        const el = document.querySelector(selectors.input);
+        if (!el) return '';
+        return (el.value !== undefined ? el.value : el.innerText || '').trim();
+      };
 
-          if (submitBtn && !submitBtn.disabled) {
-            submitBtn.click();
-            console.log('[Yavar Bridge] Submit button clicked!');
-          } else {
-            // Try Enter key as fallback
-            console.log('[Yavar Bridge] Trying Enter key fallback...');
-            inputEl.dispatchEvent(new KeyboardEvent('keydown', {
-              key: 'Enter',
-              code: 'Enter',
-              keyCode: 13,
-              which: 13,
-              bubbles: true
-            }));
-          }
-        } catch (err) {
-          console.error('[Yavar Bridge] Submit failed:', err);
+      const trySubmit = (attempt) => {
+        if (attempt > 0 && currentInputText() === '') {
+          console.log('[Yavar Bridge] Submit confirmed (input cleared)');
+          return;
         }
-      }, 800);
+        if (attempt >= MAX_ATTEMPTS) {
+          console.warn('[Yavar Bridge] Submit attempts exhausted — message may not have sent');
+          return;
+        }
+
+        const submitBtn = document.querySelector(selectors.button);
+        if (submitBtn && !submitBtn.disabled) {
+          submitBtn.click();
+        } else {
+          const el = document.querySelector(selectors.input);
+          el?.focus();
+          el?.dispatchEvent(new KeyboardEvent('keydown', {
+            key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true
+          }));
+        }
+        setTimeout(() => trySubmit(attempt + 1), 700);
+      };
+
+      setTimeout(() => trySubmit(0), 500);
 
     } catch (err) {
       console.error('[Yavar Bridge] autoSubmit failed:', err);

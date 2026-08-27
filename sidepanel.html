@@ -41,6 +41,35 @@
       <button id="btn-stop-agent" class="agent-stop-btn">Stop</button>
     </div>
 
+    <!-- "Working" cover over the chat (agents running) -->
+    <div id="work-cover" class="work-cover hidden">
+      <div class="work-cover-inner">
+        <div class="work-orb"></div>
+        <div id="work-cover-title" class="work-cover-title">Yavar is working…</div>
+        <div id="work-cover-status" class="work-cover-status">Starting…</div>
+        <div id="work-cover-log" class="work-cover-log"></div>
+        <div class="work-cover-actions">
+          <button id="btn-work-peek" class="btn-secondary">Show live chat ↓</button>
+          <button id="btn-work-stop" class="agent-stop-btn">Stop</button>
+        </div>
+        <p class="work-cover-hint">Yavar is working with the AI in the background. Peek anytime — it keeps running.</p>
+
+        <!-- Shown when work finishes: the diagram, then the curtain lifts -->
+        <div class="work-cover-done">
+          <div id="work-cover-diagram" class="work-cover-diagram"></div>
+          <button id="btn-work-reveal" class="btn-secondary">Reveal chat ↑</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Minimized "working" pill (shown when the cover is peeked away) -->
+    <div id="work-pill" class="work-pill hidden">
+      <span class="work-dot"></span>
+      <span id="work-pill-status" class="work-pill-status">Working…</span>
+      <button id="btn-work-expand" class="work-pill-btn">Status ↑</button>
+      <button id="btn-work-stop-pill" class="work-pill-btn work-pill-stop">Stop</button>
+    </div>
+
     <!-- Main iframe container - Full height -->
     <main class="iframe-container">
       <div id="loading-state" class="loading-state">
@@ -87,6 +116,42 @@
         <input id="history-search" type="text" class="history-search" placeholder="Search saved answers…">
       </div>
       <div id="history-list" class="history-list"></div>
+    </div>
+
+    <!-- Deep-Dive Lens Picker Popover -->
+    <div id="lens-picker" class="lens-picker hidden">
+      <div class="lens-picker-header">Deep-dive lens</div>
+      <div class="lens-list">
+        <div class="lens-item" data-lens="beginner">
+          <span class="lens-emoji">🎓</span>
+          <div class="lens-text"><div class="lens-name">Beginner tour</div><div class="lens-desc">Gentle, concept-first</div></div>
+        </div>
+        <div class="lens-item" data-lens="architecture">
+          <span class="lens-emoji">🏗️</span>
+          <div class="lens-text"><div class="lens-name">Architecture</div><div class="lens-desc">Map the system &amp; flow</div></div>
+        </div>
+        <div class="lens-item" data-lens="run">
+          <span class="lens-emoji">▶️</span>
+          <div class="lens-text"><div class="lens-name">How to run it</div><div class="lens-desc">Setup &amp; entry points</div></div>
+        </div>
+        <div class="lens-item" data-lens="contribute">
+          <span class="lens-emoji">🔧</span>
+          <div class="lens-text"><div class="lens-name">How to contribute</div><div class="lens-desc">Where to make changes</div></div>
+        </div>
+        <div class="lens-item" data-lens="security">
+          <span class="lens-emoji">🔒</span>
+          <div class="lens-text"><div class="lens-name">Security review</div><div class="lens-desc">Auth, input, secrets, deps</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Architecture Diagram Panel (Mermaid) -->
+    <div id="diagram-panel" class="diagram-panel hidden">
+      <div class="diagram-header">
+        <span class="diagram-title">Architecture Diagram</span>
+        <button id="btn-close-diagram" class="history-action-btn" title="Close">✕</button>
+      </div>
+      <div id="diagram-content" class="diagram-content"></div>
     </div>
 
     <!-- Model Switcher Popover -->
@@ -210,6 +275,16 @@
             </label>
           </div>
         </div>
+
+        <div class="settings-section">
+          <h3>GitHub Access (optional)</h3>
+          <p class="settings-description">Add a free GitHub token to lift the rate limit (60 → 5,000 requests/hour), enable full-repo code search, and read private repos. Stored locally on this device only — never synced.</p>
+          <div class="form-group">
+            <input type="password" id="setting-github-token" placeholder="ghp_… (Personal Access Token)" autocomplete="off">
+          </div>
+          <button id="btn-save-github-token" class="btn-primary">Save Token</button>
+          <p class="settings-tip">Create one at github.com → Settings → Developer settings → Personal access tokens. A read-only token (classic <code>public_repo</code>, or fine-grained "Contents: read") is enough.</p>
+        </div>
       </div>
     </div>
 
@@ -247,10 +322,51 @@
     <aside id="right-sidebar" class="right-sidebar">
       <div class="sidebar-panel">
         <div class="sidebar-icons">
-          <!-- Notes -->
-          <button class="sidebar-icon-btn" id="sidebar-btn-notes" title="Notes (Ctrl+N)">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path>
+          <!-- Switch AI Model -->
+          <button class="sidebar-icon-btn" id="sidebar-btn-model-switcher" title="Switch AI Model">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
+              <path d="M2 17l10 5 10-5"></path>
+              <path d="M2 12l10 5 10-5"></path>
+            </svg>
+          </button>
+
+          <!-- New Chat -->
+          <button class="sidebar-icon-btn" id="sidebar-btn-new-chat" title="New Chat">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="12" y1="5" x2="12" y2="19"></line>
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+          </button>
+
+          <div class="sidebar-divider"></div>
+
+          <!-- GitHub Deep-Dive Agent -->
+          <button class="sidebar-icon-btn" id="sidebar-btn-repo-agent" title="GitHub Deep-Dive Agent">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <rect x="3" y="8" width="18" height="12" rx="2"></rect>
+              <circle cx="9" cy="14" r="1.3"></circle>
+              <circle cx="15" cy="14" r="1.3"></circle>
+              <path d="M12 4v4"></path>
+              <circle cx="12" cy="3" r="1.2"></circle>
+            </svg>
+          </button>
+
+          <!-- Web Research Agent -->
+          <button class="sidebar-icon-btn" id="sidebar-btn-research" title="Web Research Agent (SEARCH + READ)">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <circle cx="11" cy="11" r="7"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+          </button>
+
+          <div class="sidebar-divider"></div>
+
+          <!-- Screenshot -->
+          <button class="sidebar-icon-btn" id="sidebar-btn-screenshot" title="Capture Screenshot">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+              <circle cx="12" cy="13" r="4"></circle>
             </svg>
           </button>
 
@@ -264,87 +380,28 @@
           </button>
 
           <!-- Saved Answers / History -->
-          <button class="sidebar-icon-btn" id="sidebar-btn-history" title="Saved Answers">
+          <button class="sidebar-icon-btn" id="sidebar-btn-history" title="Saved Answers &amp; Diagram">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
               <circle cx="12" cy="12" r="10"></circle>
               <polyline points="12 6 12 12 16 14"></polyline>
             </svg>
           </button>
 
-          <!-- Model Switcher -->
-          <button class="sidebar-icon-btn" id="sidebar-btn-model-switcher" title="Switch AI Model">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
-              <path d="M2 17l10 5 10-5"></path>
-              <path d="M2 12l10 5 10-5"></path>
+          <!-- Notes -->
+          <button class="sidebar-icon-btn" id="sidebar-btn-notes" title="Notes (Ctrl+N)">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path>
             </svg>
           </button>
 
-          <!-- Web Research Agent -->
-          <button class="sidebar-icon-btn" id="sidebar-btn-research" title="Web Research Agent (SEARCH + READ)">
+          <div class="sidebar-divider"></div>
+
+          <!-- Diagram (Mermaid) -->
+          <button class="sidebar-icon-btn" id="sidebar-btn-diagram" title="Show Architecture Diagram">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-              <circle cx="11" cy="11" r="7"></circle>
-              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-            </svg>
-          </button>
-
-          <!-- GitHub Deep-Dive Agent -->
-          <button class="sidebar-icon-btn" id="sidebar-btn-repo-agent" title="GitHub Deep-Dive Agent">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-              <rect x="3" y="8" width="18" height="12" rx="2"></rect>
-              <circle cx="9" cy="14" r="1.3"></circle>
-              <circle cx="15" cy="14" r="1.3"></circle>
-              <path d="M12 4v4"></path>
-              <circle cx="12" cy="3" r="1.2"></circle>
-            </svg>
-          </button>
-
-          <!-- Analyze GitHub -->
-          <button class="sidebar-icon-btn" id="sidebar-btn-analyze-repo" title="Analyze GitHub Repo (one-shot)">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
-              <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
-            </svg>
-          </button>
-
-          <!-- Screenshot -->
-          <button class="sidebar-icon-btn" id="sidebar-btn-screenshot" title="Capture Screenshot">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
-              <circle cx="12" cy="13" r="4"></circle>
-            </svg>
-          </button>
-
-          <!-- Copy Page -->
-          <button class="sidebar-icon-btn" id="sidebar-btn-copy-page" title="Copy Page Content">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-              <polyline points="14 2 14 8 20 8"></polyline>
-            </svg>
-          </button>
-
-          <!-- Copy URL -->
-          <button class="sidebar-icon-btn" id="sidebar-btn-copy-link" title="Copy URL">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
-              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
-            </svg>
-          </button>
-
-          <!-- New Chat -->
-          <button class="sidebar-icon-btn" id="sidebar-btn-new-chat" title="New Chat">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <line x1="12" y1="5" x2="12" y2="19"></line>
-              <line x1="5" y1="12" x2="19" y2="12"></line>
-            </svg>
-          </button>
-
-          <!-- Help -->
-          <button class="sidebar-icon-btn" id="sidebar-btn-help" title="Keyboard Shortcuts">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="12" r="10"></circle>
-              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
-              <line x1="12" y1="17" x2="12.01" y2="17"></line>
+              <rect x="3" y="3" width="7" height="5" rx="1"></rect>
+              <rect x="14" y="16" width="7" height="5" rx="1"></rect>
+              <path d="M6.5 8v4a2 2 0 0 0 2 2h6"></path>
             </svg>
           </button>
 
@@ -366,6 +423,7 @@
   <script src="lib/codemirror/javascript.min.js"></script>
   <script src="lib/codemirror/python.min.js"></script>
   <script src="lib/codemirror/htmlmixed.min.js"></script>
+  <script src="lib/mermaid/mermaid.min.js"></script>
   <script src="src/sidepanel.js" type="module"></script>
 </body>
 </html>
