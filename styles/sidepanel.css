@@ -1246,6 +1246,183 @@ html, body {
   background: rgba(255, 59, 48, 0.25);
 }
 
+/* ========== Repo File Browser ========== */
+/* Tiny icon tab low on the left edge (above the chat bar) — only on GitHub repos.
+   Icon-only by default so it never covers the reply text; label reveals on hover. */
+.files-rail {
+  position: fixed;
+  left: 0;
+  bottom: 160px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 7px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--border);
+  border-left: none;
+  border-radius: 0 10px 10px 0;
+  box-shadow: 2px 2px 12px rgba(0, 0, 0, 0.12);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  color: var(--text-secondary);
+  cursor: pointer;
+  z-index: 44;
+  transition: color 0.18s, border-color 0.18s, box-shadow 0.18s;
+}
+
+.files-rail.hidden {
+  display: none;
+}
+
+.files-rail:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 3px 3px 16px rgba(0, 113, 227, 0.18);
+}
+
+.files-rail-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  max-width: 0;
+  overflow: hidden;
+  opacity: 0;
+  white-space: nowrap;
+  transition: max-width 0.2s ease, opacity 0.2s ease;
+}
+
+.files-rail:hover .files-rail-label {
+  max-width: 56px;
+  opacity: 1;
+}
+
+.files-panel {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 66;
+  background: var(--bg-primary);
+  display: flex;
+  flex-direction: column;
+  animation: fadeIn 0.2s ease;
+}
+
+.files-panel.hidden {
+  display: none;
+}
+
+.files-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+}
+
+.files-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.files-header-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.files-search-wrap {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.files-search {
+  width: 100%;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.files-search:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.files-tree {
+  flex: 1;
+  overflow: auto;
+  padding: 8px 10px 16px;
+  font-size: 13px;
+}
+
+.files-empty {
+  color: var(--text-secondary);
+  font-size: 13px;
+  text-align: center;
+  padding: 32px 16px;
+  line-height: 1.6;
+}
+
+.files-repo-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  padding: 4px 6px 10px;
+}
+
+.files-children {
+  padding-left: 14px;
+}
+
+.files-tree > .files-children {
+  padding-left: 0;
+}
+
+.files-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 0.12s;
+}
+
+.files-row:hover {
+  background: rgba(0, 113, 227, 0.1);
+}
+
+.files-caret {
+  width: 12px;
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.files-icon {
+  flex-shrink: 0;
+}
+
+.files-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-primary);
+}
+
+.files-flat .files-name {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
 /* ========== Deep-Dive Lens Picker ========== */
 .lens-picker {
   position: absolute;
