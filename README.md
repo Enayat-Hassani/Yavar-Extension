@@ -1,169 +1,90 @@
-# Yavar - The Sidekick AI Wrapper
+# Yavar - Your AI Sidekick
 
-> **Now with Modular Plugin Architecture!** Easily add support for new websites and use cases.
+A Chrome extension sidekick for ChatGPT, Claude, Gemini, and Bing Chat. Select any text on any page for quick actions, capture areas of the screen, analyze GitHub repositories, and send anything straight to your favourite AI — all with keyboard shortcuts and no build step.
 
 ## What it does
 
-**Keyboard shortcuts:**
-- `Cmd+Space` (Mac) / `Ctrl+Space` (Win) - Toggle sidebar
-- `Cmd+H` / `Ctrl+H` - Copy selected text to clipboard
-- `Cmd+Shift+I` / `Ctrl+Shift+I` - Capture screenshot
-- `Cmd+Shift+L` / `Ctrl+Shift+L` - Generate GitHub learning prompt
+**Floating menu** — select text on any page and a small action menu appears:
 
-**GitHub analysis:**
-- On any GitHub repo, press `Cmd+Shift+L` to generate a structured learning prompt
-- Automatically scans repository structure and README
-- Creates a formatted prompt with file tree and context
+- **Send** — send the selection straight to your default AI platform.
+- **Explain** — send it wrapped in a "Guided Learning" prompt.
 
-**Floating menu:**
-- Select text → quick actions appear (Copy, Explain with AI)
+**Keyboard shortcuts** (rebind at `chrome://extensions/shortcuts`):
 
-## Plugin Architecture 🆕
+| Shortcut (Mac / Win) | Action |
+|---------------------|--------|
+| `Cmd+Space` / `Ctrl+Space` | Toggle sidebar |
+| `Cmd+Shift+I` / `Ctrl+Shift+I` | Capture screenshot (area select) |
+| `Cmd+Shift+L` / `Ctrl+Shift+L` | Analyze current GitHub repository |
+| `Cmd+Shift+O` / `Ctrl+Shift+N` | Toggle notes panel |
 
-Yavar now supports **plugins** - modular extensions that activate on specific websites:
+**GitHub analysis** — on any GitHub repository, press `Cmd+Shift+L` to generate a structured learning prompt. It scans the repository structure and README, then builds a formatted prompt with the file tree and context — no API token required.
 
-### Current Plugins
+**Notes panel** — a built-in CodeMirror-powered scratchpad you can toggle over any page.
 
-| Plugin | Activates On | Purpose |
-|--------|-------------|---------|
-| GitHub Analyzer | `github.com/*` | Repository structure scanning + README extraction |
+**Auto-submit & auto-paste** — send selected text, or paste a screenshot, directly into ChatGPT, Claude, Gemini, or Bing Chat.
 
-### Future Plugins (Examples)
+## AI platforms supported
 
-- **Stack Overflow Helper** - Extract code snippets and error context
-- **MDN Summarizer** - Create concise API references from documentation
-- **YouTube Analyzer** - Extract and summarize video transcripts
-- **Documentation Crawler** - Build context from multiple doc pages
-
-Want to create a plugin? See **[PLUGINS.md](PLUGINS.md)** for the complete guide!
-
-## Installation
-
-1. Go to `chrome://extensions/`
-2. Enable "Developer mode" (toggle in top-right)
-3. Click "Load unpacked"
-4. Select the `Yavar-Extension` folder
-
-## Project Structure
-
-```
-Yavar-Extension/
-├── src/
-│   ├── plugins/                    # 🆕 Modular plugin system
-│   │   ├── base-plugin.js          # Abstract base class
-│   │   ├── plugin-manager.js       # Plugin registry & lifecycle
-│   │   └── github-analyzer-plugin.js
-│   ├── content.js                  # Main content script + plugin loader
-│   ├── background.js               # Service worker
-│   ├── sidepanel.js                # Sidebar UI
-│   └── ai-bridge.js                # Auto-submit to AI chatbots
-├── styles/
-├── manifest.json
-├── QWEN.md                         # Technical documentation
-└── PLUGINS.md                      # Plugin development guide 🆕
-```
-
-## How It Works
-
-### Core Features
-
-- **Text copy:** Uses `navigator.clipboard.writeText()` - copies selected text
-- **Screenshot:** Uses `chrome.tabs.captureVisibleTab()` - captures visible webpage
-- **GitHub analysis:** Uses Git Trees API + DOM scraping for repo structure
-- **Auto-submit:** Stores prompts in session storage, injects into AI chatbots
-
-### Plugin System
-
-Plugins are self-contained modules that:
-
-1. **Extend `BasePlugin`** - Provides common interface and utilities
-2. **Define match patterns** - URLs where plugin activates
-3. **Implement actions** - Handle messages from background/sidepanel
-4. **Auto-initialize** - Load when user visits matching domain
-
-Example plugin structure:
-
-```javascript
-import { BasePlugin } from './base-plugin.js';
-
-export class MyPlugin extends BasePlugin {
-  constructor() {
-    super({
-      name: 'My Plugin',
-      matchPatterns: ['*://example.com/*'],
-      icon: '🚀'
-    });
-  }
-
-  async onInit() {
-    // Called when plugin activates
-  }
-
-  handleMessage(action, payload) {
-    // Handle messages from sidepanel
-  }
-}
-```
-
-See **[PLUGINS.md](PLUGINS.md)** for the complete plugin development guide.
-
-## AI Platforms Supported
-
-| Platform | URL | Auto-Support |
+| Platform | URL | Auto-support |
 |----------|-----|--------------|
 | ChatGPT | `https://chatgpt.com` | ✅ |
 | Claude | `https://claude.ai` | ✅ |
 | Gemini | `https://gemini.google.com` | ✅ |
 | Bing Chat | `https://www.bing.com/chat` | ✅ |
 
-## Development
-
-### No Build Step
-
-This is a vanilla JavaScript extension with no bundling. Changes are reflected immediately after reloading:
+## Installation
 
 1. Go to `chrome://extensions/`
-2. Click the refresh icon on Yavar
+2. Enable **Developer mode** (toggle in the top-right)
+3. Click **Load unpacked**
+4. Select the `Yavar-Extension` folder
 
-### Debugging
+No build step needed — reload the extension to pick up changes.
+
+## Project structure
+
+```
+Yavar-Extension/
+├── src/
+│   ├── content.js        # Content script: floating menu + text selection
+│   ├── background.js     # Service worker (lifecycle, screenshot, routing)
+│   ├── sidepanel.js      # Sidebar UI
+│   ├── ai-bridge.js      # Auto-submit / auto-paste on AI platforms
+│   ├── options.js        # Settings page
+│   └── utils/
+│       ├── commands.js   # Keyboard shortcut handlers
+│       ├── messageHandler.js
+│       └── contextMenu.js
+├── styles/
+├── rules/
+│   └── csp-bypass.json   # Declarative Net Request rules (see below)
+├── sidepanel.html
+├── options.html
+└── manifest.json
+```
+
+## Permissions & privacy
+
+Yavar asks for broad permissions to do its job. Here's what they are and why:
+
+- **`<all_urls>`** — the floating text-selection menu needs to run on every page. This is the widest possible ask; you can review exactly what the content script does in `src/content.js`.
+- **Declarative Net Request (CSP bypass)** — to inject and auto-submit prompts on ChatGPT, Claude, Gemini, and Bing, the extension strips `Content-Security-Policy` and `X-Frame-Options` response headers **only on those four chat sites** (see `rules/csp-bypass.json`). It does not touch any other site. This is required to iframe the AI frontends; know that it weakens those sites' own headers while Yavar is installed.
+
+## Configuration
+
+Most behaviour is controlled from the options page (`options.html`) and the shortcut list at `chrome://extensions/shortcuts`.
+
+> **Note on default shortcuts:** `Cmd+Space` is Spotlight and `Cmd+Shift+I` is DevTools on macOS. If these don't fire, rebind them at `chrome://extensions/shortcuts`.
+
+## Development
+
+This is a vanilla JavaScript (MV3) extension with no bundler. Edit source files, then reload from `chrome://extensions/`.
 
 - **Content scripts:** Browser DevTools → Console
 - **Background worker:** `chrome://extensions/` → "Inspect views: background page"
-- **Sidebar:** Right-click sidebar → Inspect
-
-### Testing Plugins
-
-1. Navigate to a matching URL (e.g., `github.com`)
-2. Check console for `[Plugin:GitHub Analyzer] Initialized`
-3. Press `Cmd+Shift+L` to test GitHub analysis
-4. Verify output in sidebar
-
-## Key Changes (v2.0)
-
-### 🆕 Plugin Architecture
-
-- Modular design - plugins activate only on specific domains
-- Easy to add new website support without modifying core code
-- Base plugin class provides common interface
-- Plugin manager handles lifecycle and message routing
-
-### 🆕 GitHub Analyzer Plugin
-
-- Refactored from standalone script to plugin module
-- Uses Git Trees API (no token required)
-- Automatic branch detection (`main` → `master` fallback)
-- Formatted file tree output with folder structure
-
-### 🗑️ Removed
-
-- GitHub token requirement (no longer needed)
-- `github-api.js` file (replaced by plugin)
-- Token settings UI (simplified settings)
+- **Sidebar:** right-click the sidebar → Inspect
 
 ## License
 
-MIT
-
-## Contributing
-
-Want to add a new plugin? See **[PLUGINS.md](PLUGINS.md)** for the development guide!
+MIT — see [LICENSE](LICENSE).
