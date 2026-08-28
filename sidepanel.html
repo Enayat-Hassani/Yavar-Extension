@@ -121,8 +121,20 @@
     <!-- Left dock: repo file tools, tucked into the edge; slides out on hover.
          Only shown on GitHub repo pages. -->
     <div id="files-rail-group" class="files-rail-group hidden">
+      <!-- Add the current page's text to the chat as context (any page) -->
+      <button id="dock-add-page" class="dock-tab hidden" title="Add this page's text to the chat as context">
+        <span class="dock-ico" aria-hidden="true">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"></path>
+            <path d="M14 3v5h5"></path>
+            <path d="M12 12v5M9.5 14.5h5"></path>
+          </svg>
+        </span>
+        <span class="files-tab-label">Add page</span>
+      </button>
+
       <!-- One-click "add the file open in the GitHub tab" (only when viewing a file) -->
-      <button id="files-quick-add" class="files-quick-add hidden" title="Add the file open in your GitHub tab">
+      <button id="files-quick-add" class="files-quick-add dock-tab hidden" title="Add the file open in your GitHub tab">
         <span class="files-stack" aria-hidden="true">
           <span class="sheet sheet-1"></span>
           <span class="sheet sheet-2"></span>
@@ -137,7 +149,7 @@
       </button>
 
       <!-- Browse the repo file tree -->
-      <button id="files-rail" class="files-rail" title="Browse repo files">
+      <button id="files-rail" class="files-rail dock-tab hidden" title="Browse repo files">
         <span class="files-stack" aria-hidden="true">
           <span class="sheet sheet-1"></span>
           <span class="sheet sheet-2"></span>
