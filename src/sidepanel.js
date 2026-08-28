@@ -1507,14 +1507,46 @@ Begin: state a one-line plan, then issue your first tool call.`;
     }
   }
 
-  // Read the active tab's readable page text (via the content script).
+  // Read the active tab's readable page text. Injects a reader on demand so it
+  // works even when the content script isn't loaded in that tab yet (e.g. the
+  // tab was open before the extension was reloaded); falls back to messaging.
   async getActivePageText(maxChars = 40000) {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id) throw new Error('No active tab');
-    const res = await chrome.tabs.sendMessage(tab.id, { action: 'get_page_text', maxChars })
-      .catch(() => null);
-    if (!res || !res.text) throw new Error('Could not read this page (try reloading it)');
-    return { text: res.text, title: res.title || tab.title || 'page', url: res.url || tab.url || '' };
+
+    // Primary: inject the extractor directly (no content script required)
+    try {
+      const [res] = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: (max) => {
+          try {
+            const root = document.querySelector('article') || document.querySelector('main') || document.body;
+            if (!root) return { text: '', title: document.title, url: location.href };
+            const clone = root.cloneNode(true);
+            clone.querySelectorAll('script,style,noscript,svg,iframe,nav,footer,header,form,button,aside').forEach(el => el.remove());
+            let text = (clone.innerText || clone.textContent || '')
+              .replace(/[ \t]+/g, ' ')
+              .replace(/\n[ \t]+/g, '\n')
+              .replace(/\n{3,}/g, '\n\n')
+              .trim();
+            if (document.title) text = '# ' + document.title + '\n\n' + text;
+            if (text.length > max) text = text.slice(0, max) + '\n… [truncated]';
+            return { text, title: document.title, url: location.href };
+          } catch (e) {
+            return { text: '', title: document.title, url: location.href };
+          }
+        },
+        args: [maxChars]
+      });
+      const r = res?.result;
+      if (r && r.text) return { text: r.text, title: r.title || tab.title || 'page', url: r.url || tab.url || '' };
+    } catch (e) { /* fall through to messaging */ }
+
+    // Fallback: ask the content script (if present)
+    const res = await chrome.tabs.sendMessage(tab.id, { action: 'get_page_text', maxChars }).catch(() => null);
+    if (res && res.text) return { text: res.text, title: res.title || tab.title || 'page', url: res.url || tab.url || '' };
+
+    throw new Error('Could not read this page (try reloading the tab)');
   }
 
   // Feature: add the current page's text to the chat as context.
