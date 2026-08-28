@@ -6,16 +6,25 @@ A Chrome extension that embeds ChatGPT, Claude, and Gemini in a sidebar — so y
 
 **AI sidebar** — opens `gemini.google.com`, `chatgpt.com`, or `claude.ai` in a full-viewport sidebar, with a model switcher (and support for adding your own custom models). Send selected text, screenshots, or whole-page content straight to the model.
 
-**Floating menu** — select text on any page and a small action menu appears:
+**Floating menu** — select text on any page and a compact icon menu appears, driven by **customizable prompt templates**. Built-ins include:
 
 - **Send** — send the selection straight to your default AI platform.
 - **Explain** — send it wrapped in a "Guided Learning" prompt.
+- **Summarize** — send it wrapped in a concise-summary prompt.
+
+Add, edit, or remove your own templates in Settings using `{{selection}}`, `{{page}}`, `{{clipboard}}`, `{{url}}`, and `{{title}}` placeholders, and choose which appear in the menu.
 
 **GitHub analysis** — on any GitHub repository, generate a structured learning prompt with the file tree and README context. Unauthenticated by default; optionally add a GitHub token in Settings to lift the 60 req/hr rate limit.
 
 **GitHub deep-dive agent** — pick a repository to scan, then ask questions about it. The agent reads the codebase and answers with file references, with a live working-status bar.
 
 **Web research agent** — research any topic: the agent performs **SEARCH + READ** across the web and synthesizes an answer in the sidebar. Toggle **Deep research mode** in Settings for deeper coverage.
+
+**Context dock** — a subtle dock on the left edge of the sidebar, shown on any page:
+
+- **Add page** — drop the current tab's readable text into the chat as context (inline, or attached as a file when long).
+- **Research this page** — seed the web research agent with the current page, then let it branch out via SEARCH/READ to confirm and deepen it.
+- On GitHub, one click **adds the file you're viewing**, or opens the repo **file browser**.
 
 **Repo file browser** — browse any GitHub repository's file tree right in the sidebar, search/filter it, and jump to (or quick-add) the active file.
 
@@ -74,6 +83,7 @@ Yavar-Extension/
 │   ├── options.js        # Settings page
 │   └── utils/
 │       ├── commands.js   # Keyboard shortcut handlers
+│       ├── templates.js  # Prompt templates (defaults + {{variable}} expansion)
 │       ├── messageHandler.js
 │       └── contextMenu.js
 ├── lib/
