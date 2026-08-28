@@ -8,82 +8,99 @@
 
 .yavar-menu-content {
   display: flex;
-  gap: 4px;
-  padding: 6px;
-  background: rgba(255, 255, 255, 0.98);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(0, 0, 0, 0.12);
-  border-radius: 10px;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.15);
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 11px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.08);
   pointer-events: auto !important;
-  animation: yavar-menu-fade-in 0.15s ease-out;
+  animation: yavar-menu-fade-in 0.14s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 @keyframes yavar-menu-fade-in {
   from {
     opacity: 0;
-    transform: translateY(4px);
+    transform: translateY(5px) scale(0.96);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: translateY(0) scale(1);
   }
 }
 
 .yavar-menu-btn {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
   background: transparent;
-  border: 1px solid transparent;
+  border: none;
   border-radius: 8px;
   color: #1d1d1f;
-  font-size: 13px;
-  font-weight: 500;
   cursor: pointer;
-  transition: all 0.12s ease;
+  transition: background 0.12s ease, color 0.12s ease, transform 0.08s ease;
   pointer-events: auto !important;
   position: relative;
 }
 
 .yavar-menu-btn:hover {
-  background: rgba(0, 113, 227, 0.12);
-  border-color: rgba(0, 113, 227, 0.4);
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(0, 113, 227, 0.15);
+  background: rgba(0, 113, 227, 0.1);
+  color: #0071e3;
 }
 
 .yavar-menu-btn:active {
-  transform: translateY(0);
-  background: rgba(0, 113, 227, 0.18);
-  box-shadow: 0 1px 4px rgba(0, 113, 227, 0.2);
+  transform: scale(0.92);
+  background: rgba(0, 113, 227, 0.16);
 }
 
 .yavar-menu-btn.primary {
-  background: rgba(0, 113, 227, 0.15);
-  border-color: rgba(0, 113, 227, 0.3);
+  color: #0071e3;
 }
 
 .yavar-menu-btn.primary:hover {
   background: #0071e3;
-  border-color: #0071e3;
-  color: white;
-  box-shadow: 0 4px 12px rgba(0, 113, 227, 0.3);
+  color: #fff;
 }
 
 .yavar-menu-btn.primary:active {
   background: #0063c7;
-  box-shadow: 0 2px 8px rgba(0, 113, 227, 0.4);
 }
 
 .yavar-menu-btn svg {
-  width: 16px;
-  height: 16px;
+  width: 17px;
+  height: 17px;
   flex-shrink: 0;
+  display: block;
 }
 
-.yavar-menu-btn span {
+.yavar-menu-btn .yavar-glyph {
+  font-size: 15px;
+  line-height: 1;
+  font-weight: 600;
+}
+
+.yavar-menu-msg {
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #d70015;
   white-space: nowrap;
+}
+
+@media (prefers-color-scheme: dark) {
+  .yavar-menu-content {
+    background: rgba(40, 40, 44, 0.96);
+    border-color: rgba(255, 255, 255, 0.1);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  }
+  .yavar-menu-btn { color: #f5f5f7; }
+  .yavar-menu-btn:hover { background: rgba(10, 132, 255, 0.22); color: #6bb4ff; }
+  .yavar-menu-btn.primary { color: #6bb4ff; }
+  .yavar-menu-btn.primary:hover { background: #0a84ff; color: #fff; }
 }
