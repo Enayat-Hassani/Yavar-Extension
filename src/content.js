@@ -1,6 +1,8 @@
 // Content Script - Text Selection & Keyboard Shortcuts
 // Runs on all pages to handle text selection and capture
 
+import { loadTemplates, expandTemplate, varsInTemplate } from './utils/templates.js';
+
 class YavarContentHandler {
   constructor() {
     this.floatingMenu = null;
@@ -9,14 +11,23 @@ class YavarContentHandler {
     this.isInteracting = false;
     this.enabled = true;
     this.enableFloatingMenu = true;
+    this.templates = [];
     this.init();
   }
 
   async init() {
     await this.loadSettings();
+    this.templates = await loadTemplates();
     if (this.enabled) {
       // Don't create menu here — lazy-init on first text selection
       this.addEventListeners();
+      // Rebuild the menu if the user edits their templates in options
+      chrome.storage.onChanged.addListener((changes, area) => {
+        if (area === 'sync' && changes.promptTemplates) {
+          this.templates = changes.promptTemplates.newValue || this.templates;
+          this.rebuildFloatingMenu();
+        }
+      });
     }
   }
 
@@ -32,6 +43,17 @@ class YavarContentHandler {
       this.enabled = true;
       this.enableFloatingMenu = true;
     }
+  }
+
+  // Tear down and recreate the menu (e.g. after templates change). It will
+  // lazy-rebuild on the next selection.
+  rebuildFloatingMenu() {
+    if (this.floatingMenu) {
+      this.floatingMenu.remove();
+      this.floatingMenu = null;
+    }
+    const existing = document.getElementById('yavar-floating-menu');
+    if (existing) existing.remove();
   }
 
   ensureFloatingMenu() {
@@ -62,59 +84,40 @@ class YavarContentHandler {
       pointer-events: auto;
     `;
 
-    // Send button
-    const sendBtn = document.createElement('button');
-    sendBtn.className = 'yavar-menu-btn';
-    sendBtn.dataset.action = 'send';
-    sendBtn.title = 'Send to AI';
-    sendBtn.style.cssText = `
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 6px;
-      background: transparent;
-      border: 1px solid transparent;
-      border-radius: 6px;
-      color: #1d1d1f;
-      cursor: pointer;
-      transition: all 0.12s ease;
-      pointer-events: auto;
-    `;
-    sendBtn.innerHTML = `
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="pointer-events: none;">
-        <path d="M22 2L11 13"></path>
-        <path d="M22 2L15 22L11 13L2 9L22 2Z"></path>
-      </svg>
-    `;
+    // One button per menu-flagged template
+    const menuTemplates = (this.templates || []).filter(t => t.menu);
+    if (!menuTemplates.length) menuTemplates.push({ id: 'send', name: 'Send', icon: '➤', body: '{{selection}}' });
 
-    // Explain button
-    const explainBtn = document.createElement('button');
-    explainBtn.className = 'yavar-menu-btn primary';
-    explainBtn.dataset.action = 'explain';
-    explainBtn.title = 'Explain with Guided Learning';
-    explainBtn.style.cssText = `
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 6px;
-      background: rgba(0, 113, 227, 0.15);
-      border: 1px solid rgba(0, 113, 227, 0.3);
-      border-radius: 6px;
-      color: #1d1d1f;
-      cursor: pointer;
-      transition: all 0.12s ease;
-      pointer-events: auto;
-    `;
-    explainBtn.innerHTML = `
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="pointer-events: none;">
-        <circle cx="12" r="10"></circle>
-        <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
-        <line x1="12" y1="17" x2="12.01" y2="17"></line>
-      </svg>
-    `;
+    for (const tpl of menuTemplates) {
+      const btn = document.createElement('button');
+      const isPrimary = !!tpl.primary;
+      btn.className = 'yavar-menu-btn' + (isPrimary ? ' primary' : '');
+      btn.dataset.templateId = tpl.id;
+      btn.title = tpl.name;
+      btn.style.cssText = `
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 5px;
+        min-width: 30px;
+        padding: 6px 9px;
+        font-size: 13px;
+        font-weight: 600;
+        background: ${isPrimary ? 'rgba(0, 113, 227, 0.15)' : 'transparent'};
+        border: 1px solid ${isPrimary ? 'rgba(0, 113, 227, 0.3)' : 'transparent'};
+        border-radius: 6px;
+        color: #1d1d1f;
+        cursor: pointer;
+        transition: all 0.12s ease;
+        pointer-events: auto;
+        white-space: nowrap;
+      `;
+      btn.innerHTML =
+        `<span style="font-size:14px;pointer-events:none;line-height:1;">${this.escapeHtml(tpl.icon || '•')}</span>` +
+        `<span style="pointer-events:none;">${this.escapeHtml(tpl.name)}</span>`;
+      menuContentDiv.appendChild(btn);
+    }
 
-    menuContentDiv.appendChild(sendBtn);
-    menuContentDiv.appendChild(explainBtn);
     menu.appendChild(menuContentDiv);
 
     document.body.appendChild(menu);
@@ -133,11 +136,11 @@ class YavarContentHandler {
     });
 
     menuContent.addEventListener('pointerdown', (e) => {
-      const button = e.target.closest('[data-action]');
+      const button = e.target.closest('[data-template-id]');
       if (!button) return;
       e.preventDefault();
       e.stopPropagation();
-      this.handleAction(button.dataset.action);
+      this.runTemplate(button.dataset.templateId);
     });
 
     // Hover effects
@@ -163,6 +166,12 @@ class YavarContentHandler {
         btn.style.boxShadow = 'none';
       });
     });
+  }
+
+  escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text == null ? '' : String(text);
+    return div.innerHTML;
   }
 
   addEventListeners() {
@@ -214,8 +223,11 @@ class YavarContentHandler {
       const range = selection.getRangeAt(0);
       const rect = range.getBoundingClientRect();
 
-      const menuHeight = 40;
-      const menuWidth = 80;
+      // Show first (off-screen) so we can measure the real, variable width
+      this.floatingMenu.style.visibility = 'hidden';
+      this.floatingMenu.style.display = 'block';
+      const menuWidth = this.floatingMenu.offsetWidth || 120;
+      const menuHeight = this.floatingMenu.offsetHeight || 40;
 
       let top = rect.top - menuHeight - 10;
       let left = rect.left + (rect.width / 2) - (menuWidth / 2);
@@ -226,7 +238,7 @@ class YavarContentHandler {
 
       this.floatingMenu.style.top = `${Math.round(top)}px`;
       this.floatingMenu.style.left = `${Math.round(left)}px`;
-      this.floatingMenu.style.display = 'block';
+      this.floatingMenu.style.visibility = 'visible';
     } catch (error) {
       console.error('[Yavar] Error positioning menu:', error);
     }
@@ -243,58 +255,61 @@ class YavarContentHandler {
     }, 200);
   }
 
-  async handleAction(action) {
+  async runTemplate(templateId) {
     if (!this.currentText) return;
+    const tpl = (this.templates || []).find(t => t.id === templateId);
+    if (!tpl) return;
 
-    if (action === 'send') {
-      try {
-        const prompt = this.currentText;
-
-        if (!chrome.runtime?.id) {
-          this.showButtonFeedback('send', '✗ Reload page');
-          return;
-        }
-
-        this.showButtonFeedback('send', '✓ ...');
-
-        chrome.runtime.sendMessage({
-          action: 'trigger_auto_submit',
-          prompt: prompt
-        });
-
-        this.hideFloatingMenu();
-      } catch (err) {
-        console.error('[Yavar Content] Send failed:', err);
-        this.showButtonFeedback('send', err.message?.includes('Extension context invalidated') ? '✗ Reload page' : '✗ Failed');
+    try {
+      if (!chrome.runtime?.id) {
+        this.showButtonFeedback(templateId, '✗ Reload page');
+        return;
       }
-    } else if (action === 'explain') {
-      try {
-        const prompt = `Explain this to me using "Guided Learning" Mode:\n\n${this.currentText}`;
 
-        if (!chrome.runtime?.id) {
-          this.showButtonFeedback('explain', '✗ Reload page');
-          return;
-        }
+      // Only gather the context the template actually references
+      const vars = varsInTemplate(tpl.body);
+      const ctx = { selection: this.currentText };
+      if (vars.includes('page')) ctx.page = this.getReadablePageText();
+      if (vars.includes('url')) ctx.url = window.location.href;
+      if (vars.includes('title')) ctx.title = document.title;
 
-        this.showButtonFeedback('explain', '✓ ...');
+      const prompt = await expandTemplate(tpl.body, ctx);
+      this.showButtonFeedback(templateId, '✓ ...');
 
-        chrome.runtime.sendMessage({
-          action: 'trigger_auto_submit',
-          prompt: prompt
-        });
-
-        this.hideFloatingMenu();
-      } catch (err) {
-        console.error('[Yavar Content] Explain failed:', err);
-        this.showButtonFeedback('explain', err.message?.includes('Extension context invalidated') ? '✗ Reload page' : '✗ Failed');
-      }
+      chrome.runtime.sendMessage({ action: 'trigger_auto_submit', prompt });
+      this.hideFloatingMenu();
+    } catch (err) {
+      console.error('[Yavar Content] Template failed:', err);
+      this.showButtonFeedback(templateId,
+        err.message?.includes('Extension context invalidated') ? '✗ Reload page' : '✗ Failed');
     }
   }
 
-  showButtonFeedback(action, message) {
+  // Best-effort readable text of the live page (mirror of the sidepanel's htmlToText).
+  getReadablePageText(maxChars = 12000) {
+    try {
+      const root = document.querySelector('article') || document.querySelector('main') || document.body;
+      if (!root) return '';
+      const clone = root.cloneNode(true);
+      clone.querySelectorAll('script,style,noscript,svg,iframe,nav,footer,header,form,button,aside').forEach(el => el.remove());
+      let text = (clone.innerText || clone.textContent || '')
+        .replace(/[ \t]+/g, ' ')
+        .replace(/\n[ \t]+/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+      const title = document.title ? `# ${document.title}\n\n` : '';
+      text = title + text;
+      if (text.length > maxChars) text = text.slice(0, maxChars) + '\n… [truncated]';
+      return text;
+    } catch (e) {
+      return '';
+    }
+  }
+
+  showButtonFeedback(templateId, message) {
     if (!this.floatingMenu) return;
 
-    const btn = this.floatingMenu.querySelector(`[data-action="${action}"]`);
+    const btn = this.floatingMenu.querySelector(`[data-template-id="${templateId}"]`);
     if (!btn) return;
 
     const originalHTML = btn.innerHTML;

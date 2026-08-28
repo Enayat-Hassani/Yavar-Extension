@@ -103,7 +103,7 @@
   "options_page": "options.html",
   "web_accessible_resources": [
     {
-      "resources": ["src/styles/*.css", "icons/*.png"],
+      "resources": ["src/styles/*.css", "icons/*.png", "src/utils/templates.js"],
       "matches": ["<all_urls>"]
     }
   ]

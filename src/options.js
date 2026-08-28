@@ -1,8 +1,11 @@
 // Options Page - Settings Management
 
+import { loadTemplates, saveTemplates, DEFAULT_TEMPLATES } from './utils/templates.js';
+
 class OptionsPage {
   constructor() {
     this.settings = {};
+    this.templates = [];
     this.init();
   }
 
@@ -11,6 +14,8 @@ class OptionsPage {
     this.bindEvents();
     await this.loadSettings();
     this.renderDisabledSites();
+    this.templates = await loadTemplates();
+    this.renderTemplates();
   }
 
   cacheElements() {
@@ -33,6 +38,11 @@ class OptionsPage {
     
     // Shortcuts
     this.configureShortcutsBtn = document.getElementById('configure-shortcuts-btn');
+
+    // Prompt templates
+    this.templatesList = document.getElementById('templates-list');
+    this.addTemplateBtn = document.getElementById('add-template-btn');
+    this.resetTemplatesBtn = document.getElementById('reset-templates-btn');
   }
 
   bindEvents() {
@@ -57,6 +67,16 @@ class OptionsPage {
     // Configure shortcuts - opens Chrome shortcuts page
     this.configureShortcutsBtn.addEventListener('click', () => {
       chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
+    });
+
+    // Prompt templates
+    this.addTemplateBtn?.addEventListener('click', () => this.addTemplate());
+    this.resetTemplatesBtn?.addEventListener('click', () => this.resetTemplates());
+    this.templatesList?.addEventListener('input', (e) => this.handleTemplateEdit(e));
+    this.templatesList?.addEventListener('change', (e) => this.handleTemplateEdit(e));
+    this.templatesList?.addEventListener('click', (e) => {
+      const del = e.target.closest('[data-del]');
+      if (del) this.deleteTemplate(parseInt(del.dataset.del, 10));
     });
   }
 
@@ -238,10 +258,98 @@ class OptionsPage {
     }
   }
 
+  // ===== Prompt Templates =====
+  renderTemplates() {
+    if (!this.templatesList) return;
+
+    if (!this.templates.length) {
+      this.templatesList.innerHTML = '<div class="empty-state">No templates. Add one below.</div>';
+      return;
+    }
+
+    this.templatesList.innerHTML = this.templates.map((t, i) => `
+      <div class="template-card" data-index="${i}">
+        <div class="template-row">
+          <input type="text" class="template-icon-input" data-field="icon" data-index="${i}"
+                 value="${this.escapeHtml(t.icon || '')}" maxlength="2" title="Icon" placeholder="•">
+          <input type="text" class="template-name-input" data-field="name" data-index="${i}"
+                 value="${this.escapeHtml(t.name || '')}" placeholder="Template name">
+          <label class="template-menu-toggle" title="Show as a button in the selection menu">
+            <input type="checkbox" data-field="menu" data-index="${i}" ${t.menu ? 'checked' : ''}>
+            <span>In menu</span>
+          </label>
+          <button class="btn-icon-danger" data-del="${i}" title="Delete template">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+        <textarea class="template-body-input" data-field="body" data-index="${i}" rows="3"
+                  placeholder="Prompt text. Use {{selection}}, {{page}}, {{clipboard}}…">${this.escapeHtml(t.body || '')}</textarea>
+      </div>
+    `).join('');
+  }
+
+  handleTemplateEdit(e) {
+    const el = e.target;
+    const field = el.dataset.field;
+    if (field == null) return;
+    const i = parseInt(el.dataset.index, 10);
+    if (!this.templates[i]) return;
+
+    if (field === 'menu') this.templates[i].menu = el.checked;
+    else this.templates[i][field] = el.value;
+
+    // Keep a stable id so it survives edits
+    if (!this.templates[i].id) this.templates[i].id = 'tpl-' + Date.now() + '-' + i;
+
+    this.persistTemplates();
+  }
+
+  addTemplate() {
+    this.templates.push({
+      id: 'tpl-' + Date.now(),
+      name: 'New template',
+      icon: '•',
+      menu: false,
+      body: '{{selection}}'
+    });
+    this.persistTemplates();
+    this.renderTemplates();
+    // Focus the new card's name field
+    const last = this.templatesList.querySelector('.template-card:last-child .template-name-input');
+    last?.focus();
+    last?.select();
+  }
+
+  deleteTemplate(i) {
+    if (Number.isNaN(i) || !this.templates[i]) return;
+    this.templates.splice(i, 1);
+    this.persistTemplates();
+    this.renderTemplates();
+  }
+
+  resetTemplates() {
+    if (!confirm('Reset all prompt templates to the defaults? Your custom templates will be lost.')) return;
+    this.templates = DEFAULT_TEMPLATES.map(t => ({ ...t }));
+    this.persistTemplates();
+    this.renderTemplates();
+  }
+
+  async persistTemplates() {
+    try {
+      await saveTemplates(this.templates);
+    } catch (error) {
+      console.error('[Yavar] Failed to save templates:', error);
+    }
+  }
+
   escapeHtml(text) {
     const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+    div.textContent = text == null ? '' : String(text);
+    // innerHTML escapes &, <, > but not quotes — escape them too for attribute safety
+    return div.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 }
 

@@ -69,6 +69,27 @@
         </div>
       </section>
 
+      <!-- Prompt Templates -->
+      <section class="settings-section">
+        <h2>Prompt Templates</h2>
+        <p class="help-text">
+          Reusable prompts. Placeholders get filled in when you run them:
+          <code>{{selection}}</code>, <code>{{page}}</code>, <code>{{clipboard}}</code>,
+          <code>{{url}}</code>, <code>{{title}}</code>.
+          Turn on <strong>In menu</strong> to show a template as a button in the floating
+          text-selection menu.
+        </p>
+
+        <div id="templates-list" class="templates-list">
+          <!-- Templates render here -->
+        </div>
+
+        <div class="templates-actions">
+          <button id="add-template-btn" class="btn-primary">+ Add Template</button>
+          <button id="reset-templates-btn" class="btn-secondary">Reset to Defaults</button>
+        </div>
+      </section>
+
       <!-- Data Management -->
       <section class="settings-section">
         <h2>Data Management</h2>
