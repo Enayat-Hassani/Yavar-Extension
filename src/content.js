@@ -327,9 +327,9 @@ class YavarContentHandler {
 
 // Initialize when DOM is ready
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => new YavarContentHandler());
+  document.addEventListener('DOMContentLoaded', () => { window.__yavarHandler = new YavarContentHandler(); });
 } else {
-  new YavarContentHandler();
+  window.__yavarHandler = new YavarContentHandler();
 }
 
 // Listen for messages from background
@@ -337,6 +337,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'get_selection') {
     const selection = window.getSelection().toString();
     sendResponse({ selection });
+    return true;
+  }
+  if (request.action === 'get_page_text') {
+    try {
+      const handler = window.__yavarHandler;
+      const text = handler
+        ? handler.getReadablePageText(request.maxChars || 40000)
+        : (document.body?.innerText || '').slice(0, request.maxChars || 40000);
+      sendResponse({ text, title: document.title, url: window.location.href });
+    } catch (e) {
+      sendResponse({ text: '', title: document.title, url: window.location.href, error: e.message });
+    }
     return true;
   }
 });

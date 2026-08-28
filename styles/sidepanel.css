@@ -1282,8 +1282,7 @@ html, body {
 }
 
 /* Individual tabs, flush inside the group */
-.files-rail,
-.files-quick-add {
+.dock-tab {
   display: flex;
   align-items: center;
   gap: 0;
@@ -1291,34 +1290,38 @@ html, body {
   padding: 8px 10px 8px 9px;
   background: transparent;
   border: none;
+  border-top: 1px solid var(--border);   /* hairline divider between tabs */
   color: var(--text-secondary);
   cursor: pointer;
   transition: gap 0.22s ease, background 0.15s ease, color 0.15s ease;
 }
 
-.files-rail.hidden,
-.files-quick-add.hidden {
+.dock-tab.hidden {
   display: none;
 }
 
-/* Hairline divider only when both tabs are present */
-.files-quick-add:not(.hidden) + .files-rail {
-  border-top: 1px solid var(--border);
+/* JS marks the first visible tab so the top hairline is dropped */
+.dock-tab.dock-first {
+  border-top: none;
 }
 
-.files-rail-group:hover .files-rail,
-.files-rail-group:hover .files-quick-add {
+.files-rail-group:hover .dock-tab {
   gap: 7px;
 }
 
-.files-rail:hover {
+.dock-tab:hover {
   background: rgba(0, 0, 0, 0.03);
   color: var(--text-primary);
 }
 
-.files-quick-add:hover {
-  background: rgba(0, 113, 227, 0.06);
-  color: var(--accent);
+/* Icon slots line up regardless of which icon they hold */
+.dock-ico {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  flex-shrink: 0;
+  opacity: 0.85;
 }
 
 /* Stack of paper edges seen from the side (layered horizontal slivers) */
@@ -1340,9 +1343,6 @@ html, body {
 .files-stack .sheet-1 { width: 13px; opacity: 0.8; }
 .files-stack .sheet-2 { width: 9px;  opacity: 0.5; }
 .files-stack .sheet-3 { width: 11px; opacity: 0.35; }
-
-/* The quick-add tab is tinted with the accent so the two tabs read differently */
-.files-quick-add { color: var(--accent); }
 
 .files-quick-plus {
   display: flex;

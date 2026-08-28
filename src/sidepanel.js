@@ -74,6 +74,8 @@ class YavarSidePanel {
     this.filesRailGroup = document.getElementById('files-rail-group');
     this.filesRail = document.getElementById('files-rail');
     this.filesQuickAdd = document.getElementById('files-quick-add');
+    this.dockAddPage = document.getElementById('dock-add-page');
+    this.dockResearchPage = document.getElementById('dock-research-page');
     this.filesQuickName = this.filesQuickAdd?.querySelector('.files-quick-name');
     this.filesPanel = document.getElementById('files-panel');
     this.filesTree = document.getElementById('files-tree');
@@ -198,6 +200,8 @@ class YavarSidePanel {
     // Repo file browser
     this.filesRail.addEventListener('click', () => this.toggleFilesPanel());
     this.filesQuickAdd?.addEventListener('click', () => this.quickAddActiveFile());
+    this.dockAddPage?.addEventListener('click', () => this.addPageToChat());
+    this.dockResearchPage?.addEventListener('click', () => this.researchThisPage());
     this.btnCloseFiles.addEventListener('click', () => this.filesPanel.classList.add('hidden'));
     this.btnRefreshFiles.addEventListener('click', () => this.refreshFiles());
     this.filesSearch.addEventListener('input', () => this.filterFilesTree());
@@ -1446,20 +1450,35 @@ Begin: state a one-line plan, then issue your first tool call.`;
   }
 
   async updateFilesRailVisibility() {
-    let isRepo = false;
+    let url = '';
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      const m = (tab?.url || '').match(/:\/\/github\.com\/([^/]+)\/([^/?#]+)/);
-      const reserved = new Set(['settings', 'notifications', 'orgs', 'features', 'marketplace',
-        'explore', 'topics', 'sponsors', 'about', 'pricing', 'enterprise', 'login', 'join',
-        'search', 'new', 'codespaces', 'apps', 'collections', 'events', 'trending', 'dashboard']);
-      isRepo = !!(m && !reserved.has(m[1].toLowerCase()));
+      url = tab?.url || '';
     } catch (e) { /* default hidden */ }
 
-    if (this.filesRailGroup) this.filesRailGroup.classList.toggle('hidden', !isRepo);
-    if (!isRepo && this.filesPanel) this.filesPanel.classList.add('hidden');
+    // "Usable" = a real web page that isn't one of the AI chat sites themselves
+    const isHttp = /^https?:\/\//i.test(url);
+    const isAIHost = /(chatgpt\.com|chat\.openai\.com|claude\.ai|gemini\.google\.com|bing\.com)/i.test(url);
+    const usable = isHttp && !isAIHost;
 
-    // Quick-add tab: show it only when the GitHub tab is viewing a specific file
+    const m = url.match(/:\/\/github\.com\/([^/]+)\/([^/?#]+)/);
+    const reserved = new Set(['settings', 'notifications', 'orgs', 'features', 'marketplace',
+      'explore', 'topics', 'sponsors', 'about', 'pricing', 'enterprise', 'login', 'join',
+      'search', 'new', 'codespaces', 'apps', 'collections', 'events', 'trending', 'dashboard']);
+    const isRepo = !!(m && !reserved.has(m[1].toLowerCase()));
+
+    // The whole dock shows on any usable page; individual tabs are contextual.
+    if (this.filesRailGroup) this.filesRailGroup.classList.toggle('hidden', !usable);
+    if (!usable && this.filesPanel) this.filesPanel.classList.add('hidden');
+
+    // Page-level tabs (any usable page)
+    this.dockAddPage?.classList.toggle('hidden', !usable);
+    this.dockResearchPage?.classList.toggle('hidden', !usable);
+
+    // Repo browse tab (GitHub repos only)
+    this.filesRail?.classList.toggle('hidden', !isRepo);
+
+    // Quick-add tab: only when the GitHub tab is viewing a specific file
     if (this.filesQuickAdd) {
       const activeFile = isRepo ? await this.getActiveRepoFilePath() : null;
       this._quickAddPath = activeFile;
@@ -1470,6 +1489,50 @@ Begin: state a one-line plan, then issue your first tool call.`;
       } else {
         this.filesQuickAdd.classList.add('hidden');
       }
+    }
+
+    this.markFirstDockTab();
+  }
+
+  // Drop the top hairline on whichever tab is first visible, so the divider
+  // never sits at the very top of the dock.
+  markFirstDockTab() {
+    if (!this.filesRailGroup) return;
+    const tabs = [...this.filesRailGroup.querySelectorAll('.dock-tab')];
+    let seen = false;
+    for (const tab of tabs) {
+      const visible = !tab.classList.contains('hidden');
+      tab.classList.toggle('dock-first', visible && !seen);
+      if (visible) seen = true;
+    }
+  }
+
+  // Read the active tab's readable page text (via the content script).
+  async getActivePageText(maxChars = 40000) {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id) throw new Error('No active tab');
+    const res = await chrome.tabs.sendMessage(tab.id, { action: 'get_page_text', maxChars })
+      .catch(() => null);
+    if (!res || !res.text) throw new Error('Could not read this page (try reloading it)');
+    return { text: res.text, title: res.title || tab.title || 'page', url: res.url || tab.url || '' };
+  }
+
+  // Feature: add the current page's text to the chat as context.
+  async addPageToChat() {
+    this.showNotification('📄 Reading this page…');
+    try {
+      const { text, title } = await this.getActivePageText(60000);
+      const INLINE_MAX = 4000;
+      if (text.length <= INLINE_MAX) {
+        this.forwardToIframe({ prompt: `Here is the page "${title}":\n\n"""\n${text}\n"""\n`, autoSubmit: false });
+        this.showNotification('📄 Added page to the chat');
+      } else {
+        const fname = (title.replace(/[^\w.-]+/g, '-').slice(0, 40) || 'page') + '.txt';
+        this.forwardAttachToIframe(fname, text);
+        this.showNotification(`📎 Attached page (${Math.round(text.length / 1000)}k chars)`);
+      }
+    } catch (e) {
+      this.showNotification('⚠️ ' + e.message);
     }
   }
 
