@@ -64,6 +64,15 @@
           <input type="number" id="ytx-video-count" min="1" max="50" step="1" placeholder="12">
           <p class="help-text">How many top search results to fetch transcripts for.</p>
         </div>
+
+        <div class="setting-item">
+          <label class="toggle-label">
+            <span>Remove sponsors &amp; clean up transcripts</span>
+            <input type="checkbox" id="ytx-clean" checked>
+            <span class="toggle"></span>
+          </label>
+          <p class="help-text">Uses ytx's <code>doc</code> mode to drop sponsor reads and repair jargon before sending to the AI. Slightly slower (fetches video metadata).</p>
+        </div>
       </section>
 
       <!-- Keyboard Shortcuts -->
