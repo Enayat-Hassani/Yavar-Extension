@@ -28,6 +28,7 @@ class OptionsPage {
     // Video research (ytx)
     this.ytxBaseUrlInput = document.getElementById('ytx-base-url');
     this.ytxVideoCountInput = document.getElementById('ytx-video-count');
+    this.ytxCleanToggle = document.getElementById('ytx-clean');
 
     // Disabled sites
     this.disabledSiteInput = document.getElementById('disabled-site');
@@ -59,6 +60,7 @@ class OptionsPage {
     // Video research (ytx)
     this.ytxBaseUrlInput?.addEventListener('change', () => this.saveSettings());
     this.ytxVideoCountInput?.addEventListener('change', () => this.saveSettings());
+    this.ytxCleanToggle?.addEventListener('change', () => this.saveSettings());
 
     // Add disabled site
     this.addSiteBtn.addEventListener('click', () => this.addDisabledSite());
@@ -106,7 +108,8 @@ class OptionsPage {
       enableFloatingMenu: true,
       disabledSites: [],
       ytxBaseUrl: 'http://localhost:8722',
-      ytxVideoCount: 12
+      ytxVideoCount: 12,
+      ytxClean: true
     };
   }
 
@@ -115,6 +118,7 @@ class OptionsPage {
     this.floatingMenuToggle.checked = this.settings.enableFloatingMenu ?? true;
     if (this.ytxBaseUrlInput) this.ytxBaseUrlInput.value = this.settings.ytxBaseUrl || 'http://localhost:8722';
     if (this.ytxVideoCountInput) this.ytxVideoCountInput.value = this.settings.ytxVideoCount ?? 12;
+    if (this.ytxCleanToggle) this.ytxCleanToggle.checked = this.settings.ytxClean ?? true;
   }
 
   async saveSettings() {
@@ -124,7 +128,8 @@ class OptionsPage {
       defaultAI: this.defaultAiSelect.value,
       enableFloatingMenu: this.floatingMenuToggle.checked,
       ytxBaseUrl: (this.ytxBaseUrlInput?.value || '').trim().replace(/\/+$/, '') || 'http://localhost:8722',
-      ytxVideoCount: Number.isFinite(count) ? Math.min(50, Math.max(1, count)) : 12
+      ytxVideoCount: Number.isFinite(count) ? Math.min(50, Math.max(1, count)) : 12,
+      ytxClean: this.ytxCleanToggle?.checked ?? true
     };
     
     try {

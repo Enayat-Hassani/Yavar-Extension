@@ -1664,10 +1664,10 @@ Begin: state a one-line plan, then issue your first tool call.`;
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
         const vid = this.parseYouTubeId(tab?.url || '');
         if (vid) {
-          const { base } = await this.getYtxSettings();
+          const { base, clean } = await this.getYtxSettings();
           const h = await fetch(`${base}/health`, { signal: AbortSignal.timeout(1200) }).catch(() => null);
           if (h?.ok) {
-            const r = await fetch(`${base}/api/v1/transcripts/${vid}?format=md`);
+            const r = await fetch(`${base}/api/v1/transcripts/${vid}${clean ? '?clean=true' : '?format=md'}`);
             if (r.ok) {
               const t = (await r.text()).trim();
               if (t) { text = t; title = tab?.title?.replace(/ - YouTube$/, '') || 'video'; }
@@ -1702,7 +1702,8 @@ Begin: state a one-line plan, then issue your first tool call.`;
     try { s = (await chrome.storage.sync.get('settings')).settings || {}; } catch (e) {}
     const base = (s.ytxBaseUrl || 'http://localhost:8722').replace(/\/+$/, '');
     const count = Number.isFinite(s.ytxVideoCount) ? s.ytxVideoCount : 12;
-    return { base, count: Math.min(50, Math.max(1, count)) };
+    const clean = s.ytxClean ?? true; // remove sponsors + repair jargon via ytx doc mode
+    return { base, count: Math.min(50, Math.max(1, count)), clean };
   }
 
   // Search YouTube for a topic and return up to `n` video IDs, by scraping the
@@ -1739,15 +1740,16 @@ Begin: state a one-line plan, then issue your first tool call.`;
 
   // Fetch transcripts for a list of video ids from the ytx server, with a small
   // concurrency pool. Returns [{ id, title, text }] for the ones that succeed.
-  async fetchYtxTranscripts(base, videos, onProgress) {
+  async fetchYtxTranscripts(base, videos, onProgress, { clean = true } = {}) {
     const results = [];
     let done = 0;
     const queue = [...videos];
+    const query = clean ? '?clean=true' : '?format=md';
     const worker = async () => {
       while (queue.length) {
         const v = queue.shift();
         try {
-          const r = await fetch(`${base}/api/v1/transcripts/${v.id}?format=md`);
+          const r = await fetch(`${base}/api/v1/transcripts/${v.id}${query}`);
           if (r.ok) {
             const text = (await r.text()).trim();
             if (text) results.push({ ...v, text });
@@ -1774,7 +1776,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
     }
     if (!topic) return;
 
-    const { base, count } = await this.getYtxSettings();
+    const { base, count, clean } = await this.getYtxSettings();
 
     // The plan/lens: prefer the persistent Notes content, else ask for a goal.
     let plan = '';
@@ -1813,7 +1815,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
     this.showNotification(`📥 Fetching ${videos.length} transcripts via ytx…`);
     const got = await this.fetchYtxTranscripts(base, videos, (d, total) => {
       this.showNotification(`📥 Transcripts ${d}/${total}…`);
-    });
+    }, { clean });
     if (!got.length) {
       this.showNotification('⚠️ No transcripts could be fetched (captions may be unavailable)');
       return;
