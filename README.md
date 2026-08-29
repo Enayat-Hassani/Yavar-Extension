@@ -22,8 +22,9 @@ Add, edit, or remove your own templates in Settings using `{{selection}}`, `{{pa
 
 **Context dock** — a subtle dock on the left edge of the sidebar, shown on any page:
 
-- **Add page** — drop the current tab's readable text into the chat as context (inline, or attached as a file when long).
+- **Add page** — drop the current tab's readable text into the chat as context (inline, or attached as a file when long). On a **YouTube watch page** this becomes **Add video**, grabbing the transcript instead of the page chrome.
 - **Research this page** — seed the web research agent with the current page, then let it branch out via SEARCH/READ to confirm and deepen it.
+- **Search videos** (deep search) — search YouTube for a topic (e.g. *"top things to try in Chiang Mai"*), pull the top videos' transcripts, and hand them to the AI to synthesize against your Notes. Requires a running **ytx** server; see [Video search: setting up ytx](#video-search-setting-up-ytx).
 - On GitHub, one click **adds the file you're viewing**, or opens the repo **file browser**.
 
 **Repo file browser** — browse any GitHub repository's file tree right in the sidebar, search/filter it, and jump to (or quick-add) the active file.
@@ -109,6 +110,66 @@ Yavar asks for broad permissions to do its job. Here's what they are and why:
 Most behaviour is controlled from the options page (`options.html`) and the shortcut list at `chrome://extensions/shortcuts`.
 
 > **Note on default shortcuts:** `Cmd+Space` is Spotlight and `Cmd+Shift+I` is DevTools on macOS. If these don't fire, rebind them at `chrome://extensions/shortcuts`.
+
+## Video search: setting up ytx
+
+The **Add video** and **Search videos** features get their transcripts from
+**[ytx](https://github.com/Enayat-Hassani/youtube-transcript-extractor)**, a
+small local server. (A browser extension can't fetch many transcripts reliably
+on its own — YouTube throttles it — so ytx does the heavy lifting: multi-backend
+fetching with caching.) You only need it for the video features; everything else
+works without it.
+
+ytx needs [**uv**](https://docs.astral.sh/uv/) (a Python tool). Install that
+first, then set ytx up.
+
+**macOS / Linux** — from the extension folder:
+
+```bash
+./scripts/setup-ytx.sh
+```
+
+**Windows** (PowerShell):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\setup-ytx.ps1
+```
+
+That clones ytx into `server/ytx` and installs its dependencies. Then run it
+(leave it open in a terminal):
+
+```bash
+cd server/ytx && uv run uvicorn ytx_api.main:app --host 127.0.0.1 --port 8722
+```
+
+Check it's up (should print `{"status":"ok",…}`):
+
+```bash
+curl -s http://127.0.0.1:8722/health
+```
+
+The extension talks to `http://localhost:8722` by default — change the URL or
+video count in **Settings** if you like.
+
+### Keep it always-on (optional)
+
+So you don't have to start it by hand each time:
+
+- **macOS** — installs a LaunchAgent that runs ytx at login and restarts it if it
+  stops:
+
+  ```bash
+  ./scripts/install-autostart-macos.sh
+  ```
+
+  Uninstall: `launchctl unload -w ~/Library/LaunchAgents/com.yavar.ytx.plist && rm ~/Library/LaunchAgents/com.yavar.ytx.plist`
+
+- **Windows** — create a Task Scheduler task that runs the `uvicorn …` command
+  above *At log on*.
+- **Linux** — a `systemd --user` service running the same command.
+
+It's a light process (~55 MB idle, ~0% CPU when unused). Port `8722` is used
+instead of the common `8000` to avoid clashing with other local servers.
 
 ## Development
 
