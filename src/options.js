@@ -24,7 +24,11 @@ class OptionsPage {
     
     // Feature toggles
     this.floatingMenuToggle = document.getElementById('enable-floating-menu');
-    
+
+    // Video research (ytx)
+    this.ytxBaseUrlInput = document.getElementById('ytx-base-url');
+    this.ytxVideoCountInput = document.getElementById('ytx-video-count');
+
     // Disabled sites
     this.disabledSiteInput = document.getElementById('disabled-site');
     this.addSiteBtn = document.getElementById('add-site-btn');
@@ -51,7 +55,11 @@ class OptionsPage {
     
     // Feature toggles
     this.floatingMenuToggle.addEventListener('change', () => this.saveSettings());
-    
+
+    // Video research (ytx)
+    this.ytxBaseUrlInput?.addEventListener('change', () => this.saveSettings());
+    this.ytxVideoCountInput?.addEventListener('change', () => this.saveSettings());
+
     // Add disabled site
     this.addSiteBtn.addEventListener('click', () => this.addDisabledSite());
     this.disabledSiteInput.addEventListener('keydown', (e) => {
@@ -96,20 +104,27 @@ class OptionsPage {
     return {
       defaultAI: 'chatgpt',
       enableFloatingMenu: true,
-      disabledSites: []
+      disabledSites: [],
+      ytxBaseUrl: 'http://localhost:8722',
+      ytxVideoCount: 12
     };
   }
 
   populateForm() {
     this.defaultAiSelect.value = this.settings.defaultAI || 'chatgpt';
     this.floatingMenuToggle.checked = this.settings.enableFloatingMenu ?? true;
+    if (this.ytxBaseUrlInput) this.ytxBaseUrlInput.value = this.settings.ytxBaseUrl || 'http://localhost:8722';
+    if (this.ytxVideoCountInput) this.ytxVideoCountInput.value = this.settings.ytxVideoCount ?? 12;
   }
 
   async saveSettings() {
+    const count = parseInt(this.ytxVideoCountInput?.value, 10);
     this.settings = {
       ...this.settings,
       defaultAI: this.defaultAiSelect.value,
-      enableFloatingMenu: this.floatingMenuToggle.checked
+      enableFloatingMenu: this.floatingMenuToggle.checked,
+      ytxBaseUrl: (this.ytxBaseUrlInput?.value || '').trim().replace(/\/+$/, '') || 'http://localhost:8722',
+      ytxVideoCount: Number.isFinite(count) ? Math.min(50, Math.max(1, count)) : 12
     };
     
     try {

@@ -42,6 +42,30 @@
         </div>
       </section>
 
+      <!-- Video Research (ytx) -->
+      <section class="settings-section">
+        <h2>Video Research (ytx)</h2>
+        <p class="help-text">
+          The "Videos" dock tab searches YouTube for a topic, pulls the top
+          videos' transcripts from your local <strong>ytx</strong> server, and
+          hands them to the AI to synthesize against your Notes.
+          Start it with <code>uv run uvicorn ytx_api.main:app --port 8722</code>
+          (or set it to auto-start at login — see the extension README).
+        </p>
+
+        <div class="setting-item">
+          <label for="ytx-base-url">ytx server URL:</label>
+          <input type="text" id="ytx-base-url" placeholder="http://localhost:8722">
+          <p class="help-text">Base URL of your running ytx REST API.</p>
+        </div>
+
+        <div class="setting-item">
+          <label for="ytx-video-count">Videos per topic:</label>
+          <input type="number" id="ytx-video-count" min="1" max="50" step="1" placeholder="12">
+          <p class="help-text">How many top search results to fetch transcripts for.</p>
+        </div>
+      </section>
+
       <!-- Keyboard Shortcuts -->
       <section class="settings-section">
         <h2>Keyboard Shortcuts</h2>
