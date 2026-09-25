@@ -93,7 +93,7 @@
         "default": "Ctrl+Shift+L",
         "mac": "Command+Shift+L"
       },
-      "description": "Analyze GitHub Repository"
+      "description": "Explain the GitHub repo in this tab"
     },
     "toggle-notes": {
       "suggested_key": {
