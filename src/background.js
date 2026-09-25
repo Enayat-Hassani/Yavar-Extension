@@ -100,7 +100,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'start_area_select') {
     (async () => {
       try {
-        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        const tab = await getUserTab();
         if (!tab) { sendResponse({ success: false }); return; }
 
         // Inject the area selection overlay into the active tab
@@ -179,6 +179,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   sendResponse({ error: 'No handler for message' });
   return true;
 });
+
+// The tab the user is looking at. When Yavar runs as its own window
+// (browsers without a side panel), the "current window" is Yavar itself, so
+// fall back to the last focused normal browser window.
+async function getUserTab() {
+  const own = chrome.runtime.getURL('');
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (tab && !(tab.url || '').startsWith(own)) return tab;
+  try {
+    const win = await chrome.windows.getLastFocused({ windowTypes: ['normal'] });
+    const [t] = await chrome.tabs.query({ active: true, windowId: win.id });
+    return t || null;
+  } catch (e) {
+    return null;
+  }
+}
 
 // Injected into the active tab to let the user draw a selection rectangle
 function injectAreaSelector() {

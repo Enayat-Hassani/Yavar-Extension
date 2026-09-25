@@ -8,7 +8,8 @@ export function isPublicWebUrl(url) {
   try { u = new URL(url); } catch (e) { return false; }
   if (!/^https?:$/.test(u.protocol)) return false;
 
-  const h = u.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  // Drop IPv6 brackets and a trailing dot ("localhost." is still loopback)
+  const h = u.hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
   if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.local') || h.endsWith('.internal')) return false;
   if (!h.includes('.') && !h.includes(':')) return false; // bare intranet names
 
