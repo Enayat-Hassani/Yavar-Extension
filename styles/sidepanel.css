@@ -200,96 +200,6 @@ html, body {
   color: var(--text-primary);
 }
 
-/* ========== Screenshot Panel ========== */
-.screenshot-panel {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border);
-  padding: 16px;
-  z-index: 50;
-}
-
-.screenshot-panel.hidden {
-  display: none;
-}
-
-.screenshot-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
-  font-size: 13px;
-}
-
-.screenshot-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.btn-small {
-  padding: 6px 12px;
-  font-size: 12px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.btn-small:hover {
-  background: var(--accent);
-  border-color: var(--accent);
-}
-
-.btn-small.btn-danger {
-  background: transparent;
-  border-color: var(--danger);
-  color: var(--danger);
-}
-
-.btn-small.btn-danger:hover {
-  background: var(--danger);
-  color: white;
-}
-
-.screenshot-preview {
-  width: 100%;
-  max-height: 200px;
-  overflow: hidden;
-  border-radius: 8px;
-  background: var(--surface);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.screenshot-preview img {
-  max-width: 100%;
-  max-height: 200px;
-  object-fit: contain;
-}
-
-.screenshot-hint {
-  margin-top: 12px;
-  font-size: 12px;
-  color: var(--text-secondary);
-  text-align: center;
-}
-
-.screenshot-hint kbd {
-  display: inline-block;
-  padding: 2px 6px;
-  font-size: 11px;
-  font-family: monospace;
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-}
-
 /* ========== Right Auto-Hiding Sidebar ========== */
 .right-sidebar {
   position: fixed;
@@ -1048,214 +958,6 @@ div.toggle-switch.active::after {
 
 .sidebar-btn-active {
   color: #0071e3;
-}
-
-/* ========== Deep-Dive Agent Status Bar ========== */
-.agent-bar {
-  position: fixed;
-  bottom: 16px;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
-  z-index: 600;
-  font-size: 13px;
-  color: var(--text-primary);
-  animation: slideUp 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.agent-bar.hidden {
-  display: none;
-}
-
-.agent-spinner {
-  width: 16px;
-  height: 16px;
-  border: 2px solid var(--border);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: spin 0.9s linear infinite;
-  flex-shrink: 0;
-}
-
-.agent-status {
-  white-space: nowrap;
-}
-
-.agent-stop-btn {
-  padding: 5px 12px;
-  font-size: 12px;
-  font-weight: 500;
-  border-radius: 8px;
-  border: 1px solid var(--danger);
-  background: transparent;
-  color: var(--danger);
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.agent-stop-btn:hover {
-  background: var(--danger);
-  color: white;
-}
-
-/* ========== Agent status sheet ==========
-   Same surface, header and buttons as the other sheets, so agents look like
-   the rest of Yavar. The chat above shows the agent working live. */
-.work-cover {
-  position: absolute;
-  left: 0;
-  width: 100%;
-  z-index: 45;
-  display: flex;
-  flex-direction: column;
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  transition: transform 0.45s cubic-bezier(0.55, 0, 0.35, 1);
-  will-change: transform;
-}
-
-.work-cover.hidden {
-  display: none;
-}
-
-/* Slide the sheet down and away when the agent finishes */
-.work-cover.lifting {
-  transform: translateY(100%);
-}
-
-.work-heading {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
-.work-heading-text { min-width: 0; }
-
-.work-cover-status {
-  margin-top: 2px;
-  font-size: 12px;
-  color: var(--text-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.work-head .agent-stop-btn { padding: 4px 12px; }
-
-.work-cover-log {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  margin: 12px 16px 0;
-  padding: 10px 12px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
-  font-size: 12px;
-  line-height: 1.7;
-  color: var(--text-secondary);
-}
-
-.work-cover-log:empty::before {
-  content: 'Waiting for the first step…';
-  font-family: inherit;
-}
-
-.work-log-line {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  animation: fadeIn 0.2s ease;
-}
-
-.work-log-line:last-child { color: var(--text-primary); }
-
-.work-cover-hint {
-  padding: 10px 16px 14px;
-  font-size: 11px;
-  line-height: 1.5;
-  color: var(--text-secondary);
-}
-
-/* Minimized agent pill */
-.work-pill {
-  position: fixed;
-  bottom: 16px;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 8px 6px 12px;
-  background: var(--surface-glass);
-  -webkit-backdrop-filter: var(--glass-blur);
-  backdrop-filter: var(--glass-blur);
-  color: var(--text-primary);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.16);
-  z-index: 620;
-  font-size: 12px;
-  animation: slideUp 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.work-pill.hidden {
-  display: none;
-}
-
-.work-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--accent);
-  animation: work-pulse 1.4s ease-in-out infinite;
-  flex-shrink: 0;
-}
-
-@keyframes work-pulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.45; transform: scale(0.8); }
-}
-
-.work-pill-status {
-  max-width: 200px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.work-pill-btn {
-  padding: 4px 10px;
-  font-size: 11px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: var(--bg-secondary);
-  color: var(--text-primary);
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-  flex-shrink: 0;
-}
-
-.work-pill-btn:hover {
-  background: var(--bg-tertiary);
-}
-
-.work-pill-stop {
-  color: var(--danger);
-}
-
-.work-pill-stop:hover {
-  background: var(--danger);
-  color: #fff;
 }
 
 /* ========== Repo File Browser ========== */
@@ -2839,9 +2541,6 @@ button.lens-item:focus-visible {
 .tool-menu .lens-name,
 .tool-menu .lens-desc { display: block; }
 
-/* The agent sheet stays compact so most of the live chat shows above it */
-.work-cover.sheet { height: min(var(--sheet-h, 72%), 48%) !important; }
-
 /* ========== Yavar view ==========
    The main screen, above the chat (which keeps running behind it) and
    below the sheets, menus and sidebar. */
@@ -3175,6 +2874,36 @@ button.lens-item:focus-visible {
   border: none;
 }
 
+/* Research progress: a quiet log above the report */
+.agent-progress {
+  margin: 8px 0 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.agent-progress-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-primary);
+}
+
+.agent-progress.is-done .agent-progress-head { color: var(--text-secondary); }
+
+.agent-progress-log {
+  margin: 6px 0 0 6px;
+  padding-left: 12px;
+  list-style: none;
+  border-left: 1px solid var(--border);
+}
+
+.agent-progress-log li {
+  padding: 2px 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .thread-form {
   display: flex;
   align-items: flex-end;
@@ -3236,27 +2965,27 @@ button.lens-item:focus-visible {
   .sheet:not(.hidden) { translate: 0 40px; opacity: 0; }
 }
 
-.settings-panel, .notes-panel, .modal, .screenshot-panel {
+.settings-panel, .notes-panel, .modal {
   animation: none !important;
   transition: opacity 0.2s ease, display 0.2s allow-discrete;
 }
-.settings-panel.hidden, .notes-panel.hidden, .modal.hidden, .screenshot-panel.hidden { opacity: 0; pointer-events: none; }
+.settings-panel.hidden, .notes-panel.hidden, .modal.hidden { opacity: 0; pointer-events: none; }
 @starting-style {
-  .settings-panel:not(.hidden), .notes-panel:not(.hidden), .modal:not(.hidden), .screenshot-panel:not(.hidden) { opacity: 0; }
+  .settings-panel:not(.hidden), .notes-panel:not(.hidden), .modal:not(.hidden) { opacity: 0; }
 }
 
-.model-switcher, .lens-picker, .work-pill {
+.model-switcher, .lens-picker {
   animation: none !important;
   transition: opacity 0.16s ease, translate 0.2s var(--ease-out), scale 0.2s var(--ease-out), display 0.2s allow-discrete;
 }
-.model-switcher.hidden, .lens-picker.hidden, .work-pill.hidden { opacity: 0; translate: 0 6px; scale: 0.98; pointer-events: none; }
+.model-switcher.hidden, .lens-picker.hidden { opacity: 0; translate: 0 6px; scale: 0.98; pointer-events: none; }
 @starting-style {
-  .model-switcher:not(.hidden), .lens-picker:not(.hidden), .work-pill:not(.hidden) { opacity: 0; translate: 0 6px; scale: 0.98; }
+  .model-switcher:not(.hidden), .lens-picker:not(.hidden) { opacity: 0; translate: 0 6px; scale: 0.98; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sheet, .settings-panel, .notes-panel, .modal, .screenshot-panel,
-  .model-switcher, .lens-picker, .work-pill { transition: none !important; }
+  .sheet, .settings-panel, .notes-panel, .modal,
+  .model-switcher, .lens-picker { transition: none !important; }
 }
 
 /* ========== Editor theme ("yavar") ==========

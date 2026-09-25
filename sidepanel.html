@@ -17,57 +17,6 @@
       <button id="notification-dismiss" class="notification-dismiss">✕</button>
     </div>
 
-    <!-- Screenshot Preview Panel -->
-    <div id="screenshot-panel" class="screenshot-panel hidden">
-      <div class="screenshot-header">
-        <span>📸 Screenshot captured</span>
-        <div class="screenshot-actions">
-          <button id="btn-copy-screenshot" class="btn-small">Copy Image</button>
-          <button id="btn-dismiss-screenshot" class="btn-small btn-danger">Dismiss</button>
-        </div>
-      </div>
-      <div class="screenshot-preview">
-        <img id="screenshot-img" src="" alt="Screenshot preview">
-      </div>
-      <p class="screenshot-hint">Press <kbd>Cmd+V</kbd> in ChatGPT to paste, then click Send</p>
-    </div>
-
-    <!-- Deep-Dive Agent Status Bar -->
-    <div id="agent-bar" class="agent-bar hidden">
-      <span class="agent-spinner"></span>
-      <span id="agent-status" class="agent-status">Deep-dive running…</span>
-      <button id="btn-stop-agent" class="agent-stop-btn">Stop</button>
-    </div>
-
-    <!-- Agent status sheet: the chat above shows the agent working live -->
-    <div id="work-cover" class="work-cover sheet hidden" role="status" aria-live="polite">
-      <div class="history-header work-head">
-        <div class="work-heading">
-          <span class="agent-spinner" aria-hidden="true"></span>
-          <div class="work-heading-text">
-            <div id="work-cover-title" class="history-title">Yavar is working…</div>
-            <div id="work-cover-status" class="work-cover-status">Starting…</div>
-          </div>
-        </div>
-        <div class="history-header-actions">
-          <button id="btn-work-peek" class="history-action-btn" title="Minimize (the agent keeps running)">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 9l6 6 6-6"></path></svg>
-          </button>
-          <button id="btn-work-stop" class="agent-stop-btn">Stop</button>
-        </div>
-      </div>
-      <div id="work-cover-log" class="work-cover-log"></div>
-      <p class="work-cover-hint">The AI is working in the chat above. Minimize this to watch it; the agent keeps running.</p>
-    </div>
-
-    <!-- Minimized "working" pill (shown when the cover is peeked away) -->
-    <div id="work-pill" class="work-pill hidden">
-      <span class="work-dot"></span>
-      <span id="work-pill-status" class="work-pill-status">Working…</span>
-      <button id="btn-work-expand" class="work-pill-btn">Show</button>
-      <button id="btn-work-stop-pill" class="work-pill-btn work-pill-stop">Stop</button>
-    </div>
-
     <!-- Main iframe container - Full height -->
     <main class="iframe-container">
       <div id="loading-state" class="loading-state">
