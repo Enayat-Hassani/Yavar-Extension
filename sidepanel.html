@@ -444,6 +444,21 @@
       </div>
     </div>
 
+    <!-- Rebuild it yourself: a step-by-step plan to rebuild the project -->
+    <div id="rebuild-panel" class="run-panel rebuild-panel hidden" role="dialog" aria-label="Rebuild it yourself">
+      <div class="run-header">
+        <div class="files-heading">
+          <span class="files-title">Rebuild it yourself</span>
+          <span id="rebuild-sub" class="files-repo-chip"></span>
+        </div>
+        <div class="files-header-actions">
+          <button id="rebuild-reset" class="history-action-btn" title="Start over with a new plan">↺</button>
+          <button id="rebuild-close" class="history-action-btn" title="Close (Esc)">✕</button>
+        </div>
+      </div>
+      <div id="rebuild-body" class="rebuild-body"></div>
+    </div>
+
     <!-- Text input dialog for the agents (window.prompt is unreliable in side panels) -->
     <dialog id="ask-dialog" class="ask-dialog" aria-labelledby="ask-title">
       <form method="dialog" class="ask-form">
