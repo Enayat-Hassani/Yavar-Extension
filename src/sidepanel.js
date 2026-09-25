@@ -2,6 +2,10 @@
 // Full viewport chat with bottom navigation and model management
 
 import { isPublicWebUrl } from './utils/net.js';
+import {
+  parseGitHubUrl, refCandidates, rawFileUrl, isReadablePath, estimateTokens, formatCount, formatBytes,
+  langFromPath, sliceLines, extractImports, resolveImports, suggestStartFiles, buildPack, readingPrompt, READ_MODES
+} from './utils/github.js';
 
 class YavarSidePanel {
   constructor() {
@@ -90,6 +94,16 @@ class YavarSidePanel {
     this.filesSearch = document.getElementById('files-search');
     this.btnCloseFiles = document.getElementById('btn-close-files');
     this.btnRefreshFiles = document.getElementById('btn-refresh-files');
+    this.filesRepoChip = document.getElementById('files-repo-chip');
+    this.filesActionBar = document.getElementById('files-actionbar');
+    this.filesSelCount = document.getElementById('files-sel-count');
+    this.filesSelTokens = document.getElementById('files-sel-tokens');
+    this.filesModes = document.getElementById('files-modes');
+    this.filesSend = document.getElementById('files-send');
+    this.filesClear = document.getElementById('files-clear');
+    this.dockExplainDiff = document.getElementById('dock-explain-diff');
+    this.selectedFiles = new Set();
+    this.readMarks = new Set();
 
     // "Working" cover + minimized pill
     this.workCover = document.getElementById('work-cover');
@@ -222,6 +236,27 @@ class YavarSidePanel {
     this.btnCloseFiles.addEventListener('click', () => this.filesPanel.classList.add('hidden'));
     this.btnRefreshFiles.addEventListener('click', () => this.refreshFiles());
     this.filesSearch.addEventListener('input', () => this.filterFilesTree());
+    this.filesModes?.addEventListener('click', (e) => {
+      const mode = e.target.closest('[data-mode]')?.dataset.mode;
+      if (mode) this.setReadMode(mode);
+    });
+    this.filesSend?.addEventListener('click', () =>
+      this.sendRepoFiles([...this.selectedFiles], this.getReadMode()));
+    this.filesClear?.addEventListener('click', () => {
+      this.selectedFiles.clear();
+      this.refreshSelectionUi();
+    });
+    this.dockExplainDiff?.addEventListener('click', () => this.explainActiveDiff());
+    // Keyboard: Esc closes the reader, "/" jumps to search
+    this.filesPanel?.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        if (this.filesSearch.value) { this.filesSearch.value = ''; this.filterFilesTree(); }
+        else this.filesPanel.classList.add('hidden');
+      } else if (e.key === '/' && document.activeElement !== this.filesSearch) {
+        e.preventDefault();
+        this.filesSearch.focus();
+      }
+    });
 
     // Working cover / pill controls
     this.btnWorkPeek.addEventListener('click', () => this.peekChat());
@@ -595,19 +630,12 @@ class YavarSidePanel {
   async analyzeGitHubRepo() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
-    if (!tab.url.includes('github.com')) {
+    const gh = parseGitHubUrl(tab?.url || '');
+    if (!gh) {
       this.showNotification('⚠️ Open a GitHub repository to use this feature');
       return;
     }
-
-    // Extract owner/repo from tab URL
-    const url = new URL(tab.url);
-    const pathParts = url.pathname.split('/').filter(Boolean);
-    if (pathParts.length < 2) {
-      this.showNotification('⚠️ Navigate to a GitHub repository page');
-      return;
-    }
-    const [owner, repo] = pathParts;
+    const { owner, repo } = gh;
 
     this.showNotification('🔄 Analyzing repository...');
 
@@ -677,41 +705,34 @@ First Task: Based on the tree and tech stack, what is the single most important 
 
   async buildRepoContext(owner, repo) {
     const SAFE_FILE_LIMIT = 300;
-    const token = await this.getGithubToken();
 
-    const fetchJSON = async (url) => {
-      const res = await fetch(url, { headers: this.ghHeaders(token) });
-      if (!res.ok) throw new Error(`GitHub API ${res.status}`);
-      return res.json();
-    };
-
-    const repoInfo = await fetchJSON(`https://api.github.com/repos/${owner}/${repo}`);
-    const branch = repoInfo.default_branch;
-
-    const [treeData, readmeData] = await Promise.all([
-      fetchJSON(`https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`),
-      fetchJSON(`https://api.github.com/repos/${owner}/${repo}/readme`).catch(() => ({ content: null }))
-    ]);
+    // One (cached) API call for the tree; everything else comes from raw files
+    const tree = await this.loadRepoTree(owner, repo, 'HEAD');
+    const branch = tree.ref;
+    const treeData = { tree: tree.items };
 
     // --- DEP-SNIFFER: Extract dependency/tech stack info ---
     let depContext = 'DEPENDENCIES / TECH STACK\n========================\n';
     const manifestFiles = treeData.tree.filter(f =>
+      f.type === 'blob' &&
       ['package.json', 'pyproject.toml', 'requirements.txt', 'go.mod', 'Cargo.toml'].includes(f.path.split('/').pop())
-    ).slice(0, 3);
+    ).sort((a, b) => a.path.split('/').length - b.path.split('/').length).slice(0, 3);
 
-    for (const file of manifestFiles) {
-      try {
-        const contentData = await fetchJSON(file.url);
-        const raw = this.decodeB64(contentData.content);
-        const lines = raw.split('\n').filter(l => /^[ \t]*["\w\-_]+[:==]/.test(l)).join('\n');
-        depContext += `FILE: ${file.path}\n${lines}\n\n`;
-      } catch (e) { /* skip unreadable manifests */ }
+    const manifests = await Promise.all(manifestFiles.map(f =>
+      this.fetchRepoFile(owner, repo, f.path, branch, 20000).then(t => [f.path, t]).catch(() => null)));
+    for (const entry of manifests.filter(Boolean)) {
+      const [path, raw] = entry;
+      const lines = raw.split('\n').filter(l => /^[ \t]*["\w\-_]+[:==]/.test(l)).join('\n');
+      depContext += `FILE: ${path}\n${lines}\n\n`;
     }
 
     // --- README: Preserve code blocks, filter fluff ---
     let semanticContext = `PROJECT: ${owner}/${repo}\n========================\n`;
-    if (readmeData.content) {
-      const rawReadme = this.decodeB64(readmeData.content);
+    const readme = treeData.tree.find(f => f.type === 'blob' && /^readme(\.\w+)?$/i.test(f.path));
+    const rawReadme = readme
+      ? await this.fetchRepoFile(owner, repo, readme.path, branch, 60000).catch(() => '')
+      : '';
+    if (rawReadme) {
       const sections = rawReadme.match(/(##|###).*?(?=(##|###)|$)/gs) || [rawReadme.substring(0, 2000)];
       sections.forEach(section => {
         if (/Community|License|Sponsors|Star|Latest/i.test(section)) return;
@@ -759,21 +780,33 @@ First Task: Based on the tree and tech stack, what is the single most important 
 
   // Fetch a single file's contents from a repo via the GitHub Contents API.
   async fetchRepoFile(owner, repo, path, branch, maxChars = 6000) {
-    const token = await this.getGithubToken();
     const cleanPath = path.replace(/^\.?\//, '');
-    const encoded = cleanPath.split('/').map(encodeURIComponent).join('/');
-    const url = `https://api.github.com/repos/${owner}/${repo}/contents/${encoded}?ref=${encodeURIComponent(branch)}`;
+    const ref = branch || 'HEAD';
+    let text = null;
 
-    const res = await fetch(url, { headers: this.ghHeaders(token) });
-    if (!res.ok) {
-      if (res.status === 403) throw new Error(token ? 'rate limited or access denied' : 'rate limited (add a GitHub token in Settings to lift the 60/hr limit)');
-      throw new Error(`GitHub ${res.status}`);
+    // raw.githubusercontent.com first: no API quota used (public repos)
+    try {
+      const raw = await fetch(rawFileUrl(owner, repo, ref, cleanPath), { credentials: 'omit' });
+      if (raw.ok) text = await raw.text();
+    } catch (e) { /* fall through to the API */ }
+
+    if (text == null) {
+      // Private repos (with a token) and anything raw couldn't serve
+      const token = await this.getGithubToken();
+      const encoded = cleanPath.split('/').map(encodeURIComponent).join('/');
+      const url = `https://api.github.com/repos/${owner}/${repo}/contents/${encoded}?ref=${encodeURIComponent(ref)}`;
+      const res = await fetch(url, { headers: this.ghHeaders(token) });
+      if (!res.ok) {
+        if (res.status === 403 || res.status === 429) throw new Error(token ? 'rate limited or access denied' : 'rate limited (add a GitHub token in Settings to lift the 60/hr limit)');
+        if (res.status === 404) throw new Error(token ? 'file not found' : 'not found (private repo? add a GitHub token in Settings)');
+        throw new Error(`GitHub ${res.status}`);
+      }
+      const data = await res.json();
+      if (Array.isArray(data)) throw new Error('path is a directory');
+      if (!data.content) throw new Error('no content (file may be too large — over 1MB)');
+      text = this.decodeB64(data.content);
     }
-    const data = await res.json();
-    if (Array.isArray(data)) throw new Error('path is a directory');
-    if (!data.content) throw new Error('no content (file may be too large — over 1MB)');
 
-    let text = this.decodeB64(data.content);
     // Agent uses a small cap (huge pastes freeze the input); the file browser
     // passes a huge cap so attached files arrive whole. When we must truncate,
     // cut on a newline so it never ends mid-line.
@@ -798,16 +831,12 @@ First Task: Based on the tree and tech stack, what is the single most important 
     }
 
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab || !tab.url.includes('github.com')) {
+    const gh = parseGitHubUrl(tab?.url || '');
+    if (!gh) {
       this.showNotification('⚠️ Open a GitHub repository to use the deep-dive agent');
       return;
     }
-    const parts = new URL(tab.url).pathname.split('/').filter(Boolean);
-    if (parts.length < 2) {
-      this.showNotification('⚠️ Navigate to a GitHub repository page');
-      return;
-    }
-    const [owner, repo] = parts;
+    const { owner, repo } = gh;
 
     this.showWorkCover();
     if (this.workCoverTitle) this.workCoverTitle.textContent = 'Yavar is exploring the repo…';
@@ -1483,11 +1512,8 @@ Begin: state a one-line plan, then issue your first tool call.`;
     const isAIHost = /(chatgpt\.com|chat\.openai\.com|claude\.ai|gemini\.google\.com|bing\.com)/i.test(url);
     const usable = isHttp && !isAIHost;
 
-    const m = url.match(/:\/\/github\.com\/([^/]+)\/([^/?#]+)/);
-    const reserved = new Set(['settings', 'notifications', 'orgs', 'features', 'marketplace',
-      'explore', 'topics', 'sponsors', 'about', 'pricing', 'enterprise', 'login', 'join',
-      'search', 'new', 'codespaces', 'apps', 'collections', 'events', 'trending', 'dashboard']);
-    const isRepo = !!(m && !reserved.has(m[1].toLowerCase()));
+    const gh = parseGitHubUrl(url);
+    const isRepo = !!gh;
 
     // The whole dock shows on any usable page; individual tabs are contextual.
     if (this.filesRailGroup) this.filesRailGroup.classList.toggle('hidden', !usable);
@@ -1512,17 +1538,25 @@ Begin: state a one-line plan, then issue your first tool call.`;
     // Repo browse tab (GitHub repos only)
     this.filesRail?.classList.toggle('hidden', !isRepo);
 
-    // Quick-add tab: only when the GitHub tab is viewing a specific file
+    // Quick-read tab: only when the GitHub tab is viewing a specific file.
+    // The ref/path split is resolved when clicked; here the name is enough.
     if (this.filesQuickAdd) {
-      const activeFile = isRepo ? await this.getActiveRepoFilePath() : null;
-      this._quickAddPath = activeFile;
-      if (activeFile) {
-        if (this.filesQuickName) this.filesQuickName.textContent = activeFile.split('/').pop();
-        this.filesQuickAdd.title = `Add “${activeFile}” to chat`;
-        this.filesQuickAdd.classList.remove('hidden');
-      } else {
-        this.filesQuickAdd.classList.add('hidden');
+      const isFile = gh?.kind === 'blob' && gh.rest.length > 1;
+      if (isFile) {
+        const name = gh.rest[gh.rest.length - 1];
+        const range = gh.lines ? ` L${gh.lines.start}${gh.lines.end !== gh.lines.start ? '-' + gh.lines.end : ''}` : '';
+        if (this.filesQuickName) this.filesQuickName.textContent = name + range;
+        this.filesQuickAdd.title = `Read ${gh.lines ? 'the selected lines of ' : ''}“${name}” with the AI`;
       }
+      this.filesQuickAdd.classList.toggle('hidden', !isFile);
+    }
+
+    // Explain-diff tab: on a pull request or commit page
+    if (this.dockExplainDiff) {
+      const isDiff = gh?.kind === 'pull' || gh?.kind === 'commit';
+      this.dockExplainDiff.classList.toggle('hidden', !isDiff);
+      const lbl = this.dockExplainDiff.querySelector('.files-tab-label');
+      if (lbl && isDiff) lbl.textContent = gh.kind === 'pull' ? 'Explain PR' : 'Explain commit';
     }
 
     this.markFirstDockTab();
@@ -1918,66 +1952,178 @@ Begin: state a one-line plan, then issue your first tool call.`;
   }
 
   // One-click add of the file currently open in the GitHub tab — no panel needed.
-  async quickAddActiveFile() {
-    const path = this._quickAddPath;
-    if (!path) return;
-    // addFileToChat needs the repo tree (owner/repo/branch); load it if the panel was never opened.
-    if (!this.repoTree) {
-      const ok = await this.ensureRepoTree().catch(() => false);
-      if (!ok) { this.showNotification('⚠️ Open the repo tab, then try again'); return; }
+  // ========== Repo Reader ==========
+  // Browse a repo's files, pick several, and send them to the chat as ONE
+  // Markdown pack (with a repo map) plus a reading prompt. File contents come
+  // from raw.githubusercontent.com, which doesn't use the 60/hr API quota;
+  // the tree is one API call per repo+ref, cached for the browser session.
+
+  async getActiveGitHub() {
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      const info = parseGitHubUrl(tab?.url || '');
+      if (info) info.title = tab.title || '';
+      return info;
+    } catch (e) {
+      return null;
     }
-    await this.addFileToChat(path);
   }
 
-  async toggleFilesPanel() {
-    if (!this.filesPanel.classList.contains('hidden')) {
+  // Fetch (or reuse) the recursive tree for owner/repo at ref ('HEAD' = default branch).
+  async loadRepoTree(owner, repo, ref = 'HEAD') {
+    const key = `tree:${owner}/${repo}@${ref}`;
+    this._treeCache = this._treeCache || new Map();
+    if (this._treeCache.has(key)) return this._treeCache.get(key);
+    try {
+      const cached = (await chrome.storage.session.get(key))[key];
+      if (cached && Date.now() - cached.ts < 30 * 60 * 1000) {
+        this._treeCache.set(key, cached);
+        return cached;
+      }
+    } catch (e) { /* session storage unavailable */ }
+
+    const token = await this.getGithubToken();
+    const res = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/git/trees/${encodeURIComponent(ref)}?recursive=1`,
+      { headers: this.ghHeaders(token) });
+    if (!res.ok) {
+      const err = new Error(res.status === 404
+        ? (token ? 'repo or branch not found' : 'not found (private repo? add a GitHub token in Settings)')
+        : res.status === 403 || res.status === 429
+          ? 'GitHub rate limit hit, add a free token in Settings to lift it'
+          : 'GitHub ' + res.status);
+      err.status = res.status;
+      throw err;
+    }
+    const data = await res.json();
+    const tree = {
+      owner, repo, ref, ts: Date.now(), truncated: !!data.truncated,
+      items: (data.tree || []).slice(0, 8000).map(i => ({ path: i.path, type: i.type, size: i.size }))
+    };
+    this._treeCache.set(key, tree);
+    try { await chrome.storage.session.set({ [key]: tree }); } catch (e) { /* too big or unavailable */ }
+    return tree;
+  }
+
+  // Load the tree for the repo in the active tab, honouring the branch/tag in
+  // the URL (trying each possible ref split for branch names with slashes).
+  async ensureRepoTree() {
+    const gh = await this.getActiveGitHub();
+    if (!gh) { this.repoTree = null; return false; }
+
+    let tree = null;
+    let activePath = null;
+    if (gh.rest.length) {
+      for (const cand of refCandidates(gh.rest)) {
+        try {
+          tree = await this.loadRepoTree(gh.owner, gh.repo, cand.ref);
+          activePath = cand.path || null;
+          break;
+        } catch (e) {
+          if (e.status !== 404 && e.status !== 422) throw e;
+        }
+      }
+    }
+    if (!tree) tree = await this.loadRepoTree(gh.owner, gh.repo, 'HEAD');
+
+    const sameRepo = this.repoTree && this.repoTree.owner === gh.owner && this.repoTree.repo === gh.repo;
+    if (!sameRepo) this.selectedFiles = new Set();
+    this.repoTree = {
+      ...tree,
+      branch: tree.ref,
+      fileSet: new Set(tree.items.filter(i => i.type === 'blob').map(i => i.path)),
+      sizes: new Map(tree.items.filter(i => i.type === 'blob').map(i => [i.path, i.size])),
+      root: this.buildFileTree(tree.items)
+    };
+    this.activeRepoFile = gh.kind === 'blob' && activePath && this.repoTree.fileSet.has(activePath)
+      ? { path: activePath, lines: gh.lines }
+      : null;
+    await this.loadReadMarks();
+    return true;
+  }
+
+  refLabel(ref) {
+    return !ref || ref === 'HEAD' ? 'default branch' : (/^[0-9a-f]{40}$/i.test(ref) ? ref.slice(0, 7) : ref);
+  }
+
+  // ----- Read marks: files you've already sent, per repo -----
+  readMarksKey() {
+    return this.repoTree ? `readMarks:${this.repoTree.owner}/${this.repoTree.repo}` : null;
+  }
+
+  async loadReadMarks() {
+    const key = this.readMarksKey();
+    this.readMarks = new Set();
+    if (!key) return;
+    try { this.readMarks = new Set((await chrome.storage.local.get(key))[key] || []); } catch (e) { /* ignore */ }
+  }
+
+  async markRead(paths) {
+    const key = this.readMarksKey();
+    if (!key) return;
+    paths.forEach(p => this.readMarks.add(p));
+    try { await chrome.storage.local.set({ [key]: [...this.readMarks].slice(-2000) }); } catch (e) { /* ignore */ }
+  }
+
+  // ----- Panel -----
+
+  async quickAddActiveFile() {
+    try {
+      if (!(await this.ensureRepoTree()) || !this.activeRepoFile) {
+        this.showNotification('⚠️ Open a file on GitHub first');
+        return;
+      }
+    } catch (e) {
+      this.showNotification('⚠️ ' + e.message);
+      return;
+    }
+    const { path, lines } = this.activeRepoFile;
+    await this.sendRepoFiles([path], this.getReadMode(), lines);
+  }
+
+  getReadMode() {
+    return this.readMode || 'explain';
+  }
+
+  setReadMode(mode) {
+    this.readMode = mode;
+    try { chrome.storage.local.set({ yavarReadMode: mode }); } catch (e) { /* ignore */ }
+    this.renderFilesActionBar();
+  }
+
+  async toggleFilesPanel(forceOpen = false) {
+    if (!forceOpen && !this.filesPanel.classList.contains('hidden')) {
       this.filesPanel.classList.add('hidden');
       return;
     }
+    if (this.readMode == null) {
+      try { this.readMode = (await chrome.storage.local.get('yavarReadMode')).yavarReadMode || 'explain'; }
+      catch (e) { this.readMode = 'explain'; }
+    }
     this.filesPanel.classList.remove('hidden');
     this.filesSearch.value = '';
-    this.filesTree.innerHTML = '<div class="files-empty">Loading…</div>';
+    this.filesTree.innerHTML = '<div class="files-empty"><span class="files-spinner"></span>Loading the repo…</div>';
     try {
       const ok = await this.ensureRepoTree();
       if (!ok) {
-        this.filesTree.innerHTML = '<div class="files-empty">Open a GitHub repository tab, then reopen Files.</div>';
+        this.filesTree.innerHTML = '<div class="files-empty">Open a GitHub repository in this tab, then reopen the reader.</div>';
         return;
       }
-      this.activeRepoFile = await this.getActiveRepoFilePath();
       this.renderFilesTree();
+      this.filesSearch.focus();
     } catch (e) {
-      this.filesTree.innerHTML = `<div class="files-empty">Couldn't load the repo tree: ${this.escapeHtml(e.message)}</div>`;
+      this.filesTree.innerHTML = `<div class="files-empty">Couldn't load the repo: ${this.escapeHtml(e.message)}</div>`;
     }
   }
 
   async refreshFiles() {
+    if (this.repoTree) {
+      const key = `tree:${this.repoTree.owner}/${this.repoTree.repo}@${this.repoTree.ref}`;
+      this._treeCache?.delete(key);
+      try { await chrome.storage.session.remove(key); } catch (e) { /* ignore */ }
+    }
     this.repoTree = null;
-    await this.toggleFilesPanel(); // closes
-    await this.toggleFilesPanel(); // reopens + reloads
-  }
-
-  async ensureRepoTree() {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab || !tab.url.includes('github.com')) { this.repoTree = null; return false; }
-    const parts = new URL(tab.url).pathname.split('/').filter(Boolean);
-    if (parts.length < 2) { this.repoTree = null; return false; }
-    const [owner, repo] = parts;
-
-    if (this.repoTree && this.repoTree.owner === owner && this.repoTree.repo === repo) return true; // cached
-
-    const token = await this.getGithubToken();
-    const fetchJSON = async (url) => {
-      const r = await fetch(url, { headers: this.ghHeaders(token) });
-      if (!r.ok) throw new Error('GitHub ' + r.status);
-      return r.json();
-    };
-    const info = await fetchJSON(`https://api.github.com/repos/${owner}/${repo}`);
-    const branch = info.default_branch;
-    const data = await fetchJSON(`https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`);
-    const items = (data.tree || []).slice(0, 6000).map(i => ({ path: i.path, type: i.type }));
-
-    this.repoTree = { owner, repo, branch, items, root: this.buildFileTree(items) };
-    return true;
+    await this.toggleFilesPanel(true);
   }
 
   buildFileTree(items) {
@@ -2008,43 +2154,68 @@ Begin: state a one-line plan, then issue your first tool call.`;
       this.filesTree.innerHTML = '<div class="files-empty">No repo loaded.</div>';
       return;
     }
+    const { owner, repo, ref, truncated } = this.repoTree;
+    if (this.filesRepoChip) {
+      this.filesRepoChip.textContent = `${owner}/${repo} · ${this.refLabel(ref)}`;
+      this.filesRepoChip.title = `${owner}/${repo} @ ${ref}`;
+    }
 
-    // If the GitHub tab is currently viewing a file, offer a one-click "add current file"
+    // The file open in the GitHub tab: one-click read in the current mode
     if (this.activeRepoFile) {
-      const card = document.createElement('button');
+      const { path, lines } = this.activeRepoFile;
+      const range = lines ? `Lines ${lines.start}-${lines.end} · ` : '';
+      const card = document.createElement('div');
       card.className = 'files-active';
-      card.title = 'Add the file open in your GitHub tab';
       card.innerHTML =
-        `<span class="files-stack files-stack-active" aria-hidden="true">` +
-          `<span class="sheet sheet-1"></span>` +
-          `<span class="sheet sheet-2"></span>` +
-          `<span class="sheet sheet-3"></span>` +
-        `</span>` +
-        `<span class="files-active-text"><span class="files-active-label">Add current file</span>` +
-        `<span class="files-active-path">${this.escapeHtml(this.activeRepoFile)}</span></span>` +
-        `<span class="files-active-plus">＋</span>`;
-      card.addEventListener('click', () => this.addFileToChat(this.activeRepoFile));
+        `<div class="files-active-top"><span class="files-active-label">Open in your tab</span>` +
+        `<span class="files-active-path" title="${this.escapeHtml(path)}">${range}${this.escapeHtml(path)}</span></div>` +
+        `<div class="files-active-actions">` +
+          `<button class="files-chip-btn primary" data-act="read">Read it (${this.escapeHtml(this.modeLabel())})</button>` +
+          `<button class="files-chip-btn" data-act="select">${this.selectedFiles.has(path) ? '✓ Selected' : '+ Select'}</button>` +
+          `<button class="files-chip-btn" data-act="imports" title="Also select the repo files it imports">+ Imports</button>` +
+        `</div>`;
+      card.addEventListener('click', (e) => {
+        const act = e.target.closest('[data-act]')?.dataset.act;
+        if (act === 'read') this.sendRepoFiles([path], this.getReadMode(), lines);
+        else if (act === 'select') this.toggleFileSelected(path);
+        else if (act === 'imports') this.selectWithImports(path);
+      });
       this.filesTree.appendChild(card);
     }
 
-    const header = document.createElement('div');
-    header.className = 'files-repo-name';
-    header.textContent = `${this.repoTree.owner}/${this.repoTree.repo}`;
-    this.filesTree.appendChild(header);
-    this.filesTree.appendChild(this.renderTreeChildren(this.repoTree.root));
-  }
-
-  // Path of the file currently open in the active GitHub tab (…/blob/<ref>/<path>), if any
-  async getActiveRepoFilePath() {
-    try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      const m = (tab?.url || '').match(/:\/\/github\.com\/([^/]+)\/([^/]+)\/blob\/[^/]+\/(.+)$/);
-      if (!m) return null;
-      if (this.repoTree && (m[1] !== this.repoTree.owner || m[2] !== this.repoTree.repo)) return null;
-      return decodeURIComponent(m[3].split('#')[0].split('?')[0]);
-    } catch (e) {
-      return null;
+    // Suggested reading order for newcomers
+    const starts = suggestStartFiles([...this.repoTree.fileSet]);
+    if (starts.length) {
+      const box = document.createElement('div');
+      box.className = 'files-start';
+      box.innerHTML = `<div class="files-section-label">Start here</div><div class="files-start-list"></div>`;
+      const list = box.querySelector('.files-start-list');
+      for (const p of starts) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'files-start-chip' + (this.selectedFiles.has(p) ? ' selected' : '') + (this.readMarks.has(p) ? ' read' : '');
+        b.dataset.path = p;
+        b.title = p;
+        b.textContent = p.split('/').pop();
+        b.addEventListener('click', () => this.toggleFileSelected(p));
+        list.appendChild(b);
+      }
+      this.filesTree.appendChild(box);
     }
+
+    const label = document.createElement('div');
+    label.className = 'files-section-label';
+    label.textContent = 'All files';
+    this.filesTree.appendChild(label);
+    this.filesTree.appendChild(this.renderTreeChildren(this.repoTree.root));
+
+    if (truncated) {
+      const note = document.createElement('div');
+      note.className = 'files-empty';
+      note.textContent = 'This repo is very large, so GitHub returned only part of the tree. Use search, or open a subfolder on GitHub.';
+      this.filesTree.appendChild(note);
+    }
+    this.renderFilesActionBar();
   }
 
   renderTreeChildren(node) {
@@ -2058,6 +2229,42 @@ Begin: state a one-line plan, then issue your first tool call.`;
     return container;
   }
 
+  fileRowHtml(path, label) {
+    const readable = isReadablePath(path);
+    const size = this.repoTree.sizes.get(path);
+    const sel = this.selectedFiles.has(path);
+    const read = this.readMarks.has(path);
+    return `<span class="files-check${sel ? ' on' : ''}" aria-hidden="true"></span>` +
+      `<span class="files-icon files-ext-${this.escapeHtml((path.split('.').pop() || '').toLowerCase().slice(0, 6))}">${readable ? '' : '·'}</span>` +
+      `<span class="files-name">${this.escapeHtml(label)}</span>` +
+      (read ? '<span class="files-read" title="Already sent to the AI">✓</span>' : '') +
+      `<span class="files-size">${formatBytes(size)}</span>` +
+      (readable ? `<button class="files-quick" data-quick="1" title="Read just this file now">${this.escapeHtml(this.modeLabel())}</button>` : '');
+  }
+
+  bindFileRow(row, path) {
+    const readable = isReadablePath(path);
+    row.dataset.path = path;
+    row.classList.toggle('selected', this.selectedFiles.has(path));
+    row.classList.toggle('unreadable', !readable);
+    row.setAttribute('role', 'checkbox');
+    row.setAttribute('aria-checked', String(this.selectedFiles.has(path)));
+    row.tabIndex = readable ? 0 : -1;
+    row.title = readable ? path : `${path} (binary or generated, skipped)`;
+    row.addEventListener('click', (e) => {
+      if (!readable) return;
+      if (e.target.closest('[data-quick]')) {
+        e.stopPropagation();
+        this.sendRepoFiles([path], this.getReadMode());
+        return;
+      }
+      this.toggleFileSelected(path);
+    });
+    row.addEventListener('keydown', (e) => {
+      if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); row.click(); }
+    });
+  }
+
   renderTreeNode(node) {
     const wrap = document.createElement('div');
     wrap.className = 'files-node';
@@ -2065,10 +2272,22 @@ Begin: state a one-line plan, then issue your first tool call.`;
     row.className = 'files-row';
 
     if (node.type === 'tree') {
+      row.classList.add('files-dir');
       row.innerHTML =
-        `<span class="files-caret">▸</span><span class="files-icon">📁</span><span class="files-name">${this.escapeHtml(node.name)}</span>`;
+        `<span class="files-caret">▸</span><span class="files-icon files-folder"></span>` +
+        `<span class="files-name">${this.escapeHtml(node.name)}</span>` +
+        `<span class="files-dir-count" hidden></span>` +
+        `<button class="files-quick" data-all="1" title="Select the readable files in this folder">Select all</button>`;
       let childBox = null;
-      row.addEventListener('click', () => {
+      row.dataset.dir = node.path;
+      row.tabIndex = 0;
+      this.updateDirCount(row);
+      row.addEventListener('click', (e) => {
+        if (e.target.closest('[data-all]')) {
+          e.stopPropagation();
+          this.selectFolder(node.path);
+          return;
+        }
         const caret = row.querySelector('.files-caret');
         if (childBox) {
           const open = childBox.style.display !== 'none';
@@ -2080,10 +2299,17 @@ Begin: state a one-line plan, then issue your first tool call.`;
           caret.textContent = '▾';
         }
       });
+      row.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+          const open = childBox && childBox.style.display !== 'none';
+          if ((e.key === 'ArrowRight' && open) || (e.key === 'ArrowLeft' && !open)) return;
+          e.preventDefault();
+          row.click();
+        }
+      });
     } else {
-      row.innerHTML =
-        `<span class="files-caret"></span><span class="files-icon">📄</span><span class="files-name">${this.escapeHtml(node.name)}</span>`;
-      row.addEventListener('click', () => this.addFileToChat(node.path));
+      row.innerHTML = `<span class="files-caret"></span>` + this.fileRowHtml(node.path, node.name);
+      this.bindFileRow(row, node.path);
     }
 
     wrap.appendChild(row);
@@ -2093,59 +2319,252 @@ Begin: state a one-line plan, then issue your first tool call.`;
   filterFilesTree() {
     const q = (this.filesSearch.value || '').toLowerCase().trim();
     if (!q) { this.renderFilesTree(); return; }
+    if (!this.repoTree) return;
 
-    const matches = (this.repoTree?.items || [])
-      .filter(i => i.type === 'blob' && i.path.toLowerCase().includes(q))
+    // Every space-separated term must appear; shorter paths and name hits rank first
+    const terms = q.split(/\s+/);
+    const matches = [...this.repoTree.fileSet]
+      .filter(p => terms.every(t => p.toLowerCase().includes(t)))
+      .map(p => ({ p, score: (terms.every(t => p.split('/').pop().toLowerCase().includes(t)) ? 0 : 1000) + p.length }))
+      .sort((a, b) => a.score - b.score)
       .slice(0, 200);
 
+    this.filesTree.innerHTML = '';
     if (!matches.length) {
       this.filesTree.innerHTML = '<div class="files-empty">No matching files.</div>';
       return;
     }
-    this.filesTree.innerHTML = matches
-      .map(i => `<div class="files-row files-flat" data-path="${this.escapeHtml(i.path)}"><span class="files-icon">📄</span><span class="files-name">${this.escapeHtml(i.path)}</span></div>`)
-      .join('');
-    this.filesTree.querySelectorAll('.files-flat').forEach(el => {
-      el.addEventListener('click', () => this.addFileToChat(el.dataset.path));
-    });
-  }
-
-  async addFileToChat(path) {
-    if (!this.repoTree) return;
-    const name = path.split('/').pop();
-    this.showNotification('📄 Fetching ' + name + '…');
-    try {
-      const { owner, repo, branch } = this.repoTree;
-      // Huge cap → attached files arrive whole (GitHub's Contents API tops out at 1MB anyway)
-      const content = await this.fetchRepoFile(owner, repo, path, branch, 2000000);
-
-      const INLINE_MAX = 4000; // small files paste inline (visible, convenient)
-      if (content.length <= INLINE_MAX) {
-        const block = `Here is \`${path}\` from ${owner}/${repo}:\n\n\`\`\`${this.langFromPath(path)}\n${content}\n\`\`\`\n`;
-        this.forwardToIframe({ prompt: block, autoSubmit: false });
-        this.showNotification('📄 Added ' + name + ' to the chat');
-      } else {
-        // Big files: attach the RAW file (real name) — the model reads it natively,
-        // no fence wrapping, and attachments take far larger content than pasted text.
-        this.forwardAttachToIframe(name, content);
-        this.showNotification('📎 Attached ' + name + ' (' + Math.round(content.length / 1000) + 'k chars) to the chat');
-      }
-      this.filesPanel.classList.add('hidden'); // collapse so you can see the chat + type your question
-    } catch (e) {
-      this.showNotification('⚠️ Could not fetch ' + name + ': ' + e.message);
+    for (const { p } of matches) {
+      const row = document.createElement('div');
+      row.className = 'files-row files-flat';
+      row.innerHTML = this.fileRowHtml(p, p);
+      this.bindFileRow(row, p);
+      this.filesTree.appendChild(row);
     }
   }
 
-  langFromPath(path) {
-    const ext = (path.split('.').pop() || '').toLowerCase();
-    const map = {
-      py: 'python', js: 'javascript', jsx: 'jsx', ts: 'typescript', tsx: 'tsx',
-      go: 'go', rs: 'rust', rb: 'ruby', php: 'php', java: 'java', kt: 'kotlin',
-      c: 'c', h: 'c', cpp: 'cpp', cc: 'cpp', cs: 'csharp', swift: 'swift',
-      sh: 'bash', bash: 'bash', yml: 'yaml', yaml: 'yaml', json: 'json',
-      md: 'markdown', html: 'html', css: 'css', sql: 'sql', toml: 'toml'
+  // ----- Selection -----
+
+  toggleFileSelected(path) {
+    if (!isReadablePath(path)) return;
+    if (this.selectedFiles.has(path)) this.selectedFiles.delete(path);
+    else this.selectedFiles.add(path);
+    this.refreshSelectionUi();
+  }
+
+  selectFolder(dir) {
+    const prefix = dir + '/';
+    const files = [...this.repoTree.fileSet].filter(p => p.startsWith(prefix) && isReadablePath(p));
+    const LIMIT = 40;
+    files.slice(0, LIMIT).forEach(p => this.selectedFiles.add(p));
+    if (files.length > LIMIT) this.showNotification(`Selected the first ${LIMIT} of ${files.length} files`);
+    this.refreshSelectionUi();
+  }
+
+  async selectWithImports(path) {
+    this.showNotification('🔗 Finding the files it imports…');
+    try {
+      const { owner, repo, ref } = this.repoTree;
+      const content = await this.fetchRepoFile(owner, repo, path, ref, 400000);
+      const found = resolveImports(extractImports(content, path), path, this.repoTree.fileSet).filter(isReadablePath);
+      this.selectedFiles.add(path);
+      found.forEach(p => this.selectedFiles.add(p));
+      this.refreshSelectionUi();
+      this.showNotification(found.length
+        ? `🔗 Selected ${path.split('/').pop()} + ${found.length} imported file${found.length === 1 ? '' : 's'}`
+        : '🔗 No in-repo imports found (only external packages)');
+    } catch (e) {
+      this.showNotification('⚠️ ' + e.message);
+    }
+  }
+
+  // Update checkmarks in place (keeps folders expanded and scroll position)
+  refreshSelectionUi() {
+    this.filesTree.querySelectorAll('.files-row[data-path]').forEach(row => {
+      const on = this.selectedFiles.has(row.dataset.path);
+      row.classList.toggle('selected', on);
+      row.setAttribute('aria-checked', String(on));
+      row.querySelector('.files-check')?.classList.toggle('on', on);
+    });
+    this.filesTree.querySelectorAll('.files-start-chip').forEach(chip =>
+      chip.classList.toggle('selected', this.selectedFiles.has(chip.dataset.path)));
+    this.filesTree.querySelectorAll('.files-row[data-dir]').forEach(row => this.updateDirCount(row));
+    const selBtn = this.filesTree.querySelector('.files-active [data-act="select"]');
+    if (selBtn && this.activeRepoFile) selBtn.textContent = this.selectedFiles.has(this.activeRepoFile.path) ? '✓ Selected' : '+ Select';
+    this.renderFilesActionBar();
+  }
+
+  // Badge on a folder showing how many selected files are inside it
+  updateDirCount(row) {
+    const badge = row.querySelector('.files-dir-count');
+    if (!badge) return;
+    const prefix = row.dataset.dir + '/';
+    let n = 0;
+    for (const p of this.selectedFiles) if (p.startsWith(prefix)) n++;
+    badge.hidden = n === 0;
+    badge.textContent = n;
+  }
+
+  modeLabel(mode = this.getReadMode()) {
+    return (READ_MODES.find(m => m.id === mode) || READ_MODES[0]).label;
+  }
+
+  renderFilesActionBar() {
+    if (!this.filesActionBar) return;
+    const n = this.selectedFiles?.size || 0;
+    this.filesActionBar.classList.toggle('hidden', n === 0);
+    if (!n) return;
+
+    const bytes = [...this.selectedFiles].reduce((sum, p) => sum + (this.repoTree?.sizes.get(p) || 0), 0);
+    const tokens = estimateTokens(bytes);
+    this.filesSelCount.textContent = `${n} file${n === 1 ? '' : 's'}`;
+    this.filesSelTokens.textContent = `~${formatCount(tokens)} tokens`;
+    // Rough guide: free chat plans get unreliable past ~100k tokens of context
+    this.filesSelTokens.classList.toggle('warn', tokens > 60000);
+    this.filesSelTokens.title = tokens > 60000
+      ? 'Large: free plans may cut this off. Try fewer files.'
+      : 'Estimated size of the selected files';
+
+    const mode = this.getReadMode();
+    this.filesModes.innerHTML = READ_MODES.map(m =>
+      `<button type="button" role="radio" aria-checked="${m.id === mode}" class="files-mode${m.id === mode ? ' active' : ''}" data-mode="${m.id}" title="${this.escapeHtml(m.hint)}">${this.escapeHtml(m.label)}</button>`
+    ).join('');
+    this.filesSend.textContent = mode === 'add' ? `Add ${n === 1 ? 'file' : 'pack'} to chat` : `${this.modeLabel(mode)} ${n === 1 ? 'file' : `${n} files`}`;
+  }
+
+  // ----- Sending -----
+
+  // Fetch with a small concurrency limit (be gentle to GitHub and the browser)
+  async fetchRepoFilesMany(paths) {
+    const { owner, repo, ref } = this.repoTree;
+    const out = new Array(paths.length);
+    let next = 0;
+    const worker = async () => {
+      while (next < paths.length) {
+        const i = next++;
+        try {
+          out[i] = { path: paths[i], content: await this.fetchRepoFile(owner, repo, paths[i], ref, 2000000) };
+        } catch (e) {
+          out[i] = { path: paths[i], error: e.message };
+        }
+      }
     };
-    return map[ext] || '';
+    await Promise.all(Array.from({ length: Math.min(4, paths.length) }, worker));
+    return out;
+  }
+
+  async sendRepoFiles(paths, mode = 'explain', lines = null) {
+    if (!this.repoTree || !paths.length) return;
+    if (this._sendingFiles) return;
+    this._sendingFiles = true;
+    if (this.filesSend) this.filesSend.disabled = true;
+    const { owner, repo, ref } = this.repoTree;
+    const repoName = `${owner}/${repo}`;
+    this.showNotification(`📄 Reading ${paths.length === 1 ? paths[0].split('/').pop() : paths.length + ' files'}…`);
+
+    try {
+      let files = await this.fetchRepoFilesMany(paths);
+      const failed = files.filter(f => f.error);
+      files = files.filter(f => !f.error);
+      if (!files.length) throw new Error(failed[0]?.error || 'could not read the files');
+
+      if (lines && files.length === 1) {
+        files[0] = { ...files[0], content: sliceLines(files[0].content, lines.start, lines.end), lines };
+      }
+
+      const single = files.length === 1 ? files[0] : null;
+      const what = single
+        ? (single.lines ? `lines ${single.lines.start}-${single.lines.end} of \`${single.path}\`` : `\`${single.path}\``)
+        : `these ${files.length} files`;
+      let question = readingPrompt(mode, { what, repo: repoName });
+      const totalChars = files.reduce((n, f) => n + f.content.length, 0);
+
+      if (single && single.content.length <= 4000) {
+        // Small single file: inline, so the code is visible in the chat
+        const fence = single.content.includes('```') ? '~~~~' : '```';
+        const block = `\`${single.path}\`${single.lines ? ` (lines ${single.lines.start}-${single.lines.end})` : ''} from ${repoName}:\n\n` +
+          `${fence}${langFromPath(single.path)}\n${single.content.replace(/\n$/, '')}\n${fence}`;
+        this.forwardToIframe({ prompt: question ? `${block}\n\n${question}` : block, autoSubmit: false });
+      } else {
+        // Several (or big) files: ONE attachment with a repo map, then the question
+        const pack = buildPack({ owner, repo, ref: this.refLabel(ref), files, treePaths: [...this.repoTree.fileSet] });
+        const fname = single
+          ? single.path.split('/').pop() + '.md'
+          : `${repo}-${files.length}-files.md`.replace(/[^\w.-]+/g, '-');
+        this.forwardAttachToIframe(fname, pack, 'text/markdown');
+        if (question) {
+          question = `The attached "${fname}" contains ${single ? what : `${files.length} files from ${repoName}`}` +
+            `${single ? '' : ` (${files.map(f => f.path).join(', ')})`}, starting with a map of the repository.\n\n${question}`;
+          // Give the upload a moment before the text lands
+          setTimeout(() => this.forwardToIframe({ prompt: question, autoSubmit: false }), 1500);
+        }
+      }
+
+      await this.markRead(files.map(f => f.path));
+      this.selectedFiles.clear();
+      this.filesPanel.classList.add('hidden'); // show the chat so you can read / ask
+      const size = `~${formatCount(estimateTokens(totalChars))} tokens`;
+      this.showNotification(failed.length
+        ? `⚠️ Sent ${files.length}, skipped ${failed.length} (${failed[0].error})`
+        : `📎 Sent ${files.length === 1 ? files[0].path.split('/').pop() : files.length + ' files'} (${size})`);
+    } catch (e) {
+      this.showNotification('⚠️ Could not read: ' + e.message);
+    } finally {
+      this._sendingFiles = false;
+      if (this.filesSend) this.filesSend.disabled = false;
+    }
+  }
+
+  // ----- Pull requests & commits -----
+
+  async explainActiveDiff() {
+    const gh = await this.getActiveGitHub();
+    if (!gh || (gh.kind !== 'pull' && gh.kind !== 'commit')) {
+      this.showNotification('⚠️ Open a pull request or commit on GitHub first');
+      return;
+    }
+    const label = gh.kind === 'pull' ? `pull request #${gh.number}` : `commit ${gh.sha.slice(0, 7)}`;
+    this.showNotification(`🔀 Fetching the ${label} diff…`);
+    try {
+      const diff = await this.fetchDiff(gh);
+      if (!diff.trim()) throw new Error('the diff is empty');
+      const MAX = 400000;
+      const body = diff.length > MAX ? diff.slice(0, MAX) + '\n… [diff truncated]' : diff;
+      const files = (diff.match(/^diff --git /gm) || []).length;
+      const fname = gh.kind === 'pull' ? `${gh.repo}-pr-${gh.number}.diff` : `${gh.repo}-${gh.sha.slice(0, 7)}.diff`;
+      const pageTitle = (gh.title || '').split(' · ')[0];
+
+      this.forwardAttachToIframe(fname, body, 'text/plain');
+      const prompt =
+        `The attached "${fname}" is the diff of ${label} in ${gh.owner}/${gh.repo}` +
+        `${pageTitle ? ` ("${pageTitle}")` : ''}, touching ${files} file${files === 1 ? '' : 's'}.\n\n` +
+        `Explain this change to someone learning from real-world code:\n` +
+        `1. The goal of the change in 2-3 sentences.\n` +
+        `2. File by file: what changed and why it was needed.\n` +
+        `3. Techniques or patterns worth learning from it.\n` +
+        `4. Anything risky, missing (tests, edge cases), or that you would do differently.`;
+      setTimeout(() => this.forwardToIframe({ prompt, autoSubmit: false }), 1500);
+      this.showNotification(`🔀 Sent the ${label} diff (${files} file${files === 1 ? '' : 's'}, ~${formatCount(estimateTokens(body.length))} tokens)`);
+    } catch (e) {
+      this.showNotification('⚠️ Could not get the diff: ' + e.message);
+    }
+  }
+
+  // github.com serves .diff files without using the API quota (and with your
+  // login, for private repos); the API is the fallback.
+  async fetchDiff(gh) {
+    const path = gh.kind === 'pull' ? `pull/${gh.number}` : `commit/${gh.sha}`;
+    try {
+      const res = await fetch(`https://github.com/${gh.owner}/${gh.repo}/${path}.diff`, { credentials: 'include' });
+      if (res.ok) return await res.text();
+    } catch (e) { /* fall back to the API */ }
+    const token = await this.getGithubToken();
+    const apiPath = gh.kind === 'pull' ? `pulls/${gh.number}` : `commits/${gh.sha}`;
+    const res = await fetch(`https://api.github.com/repos/${gh.owner}/${gh.repo}/${apiPath}`, {
+      headers: { ...this.ghHeaders(token), Accept: 'application/vnd.github.diff' }
+    });
+    if (!res.ok) throw new Error(res.status === 404 ? 'not found (private repo? add a GitHub token)' : 'GitHub ' + res.status);
+    return res.text();
   }
 
   // Attach text as a file (paste-a-File, like screenshots) so large files don't overflow the input

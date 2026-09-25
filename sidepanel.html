@@ -177,30 +177,53 @@
         <span class="files-tab-label files-quick-name"></span>
       </button>
 
+      <!-- Explain the pull request / commit open in the GitHub tab -->
+      <button id="dock-explain-diff" class="dock-tab hidden" title="Explain this change">
+        <span class="dock-ico" aria-hidden="true">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="6" cy="6" r="2.5"></circle><circle cx="18" cy="18" r="2.5"></circle>
+            <path d="M6 8.5v7a2.5 2.5 0 0 0 2.5 2.5H15"></path><path d="M18 15.5V9a3 3 0 0 0-3-3h-4"></path><path d="m13 4-2 2 2 2"></path>
+          </svg>
+        </span>
+        <span class="files-tab-label">Explain PR</span>
+      </button>
+
       <!-- Browse the repo file tree -->
-      <button id="files-rail" class="files-rail dock-tab hidden" title="Browse repo files">
+      <button id="files-rail" class="files-rail dock-tab hidden" title="Repo Reader: pick files to read with the AI">
         <span class="files-stack" aria-hidden="true">
           <span class="sheet sheet-1"></span>
           <span class="sheet sheet-2"></span>
           <span class="sheet sheet-3"></span>
         </span>
-        <span class="files-tab-label">Files</span>
+        <span class="files-tab-label">Read repo</span>
       </button>
     </div>
 
-    <!-- Repo File Browser Panel -->
-    <div id="files-panel" class="files-panel hidden">
+    <!-- Repo Reader: browse, pick several files, send them as one pack -->
+    <div id="files-panel" class="files-panel hidden" aria-label="Repo Reader">
       <div class="files-header">
-        <span class="files-title">Repo Files</span>
+        <div class="files-heading">
+          <span class="files-title">Repo Reader</span>
+          <span id="files-repo-chip" class="files-repo-chip"></span>
+        </div>
         <div class="files-header-actions">
           <button id="btn-refresh-files" class="history-action-btn" title="Reload tree">⟳</button>
-          <button id="btn-close-files" class="history-action-btn" title="Close">✕</button>
+          <button id="btn-close-files" class="history-action-btn" title="Close (Esc)">✕</button>
         </div>
       </div>
       <div class="files-search-wrap">
-        <input id="files-search" type="text" class="files-search" placeholder="Filter files…">
+        <input id="files-search" type="search" class="files-search" placeholder="Find a file…  ( / )" autocomplete="off">
       </div>
       <div id="files-tree" class="files-tree"></div>
+      <div id="files-actionbar" class="files-actionbar hidden">
+        <div class="files-sel-info">
+          <span id="files-sel-count" class="files-sel-count"></span>
+          <span id="files-sel-tokens" class="files-sel-tokens"></span>
+          <button id="files-clear" class="files-link-btn" type="button">Clear</button>
+        </div>
+        <div id="files-modes" class="files-modes" role="radiogroup" aria-label="What should the AI do?"></div>
+        <button id="files-send" class="files-send" type="button">Send to chat</button>
+      </div>
     </div>
 
     <!-- Deep-Dive Lens Picker Popover -->
