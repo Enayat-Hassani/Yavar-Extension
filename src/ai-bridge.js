@@ -870,7 +870,7 @@
     let queued = null;
     const schedule = (records) => {
       if (queued || (records && onlyOwnChanges(records))) return;
-      queued = setTimeout(() => { queued = null; refreshInChatUi(); }, 700);
+      queued = setTimeout(() => { queued = null; trackTemp(); refreshInChatUi(); }, 700);
     };
     const start = () => {
       refreshInChatUi();
@@ -882,6 +882,57 @@
     };
     if (document.body) start();
     else document.addEventListener('DOMContentLoaded', start);
+  }
+
+  // ---- Private (temporary) chats for Yavar's background work ----
+  // ChatGPT and Claude open one from a URL; Gemini only has a button. We
+  // remember that this page is one while the user stays in that conversation
+  // (the URL can change after the first message) and forget it when they
+  // start a new chat.
+  const NEW_CHAT_PATH = { chatgpt: /^\/$/, claude: /^\/new\/?$/, gemini: /^(\/u\/\d+)?\/app\/?$/ };
+  const here = () => location.pathname + location.search;
+
+  function tempUrl() {
+    const q = new URLSearchParams(location.search);
+    const p = detectPlatform();
+    return (p === 'chatgpt' && q.get('temporary-chat') === 'true') || (p === 'claude' && q.has('incognito'));
+  }
+
+  let tempSession = tempUrl();
+  let lastLoc = here();
+  function trackTemp() {
+    const now = here();
+    if (now === lastLoc) return;
+    lastLoc = now;
+    if (tempUrl()) tempSession = true;
+    else if (NEW_CHAT_PATH[detectPlatform()]?.test(location.pathname)) tempSession = false;
+  }
+
+  async function waitVisible(selector, timeout) {
+    const end = Date.now() + timeout;
+    while (Date.now() < end) {
+      const el = document.querySelector(selector);
+      if (el && el.offsetParent !== null) return el;
+      await new Promise(r => setTimeout(r, 150));
+    }
+    return null;
+  }
+
+  async function startGeminiTempChat() {
+    const SEL = 'button[data-test-id="temp-chat-button"]';
+    let btn = await waitVisible(SEL, 1500);
+    if (!btn) {
+      // In a narrow panel the button lives in the collapsed side menu
+      document.querySelector('button[data-test-id="side-nav-menu-button"]')?.click();
+      btn = await waitVisible(SEL, 4000);
+    }
+    if (!btn) return false;
+    const on = btn.getAttribute('aria-pressed') === 'true' || /\b(active|selected)\b/.test(btn.className);
+    if (!on) btn.click();
+    await new Promise(r => setTimeout(r, 900));   // let the new chat's URL settle
+    tempSession = true;
+    lastLoc = here();
+    return true;
   }
 
   function replaceComposerText(text) {
@@ -978,6 +1029,18 @@
 
     if (event.data?.action === 'AUTO_REPLACE_PROMPT' && typeof event.data.prompt === 'string') {
       replaceComposerText(event.data.prompt);
+    }
+
+    if (event.data?.action === 'CHAT_STATE') {
+      trackTemp();
+      postToYavar({ action: 'CHAT_STATE', requestId: event.data.requestId, platform: detectPlatform(), temporary: tempSession });
+    }
+
+    if (event.data?.action === 'START_TEMP_CHAT') {
+      const requestId = event.data.requestId;
+      (detectPlatform() === 'gemini' ? startGeminiTempChat() : Promise.resolve(false))
+        .catch(() => false)
+        .then(ok => postToYavar({ action: 'TEMP_CHAT_STARTED', requestId, ok }));
     }
 
     if (event.data?.action === 'STOP_WATCH') {

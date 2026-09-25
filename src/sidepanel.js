@@ -95,6 +95,7 @@ class YavarSidePanel {
     try { chrome.runtime.connect({ name: 'yavar-panel' }); } catch (e) { /* ignore */ }
     this.cacheElements();
     this.setupSheets();
+    this.setupThread();
     await this.loadModels();
     this.bindEvents();
     this.loadCurrentAI();
@@ -274,11 +275,11 @@ class YavarSidePanel {
     document.getElementById('btn-save-current')?.addEventListener('click', () => this.captureLastAnswer());
     this.sidebarBtnAgents?.addEventListener('click', (e) => {
       e.stopPropagation();
-      this.toggleToolMenu('agents', this.sidebarBtnAgents);
+      this.toggleToolMenu('agents', this.sidebarBtnAgents, e.detail === 0);
     });
     this.sidebarBtnCode?.addEventListener('click', (e) => {
       e.stopPropagation();
-      this.toggleToolMenu('code', this.sidebarBtnCode);
+      this.toggleToolMenu('code', this.sidebarBtnCode, e.detail === 0);
     });
     this.toolMenu?.addEventListener('click', (e) => {
       const item = e.target.closest('[data-tool]');
@@ -501,11 +502,53 @@ class YavarSidePanel {
 
   onBridgeReady() {
     this._bridgeReady = true;
+    (this._bridgeWaiters || []).splice(0).forEach(resolve => resolve(true));
     const queued = this._chatQueue || [];
     this._chatQueue = [];
     queued.forEach(p => this.aiFrame?.contentWindow?.postMessage(p, '*'));
     this.sendTemplatesToFrame();
     this.sendContextToFrame();
+  }
+
+  whenBridgeReady(timeoutMs = 15000) {
+    if (this._bridgeReady) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      (this._bridgeWaiters = this._bridgeWaiters || []).push(resolve);
+      setTimeout(() => resolve(false), timeoutMs);
+    });
+  }
+
+  // Yavar's own work (in-panel answers, agents, reader explanations) goes to
+  // a private chat by default, so it doesn't fill the user's chat history.
+  // Already in one? Keep going there, so follow-ups keep their context.
+  async ensureTaskChat() {
+    this._chatIsTemp = false;
+    try {
+      const { settings } = await chrome.storage.sync.get('settings');
+      if (settings?.tempChats === false) return;
+    } catch (e) { /* default on */ }
+    let host = '';
+    try { host = new URL(this.getCurrentModel()?.url || '').hostname; } catch (e) { return; }
+    const platform = /chatgpt\.com|chat\.openai\.com/.test(host) ? 'chatgpt'
+      : /claude\.ai/.test(host) ? 'claude' : /gemini\.google\.com/.test(host) ? 'gemini' : null;
+    if (!platform) return;
+    let state;
+    try { state = await this.chatRequest('CHAT_STATE', { timeoutMs: 8000 }); } catch (e) { return; }
+    if (state?.temporary) { this._chatIsTemp = true; return; }
+
+    if (platform === 'gemini') {
+      let ok = false;
+      try { ok = (await this.chatRequest('START_TEMP_CHAT', { timeoutMs: 12000 }))?.ok; } catch (e) { /* below */ }
+      if (!ok) this.showNotification("⚠️ Couldn't open a temporary Gemini chat, using this one");
+      this._chatIsTemp = !!ok;
+      return;
+    }
+    this._chatIsTemp = true;
+    this.loadingState.classList.remove('hidden');
+    this.chatNavigating();
+    this.aiFrame.src = platform === 'chatgpt' ? 'https://chatgpt.com/?temporary-chat=true' : 'https://claude.ai/new?incognito';
+    await this.whenBridgeReady(20000);
+    await new Promise(r => setTimeout(r, 800));   // the message box renders just after
   }
 
   // The chat frame is (re)loading: queue until its new bridge is ready, and
@@ -566,11 +609,12 @@ class YavarSidePanel {
       ANSWER_WATCH_STALLED: 'no reply from the AI',
       ANSWER_WATCH_TIMEOUT: 'no reply from the AI'
     }[data.action];
-    if (data.action !== 'ANSWER_SETTLED' && data.action !== 'ANSWER_CAPTURED' && !fail) return false;
+    const plain = data.action === 'CHAT_STATE' || data.action === 'TEMP_CHAT_STARTED';
+    if (data.action !== 'ANSWER_SETTLED' && data.action !== 'ANSWER_CAPTURED' && !fail && !plain) return false;
     this._chatRequests.delete(data.requestId);
     clearTimeout(req.timer);
     if (fail) req.reject(new Error(fail));
-    else req.resolve(data.text || '');
+    else req.resolve(plain ? data : (data.text || ''));
     return true;
   }
 
@@ -591,6 +635,7 @@ class YavarSidePanel {
     if (this._panelAsk) throw new Error('still waiting for the previous answer');
     this._panelAsk = true;
     try {
+      await this.ensureTaskChat();
       const reply = this.chatRequest('WATCH_FOR_ANSWER', { timeoutMs: 120000, onProgress });
       attachments.forEach(a => this.forwardAttachToIframe(a.filename, a.content, a.mime || 'text/markdown'));
       if (attachments.length) await new Promise(r => setTimeout(r, 1500 + attachments.length * 400));
@@ -603,18 +648,21 @@ class YavarSidePanel {
 
   // An answer shown inside Yavar: streams, renders Markdown, and wires the
   // code-block buttons. onUseCode(code, lang) enables "Use in editor".
-  answerCard(container, { title, onUseCode = null, collapsible = false } = {}) {
+  answerCard(container, { title, onUseCode = null, collapsible = false, saveAs = null } = {}) {
     const card = document.createElement('div');
     card.className = 'answer-card is-writing';
     card.innerHTML =
       `<div class="answer-head"><span class="answer-title">${this.escapeHtml(title)}</span>` +
       `<span class="answer-status"><span class="files-spinner"></span>Writing…</span>` +
+      (saveAs ? `<button type="button" class="answer-link" data-ans="copy" title="Copy as Markdown" hidden>Copy</button>` +
+        `<button type="button" class="answer-link" data-ans="save" title="Keep this answer in Saved answers" hidden>Save</button>` : '') +
       `<button type="button" class="answer-link" data-ans="chat" title="Show the chat (the answer is there too)">Open in chat</button></div>` +
       `<div class="answer-body md"></div>`;
     container.appendChild(card);
     const body = card.querySelector('.answer-body');
     let code = [];
     let pending = null;
+    let finalText = '';
     const paint = (text) => {
       const r = renderMarkdown(text);
       body.innerHTML = r.html;
@@ -626,6 +674,22 @@ class YavarSidePanel {
       if (!btn) return;
       if (btn.dataset.ans === 'chat') { this.closeSheets(); return; }
       if (btn.dataset.ans === 'toggle') { card.classList.toggle('collapsed'); return; }
+      if (btn.dataset.ans === 'copy') {
+        try { await navigator.clipboard.writeText(finalText); btn.textContent = 'Copied ✓'; } catch (err) { /* ignore */ }
+        setTimeout(() => { btn.textContent = 'Copy'; }, 1400);
+        return;
+      }
+      if (btn.dataset.ans === 'save') {
+        if (btn.disabled) return;
+        await this.addHistoryEntry({
+          id: 'h_' + Date.now(), ts: Date.now(), platform: this.getCurrentModel()?.name || 'AI', url: '',
+          prompt: saveAs.prompt || title || '', answer: finalText,
+          topic: (this._readingContext && Date.now() - this._readingContext.ts < 3600000) ? this._readingContext.label : ''
+        });
+        btn.textContent = 'Saved ✓';
+        btn.disabled = true;
+        return;
+      }
       const block = code[Number(btn.closest('[data-code-index]')?.dataset.codeIndex)];
       if (!block) return;
       const act = btn.dataset.mdAct;
@@ -651,9 +715,11 @@ class YavarSidePanel {
       },
       done: (text) => {
         pending = null;
+        finalText = text;
         paint(text);
         card.classList.remove('is-writing');
         card.querySelector('.answer-status').textContent = '';
+        card.querySelectorAll('[data-ans="save"], [data-ans="copy"]').forEach(b => { b.hidden = false; });
       },
       fail: (msg) => {
         card.classList.remove('is-writing');
@@ -791,6 +857,8 @@ class YavarSidePanel {
       const deepResearchToggle = document.getElementById('setting-deep-research-toggle');
       const inChatToggle = document.getElementById('setting-inchat-toggle');
       if (inChatToggle) inChatToggle.checked = settings?.inChatButtons ?? true;
+      const tempChatsToggle = document.getElementById('setting-temp-chats-toggle');
+      if (tempChatsToggle) tempChatsToggle.checked = settings?.tempChats ?? true;
 
       if (autoPasteToggle) autoPasteToggle.checked = autoPaste;
       if (autoSubmitToggle) autoSubmitToggle.checked = autoSubmit;
@@ -804,6 +872,7 @@ class YavarSidePanel {
         screenshotPreviewToggle?.addEventListener('change', (e) => this.saveSetting('showScreenshotPreview', e.target.checked));
         deepResearchToggle?.addEventListener('change', (e) => this.saveSetting('deepResearch', e.target.checked));
         inChatToggle?.addEventListener('change', (e) => this.saveSetting('inChatButtons', e.target.checked));
+        tempChatsToggle?.addEventListener('change', (e) => this.saveSetting('tempChats', e.target.checked));
         this.settingsListenersAdded = true;
       }
     } catch (error) {
@@ -1259,6 +1328,7 @@ First Task: Based on the tree and tech stack, what is the single most important 
       staleTurns: 0
     };
     this.showAgentBar();
+    this.agent.task = query;
     this.logWorkActivity(`🔎 Researching: ${query}`);
 
     const prompt = `RESEARCH TASK: ${query}\n\n` + this.researchInstructions(deep);
@@ -1349,7 +1419,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
     if (this.agent.turn > 1) {
       setTimeout(send, 1500);
     } else {
-      send();
+      this.ensureTaskChat().finally(send);
     }
   }
 
@@ -1382,7 +1452,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
     const doneLabel = this.agent.mode === 'repo' ? 'Analysis complete.' : 'Research complete.';
 
     if (!calls.length) {
-      this.finishAgent(doneLabel);
+      this.finishAgent(doneLabel, answer);
       return;
     }
 
@@ -1643,7 +1713,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
     this.showNotification('⏹️ Agent stopped');
   }
 
-  finishAgent(message) {
+  finishAgent(message, answer = '') {
     if (this.agent) this.agent.active = false;
     this._agentRequestId = null;
     this.postToChat({ action: 'STOP_WATCH' });
@@ -1651,6 +1721,16 @@ Begin: state a one-line plan, then issue your first tool call.`;
     if (this.agentBar) this.agentBar.classList.add('hidden');
     if (this.workPill) this.workPill.classList.add('hidden');
     this.liftCurtain();
+    // The report opens in the answer sheet; follow-ups continue the same chat
+    if (answer.trim()) {
+      const a = this.agent || {};
+      this.showInThread({
+        title: a.mode === 'repo' ? 'Deep-dive' : 'Research',
+        sub: a.mode === 'repo' ? `${a.owner}/${a.repo}` : '',
+        label: a.task || (a.mode === 'repo' ? `Deep-dive of ${a.owner}/${a.repo}` : 'Research'),
+        text: answer
+      });
+    }
   }
 
   // Elegantly slide the cover up like a curtain, revealing the chat beneath
@@ -1881,7 +1961,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
     ];
   }
 
-  toggleToolMenu(kind, anchor) {
+  toggleToolMenu(kind, anchor, fromKeyboard = false) {
     const menu = this.toolMenu;
     if (!menu) return;
     if (!menu.classList.contains('hidden') && menu.dataset.kind === kind) {
@@ -1901,7 +1981,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
     const r = anchor.getBoundingClientRect();
     menu.style.right = (window.innerWidth - r.left + 8) + 'px';
     menu.style.top = Math.max(8, Math.min(r.top - 8, window.innerHeight - menu.offsetHeight - 8)) + 'px';
-    menu.querySelector('button:not([disabled])')?.focus();
+    if (fromKeyboard) menu.querySelector('button:not([disabled])')?.focus();
   }
 
   // One place for every tool, whether opened from the sidebar or the chat
@@ -2251,7 +2331,6 @@ Begin: state a one-line plan, then issue your first tool call.`;
     ).join('\n\n---\n\n');
 
     const fname = 'videos-' + (topic.replace(/[^\w.-]+/g, '-').slice(0, 40) || 'topic') + '.md';
-    this.forwardAttachToIframe(fname, bundle);
 
     const planBlock = plan ? `\n\nMY PLAN / WHAT I CARE ABOUT:\n"""\n${plan}\n"""` : '';
     const prompt =
@@ -2262,8 +2341,10 @@ Begin: state a one-line plan, then issue your first tool call.`;
       planBlock +
       `\n\nGive me a concrete, de-duplicated shortlist tailored to my plan, with a one-line ` +
       `reason for each item and which video(s) it came from.`;
-    this.forwardToIframe({ prompt, autoSubmit: false });
-    this.showNotification(`✅ Added ${got.length} transcripts — review the prompt and send`);
+    this.askInThread({
+      title: 'Videos', sub: topic, label: `What ${got.length} videos say about “${topic}”`,
+      prompt, attachments: [{ filename: fname, content: bundle }]
+    });
   }
 
   // Feature: research this page — seed the web-research agent with the page.
@@ -2308,6 +2389,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
       staleTurns: 0
     };
     this.showAgentBar();
+    this.agent.task = question || `Research: ${page.title}`;
     this.logWorkActivity(`🔎 Researching page: ${page.title}`);
 
     const goal = question
@@ -3342,22 +3424,19 @@ Begin: state a one-line plan, then issue your first tool call.`;
       const act = e.target.closest('[data-act]')?.dataset.act;
       if (act === 'summarize') {
         const lines = commits.map(c => `- ${c.sha.slice(0, 7)} ${c.date ? c.date.slice(0, 10) : ''} ${c.author}: ${c.title}`).join('\n');
-        this.forwardToIframe({
+        this._readingContext = { label: `${owner}/${repo}`, ts: Date.now() };
+        this.askInThread({
+          title: 'Recent changes', sub: `${owner}/${repo}`, label: `What changed lately (${commits.length} commits)`,
           prompt: `Here are the latest ${commits.length} commits on ${this.refLabel(ref)} of ${owner}/${repo}:\n\n${lines}\n\n` +
             'Explain what the project has been working on lately: group related commits into themes, say what each theme ' +
-            'means for the code or users, and point out any commit worth reading closely to learn from (and why).',
-          autoSubmit: false
+            'means for the code or users, and point out any commit worth reading closely to learn from (and why).'
         });
-        this._readingContext = { label: `${owner}/${repo}`, ts: Date.now() };
-        this.filesPanel.classList.add('hidden');
-        this.showNotification(`🕘 Sent ${commits.length} recent commits`);
         return;
       }
       const row = e.target.closest('.files-commit');
       if (row && (act === 'explain' || !e.target.closest('button'))) {
         this.explainDiff({ owner, repo, kind: 'commit', sha: row.dataset.sha,
           title: commits.find(c => c.sha === row.dataset.sha)?.title || '' });
-        this.filesPanel.classList.add('hidden');
       }
     };
   }
@@ -3514,11 +3593,20 @@ Begin: state a one-line plan, then issue your first tool call.`;
       let question = readingPrompt(mode, { what, repo: repoName });
       const totalChars = files.reduce((n, f) => n + f.content.length, 0);
 
+      const modeLabel = READ_MODES.find(m => m.id === mode)?.label || 'Explain';
+      const names = files.map(f => f.path.split('/').pop());
+      const label = `${modeLabel}: ${names.length > 3 ? names.slice(0, 3).join(', ') + ` +${names.length - 3}` : names.join(', ')}`;
+      let answered = false;
       if (single && single.content.length <= 4000) {
         // Small single file: inline, so the code is visible in the chat
         const block = `\`${single.path}\`${single.lines ? ` (lines ${single.lines.start}-${single.lines.end})` : ''} from ${repoName}:\n\n` +
           fencedFile(single);
-        this.forwardToIframe({ prompt: question ? `${block}\n\n${question}` : block, autoSubmit: false });
+        if (question) {
+          this.askInThread({ title: modeLabel, sub: repoName, label, prompt: `${block}\n\n${question}` });
+          answered = true;
+        } else {
+          this.forwardToIframe({ prompt: block, autoSubmit: false });
+        }
       } else {
         // Several (or big) files: ONE attachment with a repo map, then the question
         const fname = single
@@ -3528,13 +3616,21 @@ Begin: state a one-line plan, then issue your first tool call.`;
           question = `The attached "${fname}" contains ${single ? what : `${files.length} files from ${repoName}`}` +
             `${single ? '' : ` (${files.map(f => f.path).join(', ')})`}, starting with a map of the repository.\n\n${question}`;
         }
-        this.attachThenPrompt(fname, this.packFor(files), question);
+        if (question) {
+          this.askInThread({ title: modeLabel, sub: repoName, label, prompt: question,
+            attachments: [{ filename: fname, content: this.packFor(files) }] });
+          answered = true;
+        } else {
+          this.attachThenPrompt(fname, this.packFor(files), question);
+        }
       }
 
       await this.markRead(files.map(f => f.path));
       this._readingContext = { label: repoName, ts: Date.now() };
       this.selectedFiles.clear();
-      this.filesPanel.classList.add('hidden'); // show the chat so you can read / ask
+      // "Just add" leaves the files in the chat for your own question;
+      // everything else is answered in Yavar's answer sheet
+      if (!answered) this.filesPanel.classList.add('hidden');
       const size = `~${formatCount(estimateTokens(totalChars))} tokens`;
       this.showNotification(failed.length
         ? `⚠️ Sent ${files.length}, skipped ${failed.length} (${failed[0].error})`
@@ -3592,7 +3688,13 @@ Begin: state a one-line plan, then issue your first tool call.`;
         `2. File by file: what changed and why it was needed.\n` +
         `3. Techniques or patterns worth learning from it.\n` +
         `4. Anything risky, missing (tests, edge cases), or that you would do differently.`;
-      this.attachThenPrompt(fname, body, prompt, { mime: 'text/plain' });
+      this.askInThread({
+        title: gh.kind === 'pull' ? `PR #${gh.number}` : `Commit ${gh.sha.slice(0, 7)}`,
+        sub: `${gh.owner}/${gh.repo}${pageTitle ? ' · ' + pageTitle : ''}`,
+        label: `Explain this ${gh.kind === 'pull' ? 'pull request' : 'commit'}`,
+        prompt,
+        attachments: [{ filename: fname, content: body, mime: 'text/plain' }]
+      });
       this.showNotification(`🔀 Sent the ${label} diff (${files} file${files === 1 ? '' : 's'}, ~${formatCount(estimateTokens(body.length))} tokens)`);
     } catch (e) {
       this.showNotification('⚠️ Could not get the diff: ' + e.message);
@@ -4035,9 +4137,9 @@ Begin: state a one-line plan, then issue your first tool call.`;
 
   initCodeMirror() {
     this.cmEditor = CodeMirror(this.notesEditorContainer, {
-      mode: 'javascript',
-      theme: 'material-darker',
-      lineNumbers: true,
+      mode: null,
+      theme: 'yavar',
+      lineNumbers: false,
       lineWrapping: true,
       tabSize: 2,
       indentWithTabs: false,
@@ -4147,7 +4249,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
     if (this.runEditor) return;
     this.runEditor = CodeMirror(document.getElementById('run-editor'), {
       mode: 'python',
-      theme: 'material-darker',
+      theme: 'yavar',
       lineNumbers: true,
       lineWrapping: false,
       tabSize: 4,
@@ -4320,8 +4422,8 @@ Begin: state a one-line plan, then issue your first tool call.`;
   }
 
   // Ask in the background and stream the answer into a card in `container`
-  async showAnswerIn(container, title, prompt, { attachments = [], onUseCode = null, onDone = null } = {}) {
-    const card = this.answerCard(container, { title, onUseCode, collapsible: true });
+  async showAnswerIn(container, title, prompt, { attachments = [], onUseCode = null, onDone = null, saveAs = null, collapsible = true } = {}) {
+    const card = this.answerCard(container, { title, onUseCode, collapsible, saveAs });
     card.el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     try {
       // Bring the answer's top into view once it starts arriving
@@ -4340,6 +4442,91 @@ Begin: state a one-line plan, then issue your first tool call.`;
       card.fail(e.message);
       return null;
     }
+  }
+
+  // ========== Answer sheet ==========
+  // Yavar's own requests (reader, PRs, commits, agents, videos) are answered
+  // here. The conversation still happens in the chat (private by default),
+  // so follow-ups keep their context and "Open chat" shows the real thing.
+
+  setupThread() {
+    this.threadPanel = document.getElementById('thread-panel');
+    this.threadBody = document.getElementById('thread-body');
+    this.threadInput = document.getElementById('thread-input');
+    if (!this.threadPanel) return;
+    const close = () => this.threadPanel.classList.add('hidden');
+    document.getElementById('thread-close')?.addEventListener('click', close);
+    document.getElementById('thread-open-chat')?.addEventListener('click', () => this.closeSheets());
+    this.threadPanel.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+    document.getElementById('thread-form')?.addEventListener('submit', (e) => {
+      e.preventDefault();
+      this.threadFollowUp();
+    });
+    this.threadInput?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+        e.preventDefault();
+        this.threadFollowUp();
+      }
+    });
+    this.threadInput?.addEventListener('input', () => {
+      this.threadInput.style.height = 'auto';
+      this.threadInput.style.height = Math.min(this.threadInput.scrollHeight, 120) + 'px';
+    });
+  }
+
+  openThread({ title, sub = '', fresh = true }) {
+    if (fresh) {
+      this.threadBody.innerHTML = '';
+      document.getElementById('thread-title').textContent = title;
+      document.getElementById('thread-sub').textContent = sub;
+    }
+    document.getElementById('thread-private')?.classList.toggle('hidden', !this._chatIsTemp);
+    this.threadPanel.classList.remove('hidden');
+  }
+
+  addThreadQuestion(label) {
+    const q = document.createElement('div');
+    q.className = 'thread-q';
+    q.textContent = label;
+    this.threadBody.appendChild(q);
+  }
+
+  // Ask the chat and stream the answer into the sheet
+  async askInThread({ title, sub = '', label, prompt, attachments = [], fresh = true }) {
+    if (!this.threadPanel) return null;
+    // A new topic replaces a question that is still waiting for its answer
+    if (fresh && this._panelAsk && !this.agent?.active) {
+      this.postToChat({ action: 'STOP_WATCH' });
+      this.cancelChatRequests('replaced by a new question');
+      await new Promise(r => setTimeout(r, 0));   // let the old request unwind
+    }
+    this.openThread({ title, sub, fresh });
+    this.addThreadQuestion(label);
+    this.threadPanel.classList.add('is-busy');
+    try {
+      return await this.showAnswerIn(this.threadBody, 'Answer', prompt, {
+        attachments, collapsible: false, saveAs: { prompt: label }
+      });
+    } finally {
+      this.threadPanel.classList.remove('is-busy');
+      document.getElementById('thread-private')?.classList.toggle('hidden', !this._chatIsTemp);
+    }
+  }
+
+  // An answer we already have (an agent's final report)
+  showInThread({ title, sub = '', label, text }) {
+    if (!this.threadPanel || !text) return;
+    this.openThread({ title, sub });
+    this.addThreadQuestion(label);
+    this.answerCard(this.threadBody, { title: 'Answer', saveAs: { prompt: label } }).done(text);
+  }
+
+  threadFollowUp() {
+    const text = this.threadInput.value.trim();
+    if (!text || this.threadPanel.classList.contains('is-busy')) return;
+    this.threadInput.value = '';
+    this.threadInput.style.height = '';
+    this.askInThread({ label: text, prompt: text, fresh: false });
   }
 
   // ========== Input Dialog ==========
