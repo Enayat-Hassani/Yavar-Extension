@@ -8,7 +8,7 @@ A Chrome extension that embeds ChatGPT, Claude, and Gemini in a sidebar — so y
 
 **Yavar inside the chat** — when ChatGPT, Claude or Gemini is open in the sidebar, Yavar's controls sit right in the chat (inside isolated shadow DOM, so they never clash with the site's styles):
 
-- Under every finished answer: **Save** (stores that exact answer *with the question you asked*), **→ Notes**, **Copy MD**, and **View diagram** when the answer contains a Mermaid chart.
+- Under every finished answer: **Save** (stores that exact answer *with the question you asked*), **→ Notes**, **Copy MD**.
 - Above the message box: **📚 Repo**, **📄 Page**, **✨ Prompts** (wraps what you typed in any of your templates), **▶ Code**, **🧳 Fresh** (continue in a fresh chat).
 - **▶ Run** on Python and JavaScript code blocks.
 
@@ -56,8 +56,6 @@ Add, edit, or remove your own templates in Settings using `{{selection}}`, `{{pa
 **Run code** — every Python or JavaScript block in an answer gets a **▶ Run** button. It runs locally in a sandbox (Python via bundled [Pyodide](https://pyodide.org), standard library only), shows the output, and offers *Ask AI to fix it*, *Explain the output* and *What should I try next?*. The sidebar's code button opens the same runner as a playground.
 
 **Explain PR / commit** — on a pull request or commit page, one click attaches the diff and asks the AI to explain the goal, each file's change, what to learn from it, and what's risky.
-
-**Architecture diagrams** — generate a Mermaid **architecture diagram** of the current repository, rendered interactively in the sidebar.
 
 **History & saved answers** — capture the AI's last answer and keep it in a searchable saved-answers panel. Answers saved while reading a repo are tagged with it (click the tag to see everything about that repo). Expand, copy, send to Notes, or **export everything as Markdown**.
 
@@ -119,7 +117,7 @@ Yavar-Extension/
 │   ├── content.js        # Content script: floating menu + text selection
 │   ├── background.js     # Service worker (lifecycle, screenshot, routing)
 │   ├── sidepanel.js      # Sidebar UI: chat, agents, repo browser, history,
-│   │                     #   diagrams, notes, model management, settings
+│   │                     #   notes, model management, settings
 │   ├── ai-bridge.js      # Auto-submit / auto-paste / answer capture on AI platforms
 │   ├── options.js        # Settings page
 │   └── utils/
@@ -131,7 +129,7 @@ Yavar-Extension/
 │       └── contextMenu.js
 ├── lib/
 │   ├── codemirror/       # CodeMirror (notes panel)
-│   └── mermaid/          # Mermaid (architecture diagrams)
+│   └── pyodide/          # Python runtime for the code runner
 ├── styles/
 ├── tests/                # node:test unit tests
 ├── scripts/              # ytx setup + check.mjs (static checks)

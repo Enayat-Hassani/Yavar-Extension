@@ -1154,45 +1154,6 @@ div.toggle-switch.active::after {
   transform: translateY(-100%);
 }
 
-/* Finished "done" state: hide the working bits, show the diagram */
-.work-cover.done .work-orb,
-.work-cover.done .work-cover-log,
-.work-cover.done .work-cover-actions,
-.work-cover.done .work-cover-hint {
-  display: none;
-}
-
-.work-cover-done {
-  display: none;
-  flex-direction: column;
-  align-items: center;
-  width: 100%;
-}
-
-.work-cover.done .work-cover-done {
-  display: flex;
-  animation: fadeIn 0.3s ease;
-}
-
-.work-cover.done .work-cover-inner {
-  max-width: 96%;
-}
-
-.work-cover-diagram {
-  width: 100%;
-  max-height: 62vh;
-  overflow: auto;
-  background: var(--surface);
-  border-radius: 10px;
-  padding: 14px;
-  margin-bottom: 16px;
-}
-
-.work-cover-diagram svg {
-  max-width: 100%;
-  height: auto;
-}
-
 .work-cover-inner {
   width: 100%;
   max-width: 420px;
@@ -2132,64 +2093,6 @@ div.toggle-switch.active::after {
 .lens-desc {
   font-size: 11px;
   color: var(--text-secondary);
-}
-
-/* ========== Architecture Diagram Panel ========== */
-.diagram-panel {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  z-index: 70;
-  background: var(--surface);
-  display: flex;
-  flex-direction: column;
-  animation: fadeIn 0.2s ease;
-}
-
-.diagram-panel.hidden {
-  display: none;
-}
-
-.diagram-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 12px 16px;
-  background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border);
-}
-
-.diagram-title {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.diagram-content {
-  flex: 1;
-  overflow: auto;
-  padding: 20px;
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  background: var(--surface);
-}
-
-.diagram-content svg {
-  max-width: 100%;
-  height: auto;
-}
-
-.diagram-error {
-  color: var(--danger);
-  font-size: 12px;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-family: 'SF Mono', monospace;
-  text-align: left;
-  width: 100%;
 }
 
 /* ========== History Panel (captured AI answers) ========== */

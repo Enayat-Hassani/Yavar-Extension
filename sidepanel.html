@@ -53,11 +53,6 @@
         </div>
         <p class="work-cover-hint">Yavar is working with the AI in the background. Peek anytime — it keeps running.</p>
 
-        <!-- Shown when work finishes: the diagram, then the curtain lifts -->
-        <div class="work-cover-done">
-          <div id="work-cover-diagram" class="work-cover-diagram"></div>
-          <button id="btn-work-reveal" class="btn-secondary">Reveal chat ↑</button>
-        </div>
       </div>
     </div>
 
@@ -262,15 +257,6 @@
           <div class="lens-text"><div class="lens-name">Security review</div><div class="lens-desc">Auth, input, secrets, deps</div></div>
         </div>
       </div>
-    </div>
-
-    <!-- Architecture Diagram Panel (Mermaid) -->
-    <div id="diagram-panel" class="diagram-panel hidden">
-      <div class="diagram-header">
-        <span class="diagram-title">Architecture Diagram</span>
-        <button id="btn-close-diagram" class="history-action-btn" title="Close">✕</button>
-      </div>
-      <div id="diagram-content" class="diagram-content"></div>
     </div>
 
     <!-- Model Switcher Popover -->
@@ -562,7 +548,7 @@
           </button>
 
           <!-- Saved Answers / History -->
-          <button class="sidebar-icon-btn" id="sidebar-btn-history" title="Saved Answers &amp; Diagram">
+          <button class="sidebar-icon-btn" id="sidebar-btn-history" title="Saved answers">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
               <circle cx="12" cy="12" r="10"></circle>
               <polyline points="12 6 12 12 16 14"></polyline>
@@ -588,15 +574,6 @@
 
           <div class="sidebar-divider"></div>
 
-          <!-- Diagram (Mermaid) -->
-          <button class="sidebar-icon-btn" id="sidebar-btn-diagram" title="Show Architecture Diagram">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-              <rect x="3" y="3" width="7" height="5" rx="1"></rect>
-              <rect x="14" y="16" width="7" height="5" rx="1"></rect>
-              <path d="M6.5 8v4a2 2 0 0 0 2 2h6"></path>
-            </svg>
-          </button>
-
           <!-- Settings -->
           <button class="sidebar-icon-btn" id="sidebar-btn-settings" title="Settings">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -615,7 +592,6 @@
   <script src="lib/codemirror/javascript.min.js"></script>
   <script src="lib/codemirror/python.min.js"></script>
   <script src="lib/codemirror/htmlmixed.min.js"></script>
-  <script src="lib/mermaid/mermaid.min.js"></script>
   <script src="src/sidepanel.js" type="module"></script>
 </body>
 </html>

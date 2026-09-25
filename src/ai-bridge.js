@@ -696,11 +696,8 @@
       '<span class="brand">Yavar</span>' +
       '<button data-a="save" title="Save this answer to Yavar history">Save</button>' +
       '<button data-a="notes" title="Append this answer to your Yavar notes">→ Notes</button>' +
-      '<button data-a="copy" title="Copy as Markdown">Copy MD</button>' +
-      '<button data-a="diagram" title="Open the diagram in this answer" hidden>View diagram</button>';
+      '<button data-a="copy" title="Copy as Markdown">Copy MD</button>';
     root.appendChild(row);
-    const md0 = answerMarkdown(msgEl);
-    if (/```mermaid/i.test(md0)) row.querySelector('[data-a="diagram"]').hidden = false;
 
     row.addEventListener('click', async (e) => {
       const btn = e.target.closest('button');
@@ -717,9 +714,6 @@
       } else if (btn.dataset.a === 'copy') {
         try { await navigator.clipboard.writeText(text); flash(btn, 'Copied ✓'); }
         catch (err) { postToYavar({ action: 'YAVAR_COPY', text }); flash(btn, 'Copied ✓'); }
-      } else if (btn.dataset.a === 'diagram') {
-        const m = text.match(/```mermaid\s*\n([\s\S]*?)```/i);
-        if (m) postToYavar({ action: 'YAVAR_DIAGRAM', code: m[1].trim() });
       }
     });
     msgEl.appendChild(host);
@@ -802,6 +796,7 @@
     if (!input) { if (composer) composer.host.hidden = true; return; }
     composer = composer && composer.host.isConnected ? composer : buildComposer();
     const anchor = input.closest('form') || input.parentElement?.parentElement || input;
+    watchAnchor(anchor);
     const r = anchor.getBoundingClientRect();
     const barH = composer.bar.offsetHeight || 30;
     const top = r.top - barH - 6;
@@ -811,9 +806,32 @@
     composer.host.toggleAttribute('dark', looksDark());
   }
 
+  // Re-place the bar when the message box moves or resizes (it grows as you
+  // type, the sidebar is resized…) instead of polling on a timer.
+  let anchorObserver = null;
+  let observedAnchor = null;
+  function watchAnchor(anchor) {
+    if (anchor === observedAnchor || typeof ResizeObserver === 'undefined') return;
+    anchorObserver?.disconnect();
+    anchorObserver = new ResizeObserver(() => schedulePlace());
+    anchorObserver.observe(anchor);
+    observedAnchor = anchor;
+  }
+
+  // At most one placement per animation frame (scroll fires very often)
+  let placeQueued = false;
+  function schedulePlace() {
+    if (placeQueued) return;
+    placeQueued = true;
+    requestAnimationFrame(() => { placeQueued = false; placeComposer(); });
+  }
+
   function removeInChatUi() {
     document.querySelectorAll('yavar-answer-bar').forEach(el => el.remove());
     if (composer) { composer.host.remove(); composer = null; }
+    anchorObserver?.disconnect();
+    anchorObserver = null;
+    observedAnchor = null;
   }
 
   function refreshInChatUi() {
@@ -843,9 +861,8 @@
     const start = () => {
       refreshInChatUi();
       new MutationObserver(schedule).observe(document.body, { childList: true, subtree: true });
-      addEventListener('resize', () => placeComposer());
-      addEventListener('scroll', () => placeComposer(), true);
-      setInterval(placeComposer, 1500); // layout shifts the observer can't see
+      addEventListener('resize', schedulePlace);
+      addEventListener('scroll', schedulePlace, { capture: true, passive: true });
     };
     if (document.body) start();
     else document.addEventListener('DOMContentLoaded', start);
