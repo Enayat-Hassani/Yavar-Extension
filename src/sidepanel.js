@@ -10,6 +10,10 @@ import {
   fencedFile, parseCommitsAtom, commitsFromApi, timeAgo, folderReadme, readmeSnippet, LOCAL_SKIP_DIRS, isSecretPath
 } from './utils/github.js';
 
+// Session-storage keys other parts of the extension use to hand work to the panel
+const PENDING_KEYS = ['pendingAutoSubmit', 'lastSubmitTime', 'pendingText', 'pendingAction',
+  'pendingScreenshot', 'pendingScreenshotRect'];
+
 class YavarSidePanel {
   constructor() {
     // Default AI models
@@ -55,7 +59,7 @@ class YavarSidePanel {
     this.setupStorageListener();
     this.initCodeMirror();
     this.setupFilesRailVisibility();
-    this.checkPendingData();
+    this.drainPending();
   }
 
   cacheElements() {
@@ -414,10 +418,6 @@ class YavarSidePanel {
     setTimeout(() => {
       this.loadingState.classList.add('hidden');
     }, 500);
-
-    // Retry any pending auto-submit after iframe loads
-    console.log('[Yavar Sidepanel] Iframe fully loaded:', this.aiFrame.src);
-    this.checkPendingAutoSubmit();
   }
 
   openNewChat() {
@@ -3528,8 +3528,8 @@ Begin: state a one-line plan, then issue your first tool call.`;
     // own button; otherwise pair with the last prompt we forwarded (< 15 min)
     const prompt = data.prompt != null
       ? data.prompt
-      : (this._lastForwardedPrompt && Date.now() - (this._lastForwardedTime || 0) < 900000)
-        ? this._lastForwardedPrompt
+      : (this._lastPrompt && Date.now() - (this._lastPromptTime || 0) < 900000)
+        ? this._lastPrompt
         : '';
 
     const entry = {
@@ -4057,67 +4057,14 @@ Begin: state a one-line plan, then issue your first tool call.`;
   // ========== Message Listener ==========
 
   setupMessageListener() {
-    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-      console.log('[Yavar Sidepanel] Message received:', message);
-
-      if (message.type === 'TEXT_SELECTION') {
-        this.handleTextSelection(message.text);
-      }
-
-      if (message.type === 'SCREENSHOT_CAPTURED') {
-        console.log('[Yavar Sidepanel] SCREENSHOT_CAPTURED received, rect:', message.rect, 'imageData length:', message.imageData?.length);
-        if (message.rect) {
-          // Crop to selected area
-          console.log('[Yavar Sidepanel] Calling cropAndShowScreenshot');
-          this.cropAndShowScreenshot(message.imageData, message.rect);
-        } else {
-          console.log('[Yavar Sidepanel] No rect, showing full screenshot');
-          this.capturedScreenshot = message.imageData;
-          this.showScreenshotPanel(message.imageData);
-        }
-      }
-
-      if (message.action === 'trigger_learn') {
-        this.analyzeGitHubRepo();
-      }
-
-      if (message.action === 'toggle_notes') {
-        this.toggleNotes();
-      }
-
-      if (message.action === 'AUTO_SUBMIT_PROMPT' && message.prompt) {
-        // Only forward if we haven't already handled this prompt via checkPendingAutoSubmit
-        // The background sends staggered retries — only honor the first one
-        if (!this._lastForwardedPrompt || this._lastForwardedPrompt !== message.prompt ||
-            Date.now() - (this._lastForwardedTime || 0) > 8000) {
-          console.log('[Yavar Sidepanel] Received AUTO_SUBMIT_PROMPT, forwarding to iframe');
-          this._lastForwardedPrompt = message.prompt;
-          this._lastForwardedTime = Date.now();
-          // Handled here, so drop the stored copy; otherwise the next frame load
-          // (model switch, new chat) would paste this prompt again.
-          chrome.storage.session.remove(['pendingAutoSubmit', 'lastSubmitTime']).catch(() => {});
-          this.getAutoPasteSettings().then(({ autoPaste, autoSubmit }) => {
-            if (autoPaste) this.forwardToIframe({ prompt: message.prompt, autoSubmit });
-            else navigator.clipboard.writeText(message.prompt)
-              .then(() => this.showNotification('📋 Prompt copied - paste it into the chat'))
-              .catch(() => {});
-          });
-        } else {
-          console.log('[Yavar Sidepanel] Ignoring duplicate AUTO_SUBMIT_PROMPT from staggered retry');
-        }
-      }
-
-      sendResponse({ received: true });
-      return true;
+    // Only answer our own messages: runtime messages also reach the
+    // background, and replying to theirs (e.g. the options page's
+    // GET_SETTINGS) could win the race with an empty response.
+    chrome.runtime.onMessage.addListener((message) => {
+      if (message.action === 'trigger_learn') this.analyzeGitHubRepo();
+      else if (message.action === 'toggle_notes') this.toggleNotes();
+      return false;
     });
-  }
-
-  async handleTextSelection(text) {
-    if (!text) return;
-
-    await navigator.clipboard.writeText(text);
-    const preview = text.substring(0, 50) + (text.length > 50 ? '...' : '');
-    this.showNotification(`📋 "${preview}" copied!`);
   }
 
   // The in-chat "Prompts" menu lists the user's templates
@@ -4190,16 +4137,9 @@ Begin: state a one-line plan, then issue your first tool call.`;
   // content): paste it into the chat input so the user can add a question,
   // and also try the clipboard (which fails if the panel isn't focused).
   async handlePendingText(text) {
-    // The storage listener and the on-open check can both see the same text
-    if (text === this._lastPendingText && Date.now() - this._lastPendingTime < 5000) return;
-    this._lastPendingText = text;
-    this._lastPendingTime = Date.now();
-
     const { autoPaste } = await this.getAutoPasteSettings();
     if (autoPaste) {
-      await this.whenFrameReady();
-      this._lastForwardedPrompt = text;
-      this._lastForwardedTime = Date.now();
+      this.rememberPrompt(text);
       this.forwardToIframe({ prompt: text, autoSubmit: false });
     }
     let copied = false;
@@ -4210,7 +4150,6 @@ Begin: state a one-line plan, then issue your first tool call.`;
   }
 
   setupStorageListener() {
-    // Listen for screenshot data that arrives after sidepanel loads
     chrome.storage.onChanged.addListener((changes, areaName) => {
       if (areaName === 'sync' && changes.promptTemplates) this.sendTemplatesToFrame();
       if (areaName === 'local' && changes.yavarHistory && this._history) {
@@ -4218,108 +4157,62 @@ Begin: state a one-line plan, then issue your first tool call.`;
       }
       if (areaName !== 'session') return;
 
-      if (changes.pendingAction?.newValue) {
-        chrome.storage.session.remove('pendingAction');
-        this.runPendingAction(changes.pendingAction.newValue);
-      }
-
-      // Context-menu text while the panel is already open
-      if (changes.pendingText?.newValue) {
-        const text = changes.pendingText.newValue;
-        chrome.storage.session.remove('pendingText');
-        this.handlePendingText(text);
-      }
-
-      if (changes.pendingScreenshot) {
-        const { newValue, oldValue } = changes.pendingScreenshot;
-        if (newValue) {
-          console.log('[Yavar Sidepanel] Storage listener: screenshot arrived');
-          chrome.storage.session.get('pendingScreenshotRect').then(result => {
-            const rect = result?.pendingScreenshotRect;
-            if (rect) {
-              this.cropAndShowScreenshot(newValue, rect);
-              chrome.storage.session.remove('pendingScreenshotRect');
-            } else {
-              this.capturedScreenshot = newValue;
-              this.showScreenshotPanel(newValue);
-            }
-            chrome.storage.session.remove('pendingScreenshot');
-          });
-        }
-      }
+      if (PENDING_KEYS.some(k => changes[k]?.newValue !== undefined)) this.drainPending();
     });
   }
 
-  async checkPendingData() {
-    try {
-      const result = await chrome.storage.session.get(['pendingText', 'pendingScreenshot', 'pendingScreenshotRect', 'pendingAction']);
-
-      if (result.pendingAction) {
-        await chrome.storage.session.remove('pendingAction');
-        this.runPendingAction(result.pendingAction);
-      }
-
-      if (result.pendingText) {
-        await chrome.storage.session.remove('pendingText');
-        this.handlePendingText(result.pendingText);
-      }
-
-      if (result.pendingScreenshot) {
-        console.log('[Yavar Sidepanel] Found pending screenshot in storage, rect:', result.pendingScreenshotRect);
-        if (result.pendingScreenshotRect) {
-          // Crop to selected area
-          this.cropAndShowScreenshot(result.pendingScreenshot, result.pendingScreenshotRect);
-        } else {
-          this.capturedScreenshot = result.pendingScreenshot;
-          this.showScreenshotPanel(result.pendingScreenshot);
-        }
-        await chrome.storage.session.remove('pendingScreenshot');
-        await chrome.storage.session.remove('pendingScreenshotRect');
-      }
-    } catch (error) {
-      console.error('[Yavar] Failed to check pending data:', error);
-    }
-
-    // Also check for pending auto-submit
-    this.checkPendingAutoSubmit();
+  // Items handed over through chrome.storage.session (floating-menu prompt,
+  // context-menu text, queued actions, screenshots). One serialized drain
+  // reads and removes them, so however many signals arrive (panel open,
+  // storage changes), each item is handled exactly once.
+  drainPending() {
+    this._drain = (this._drain || Promise.resolve())
+      .then(() => this.drainPendingOnce())
+      .catch(e => console.error('[Yavar] Failed to handle pending items:', e));
+    return this._drain;
   }
 
-  async checkPendingAutoSubmit() {
-    console.log('[Yavar Sidepanel] checkPendingAutoSubmit called');
-    try {
-      const result = await chrome.storage.session.get(['pendingAutoSubmit', 'lastSubmitTime']);
-      console.log('[Yavar Sidepanel] checkPendingAutoSubmit result:', result);
-      if (result.pendingAutoSubmit && Date.now() - result.lastSubmitTime < 120000) {
-        console.log('[Yavar Sidepanel] Found pending auto-submit prompt, length:', result.pendingAutoSubmit?.length);
-        
-        // Check settings
-        const { autoPaste, autoSubmit } = await this.getAutoPasteSettings();
-        
-        if (autoPaste) {
-          // Only forward if message listener hasn't already handled this prompt
-          if (this._lastForwardedPrompt === result.pendingAutoSubmit &&
-              Date.now() - (this._lastForwardedTime || 0) < 8000) {
-            console.log('[Yavar Sidepanel] Skipping checkPending — already forwarded by message listener');
-          } else {
-            this._lastForwardedPrompt = result.pendingAutoSubmit;
-            this._lastForwardedTime = Date.now();
-            this.forwardToIframe({ prompt: result.pendingAutoSubmit, autoSubmit: autoSubmit });
-            console.log('[Yavar Sidepanel] Forwarding to iframe (autoSubmit:', autoSubmit + ')');
-          }
-        } else {
-          // Just notify user
-          this.showNotification('📋 Text ready - click to paste manually');
-          console.log('[Yavar Sidepanel] Auto-paste disabled, showing notification');
-        }
-        
-        await chrome.storage.session.remove(['pendingAutoSubmit', 'lastSubmitTime']);
-        console.log('[Yavar Sidepanel] Cleared pending auto-submit');
+  async drainPendingOnce() {
+    const r = await chrome.storage.session.get(PENDING_KEYS);
+    const present = PENDING_KEYS.filter(k => r[k] !== undefined);
+    if (!present.length) return;
+    await chrome.storage.session.remove(present);
+
+    if (r.pendingAction) this.runPendingAction(r.pendingAction);
+    if (r.pendingText) this.handlePendingText(r.pendingText);
+    if (r.pendingScreenshot) {
+      if (r.pendingScreenshotRect) {
+        this.cropAndShowScreenshot(r.pendingScreenshot, r.pendingScreenshotRect);
       } else {
-        console.log('[Yavar Sidepanel] No valid pending auto-submit (expired or missing)');
+        this.capturedScreenshot = r.pendingScreenshot;
+        this.showScreenshotPanel(r.pendingScreenshot);
       }
-    } catch (error) {
-      console.error('[Yavar Sidepanel] Failed to check pending auto-submit:', error);
     }
+    // Floating-menu prompts older than 2 minutes are stale (panel closed meanwhile)
+    if (r.pendingAutoSubmit && Date.now() - (r.lastSubmitTime || 0) < 120000) {
+      this.handlePendingPrompt(r.pendingAutoSubmit);
+    }
+  }
+
+  async handlePendingPrompt(prompt) {
+    const { autoPaste, autoSubmit } = await this.getAutoPasteSettings();
+    if (autoPaste) {
+      this.rememberPrompt(prompt);
+      this.forwardToIframe({ prompt, autoSubmit });   // queued until the chat is ready
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(prompt);
+      this.showNotification('📋 Prompt copied - paste it into the chat');
+    } catch (e) {
+      this.showNotification('📋 Prompt ready - enable auto-paste in Settings to send it directly');
+    }
+  }
+
+  // The last prompt we put in the chat, to pair with a saved answer
+  rememberPrompt(prompt) {
+    this._lastPrompt = prompt;
+    this._lastPromptTime = Date.now();
   }
 
   forwardToIframe({ prompt, autoSubmit }) {
