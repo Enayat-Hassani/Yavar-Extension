@@ -25,6 +25,7 @@ Add, edit, or remove your own templates in Settings using `{{selection}}`, `{{pa
 - **Add page** — drop the current tab's readable text into the chat as context (inline, or attached as a file when long). On a **YouTube watch page** this becomes **Add video**, grabbing the transcript instead of the page chrome.
 - **Research this page** — seed the web research agent with the current page, then let it branch out via SEARCH/READ to confirm and deepen it.
 - **Search videos** (deep search) — search YouTube for a topic (e.g. *"top things to try in Chiang Mai"*), pull the top videos' transcripts (sponsor reads removed by default), and hand them to the AI to synthesize against your Notes. Requires a running **ytx** server; see [Video search: setting up ytx](#video-search-setting-up-ytx).
+- **Transcribe list** — on a YouTube *search results* page, one click transcribes the top videos you're already looking at (honoring your own filters/sort) and synthesizes them the same way.
 - On GitHub, one click **adds the file you're viewing**, or opens the repo **file browser**.
 
 **Repo file browser** — browse any GitHub repository's file tree right in the sidebar, search/filter it, and jump to (or quick-add) the active file.

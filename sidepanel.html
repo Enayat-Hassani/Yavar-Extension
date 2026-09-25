@@ -156,6 +156,17 @@
         <span class="files-tab-label">Search videos</span>
       </button>
 
+      <!-- Transcribe the videos shown on the current YouTube search results page -->
+      <button id="dock-transcribe-results" class="dock-tab hidden" title="Transcribe the top videos on this YouTube search page and synthesize them">
+        <span class="dock-ico" aria-hidden="true">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 5h13M3 10h13M3 15h8"></path>
+            <path d="M17 13.5l4 2.5-4 2.5z" fill="currentColor" stroke="none"></path>
+          </svg>
+        </span>
+        <span class="files-tab-label">Transcribe list</span>
+      </button>
+
       <!-- One-click "add the file open in the GitHub tab" (only when viewing a file) -->
       <button id="files-quick-add" class="files-quick-add dock-tab hidden" title="Add the file open in your GitHub tab">
         <span class="files-stack" aria-hidden="true">
@@ -392,6 +403,28 @@
           <div class="modal-actions">
             <button type="button" id="btn-cancel-model" class="btn-secondary">Cancel</button>
             <button type="submit" class="btn-primary">Add Model</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Reusable in-panel input dialog (replaces the browser's native prompt) -->
+    <div id="input-dialog" class="modal hidden">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3 id="input-dialog-title">Input</h3>
+          <button id="input-dialog-close" class="btn-icon" type="button">✕</button>
+        </div>
+        <form id="input-dialog-form">
+          <div class="form-group">
+            <label id="input-dialog-label" for="input-dialog-field"></label>
+            <input type="text" id="input-dialog-field" autocomplete="off">
+            <textarea id="input-dialog-textarea" class="hidden" rows="3"></textarea>
+            <p id="input-dialog-hint" class="input-dialog-hint hidden"></p>
+          </div>
+          <div class="modal-actions">
+            <button type="button" id="input-dialog-cancel" class="btn-secondary">Cancel</button>
+            <button type="submit" id="input-dialog-ok" class="btn-primary">OK</button>
           </div>
         </form>
       </div>
