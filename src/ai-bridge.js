@@ -165,12 +165,22 @@
     const TICK = 600;
     const STABLE_TICKS = 3;      // ~1.8s of unchanged text after generation stops
     const STALL_MS = 22000;      // no generation + no new answer → the submit likely failed
-    const HARD_TIMEOUT_MS = 90000;
+    const IDLE_TIMEOUT_MS = 90000; // give up only after this long with no activity
 
     let sawGenerating = false;
     let lastText = '';
+    let lastProgress = '';
     let stableTicks = 0;
     let elapsed = 0;
+    let lastActivity = Date.now();
+
+    // Stream the answer so far to the panel (only when it changed)
+    const progress = (text) => {
+      if (!text || text === lastProgress) return;
+      lastProgress = text;
+      lastActivity = Date.now();
+      try { postToYavar({ action: 'ANSWER_PROGRESS', text, requestId }); } catch (e) {}
+    };
 
     const settle = (text) => {
       const rid = requestId;
@@ -195,16 +205,19 @@
       if (watchRequestId !== requestId) return;
       elapsed += TICK;
 
-      // Still generating → keep waiting, reset stability
-      if (document.querySelector(STOP_SELECTORS)) {
-        sawGenerating = true;
-        stableTicks = 0;
-        return;
-      }
-
+      const generating = !!document.querySelector(STOP_SELECTORS);
       const cur = extractLastAnswer();
       const curCount = document.querySelectorAll(sel.message).length;
       const isNewAnswer = curCount > baselineCount || (cur.ok && cur.text && cur.text !== preArmText);
+      if (cur.ok && isNewAnswer) progress(cur.text);
+
+      // Still generating → keep waiting, reset stability
+      if (generating) {
+        sawGenerating = true;
+        lastActivity = Date.now();
+        stableTicks = 0;
+        return;
+      }
 
       if (cur.ok && cur.text && isNewAnswer) {
         if (cur.text === lastText) {
@@ -221,9 +234,14 @@
       }
     }, TICK);
 
-    watchSafetyTimer = setTimeout(() => {
-      if (watchRequestId === requestId) emit('ANSWER_WATCH_TIMEOUT');
-    }, HARD_TIMEOUT_MS);
+    // Time out only after a long stretch with no generation and no new text
+    const checkIdle = () => {
+      if (watchRequestId !== requestId) return;
+      const idle = Date.now() - lastActivity;
+      if (idle >= IDLE_TIMEOUT_MS) emit('ANSWER_WATCH_TIMEOUT');
+      else watchSafetyTimer = setTimeout(checkIdle, IDLE_TIMEOUT_MS - idle);
+    };
+    watchSafetyTimer = setTimeout(checkIdle, IDLE_TIMEOUT_MS);
   }
 
   function waitForElement(selector, timeout = 10000) {

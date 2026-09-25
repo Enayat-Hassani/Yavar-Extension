@@ -3,6 +3,7 @@
 
 import { isPublicWebUrl } from './utils/net.js';
 import { loadTemplates, expandTemplate, varsInTemplate } from './utils/templates.js';
+import { renderMarkdown, runnableLang } from './utils/markdown.js';
 import { pickCoreFiles, planPrompt, hintPrompt, checkPrompt, parseRebuildPlan } from './utils/rebuild.js';
 import {
   parseGitHubUrl, refCandidates, rawFileUrl, encodePath, isReadablePath, estimateTokens, formatCount, formatBytes,
@@ -47,10 +48,52 @@ class YavarSidePanel {
     return tabs;
   }
 
+  // Bottom sheets: a drag handle on top of each; one remembered height
+  setupSheets() {
+    let saved = null;
+    try { saved = Number(localStorage.getItem('yavarSheetH')) || null; } catch (e) { /* no storage */ }
+    const apply = (pct) => document.querySelectorAll('.sheet').forEach(el => el.style.setProperty('--sheet-h', pct + '%'));
+    if (saved) apply(saved);
+    document.querySelectorAll('.sheet').forEach(sheet => {
+      const handle = document.createElement('div');
+      handle.className = 'sheet-handle';
+      handle.title = 'Drag to resize · double-click for full height';
+      sheet.prepend(handle);
+      handle.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        handle.setPointerCapture(e.pointerId);
+        sheet.classList.add('dragging');
+        const move = (ev) => {
+          const pct = Math.round(Math.min(100, Math.max(30, ((innerHeight - ev.clientY) / innerHeight) * 100)));
+          apply(pct);
+          saved = pct;
+        };
+        const up = () => {
+          sheet.classList.remove('dragging');
+          handle.removeEventListener('pointermove', move);
+          try { localStorage.setItem('yavarSheetH', String(saved)); } catch (err) { /* ignore */ }
+        };
+        handle.addEventListener('pointermove', move);
+        handle.addEventListener('pointerup', up, { once: true });
+      });
+      handle.addEventListener('dblclick', () => {
+        saved = saved >= 99 ? 72 : 100;
+        apply(saved);
+        try { localStorage.setItem('yavarSheetH', String(saved)); } catch (err) { /* ignore */ }
+      });
+    });
+  }
+
+  // Hide every sheet to show the chat
+  closeSheets() {
+    document.querySelectorAll('.sheet').forEach(el => el.classList.add('hidden'));
+  }
+
   async init() {
     // Let the background know a panel is open (used where there's no side panel API)
     try { chrome.runtime.connect({ name: 'yavar-panel' }); } catch (e) { /* ignore */ }
     this.cacheElements();
+    this.setupSheets();
     await this.loadModels();
     this.bindEvents();
     this.loadCurrentAI();
@@ -468,15 +511,22 @@ class YavarSidePanel {
   // Post { action, requestId } to the chat bridge and resolve with the
   // reply's text (ANSWER_SETTLED / ANSWER_CAPTURED) or reject on its failure
   // messages or a timeout. Replies are matched by requestId in the listener.
-  chatRequest(action, { timeoutMs = 0 } = {}) {
+  // With timeoutMs, the request fails after that long *without progress*
+  // (each ANSWER_PROGRESS restarts the clock, so long answers aren't cut off).
+  chatRequest(action, { timeoutMs = 0, onProgress = null } = {}) {
     if (!this.aiFrame?.contentWindow) return Promise.reject(new Error('no AI chat loaded'));
     this._chatRequests = this._chatRequests || new Map();
     const id = `req_${action}_${Date.now()}`;
     return new Promise((resolve, reject) => {
-      const timer = timeoutMs ? setTimeout(() => {
-        if (this._chatRequests.delete(id)) reject(new Error('the chat did not respond'));
-      }, timeoutMs) : null;
-      this._chatRequests.set(id, { resolve, reject, timer });
+      const req = { resolve, reject, timer: null, onProgress };
+      req.arm = () => {
+        clearTimeout(req.timer);
+        if (timeoutMs) req.timer = setTimeout(() => {
+          if (this._chatRequests.delete(id)) reject(new Error('the chat did not respond'));
+        }, timeoutMs);
+      };
+      req.arm();
+      this._chatRequests.set(id, req);
       this.postToChat({ action, requestId: id });
     });
   }
@@ -494,6 +544,11 @@ class YavarSidePanel {
   settleChatRequest(data) {
     const req = data.requestId && this._chatRequests?.get(data.requestId);
     if (!req) return false;
+    if (data.action === 'ANSWER_PROGRESS') {
+      req.arm();
+      try { req.onProgress?.(data.text || ''); } catch (e) { /* UI errors shouldn't kill the request */ }
+      return true;
+    }
     const fail = {
       ANSWER_CAPTURE_FAILED: data.reason === 'no-messages' ? 'no answer in the chat yet' : 'could not read the answer',
       ANSWER_WATCH_FAILED: 'answer reading is not supported on this model',
@@ -515,6 +570,86 @@ class YavarSidePanel {
     const reply = this.chatRequest('WATCH_FOR_ANSWER', { timeoutMs: 120000 });
     this.forwardToIframe({ prompt, autoSubmit: true });
     return reply;
+  }
+
+  // Ask the chat something and get the answer back *inside Yavar*, streamed
+  // as it's written, while the conversation carries on in the chat itself.
+  // attachments: [{ filename, content, mime }] are uploaded first.
+  async askInPanel(prompt, { attachments = [], onProgress = null } = {}) {
+    if (this.agent?.active) throw new Error('an agent is using the chat, stop it first');
+    if (this._panelAsk) throw new Error('still waiting for the previous answer');
+    this._panelAsk = true;
+    try {
+      const reply = this.chatRequest('WATCH_FOR_ANSWER', { timeoutMs: 120000, onProgress });
+      attachments.forEach(a => this.forwardAttachToIframe(a.filename, a.content, a.mime || 'text/markdown'));
+      if (attachments.length) await new Promise(r => setTimeout(r, 1500 + attachments.length * 400));
+      this.forwardToIframe({ prompt, autoSubmit: true });
+      return await reply;
+    } finally {
+      this._panelAsk = false;
+    }
+  }
+
+  // An answer shown inside Yavar: streams, renders Markdown, and wires the
+  // code-block buttons. onUseCode(code, lang) enables "Use in editor".
+  answerCard(container, { title, onUseCode = null, collapsible = false } = {}) {
+    const card = document.createElement('div');
+    card.className = 'answer-card is-writing';
+    card.innerHTML =
+      `<div class="answer-head"><span class="answer-title">${this.escapeHtml(title)}</span>` +
+      `<span class="answer-status"><span class="files-spinner"></span>Writing…</span>` +
+      `<button type="button" class="answer-link" data-ans="chat" title="Show the chat (the answer is there too)">Open in chat</button></div>` +
+      `<div class="answer-body md"></div>`;
+    container.appendChild(card);
+    const body = card.querySelector('.answer-body');
+    let code = [];
+    let pending = null;
+    const paint = (text) => {
+      const r = renderMarkdown(text);
+      body.innerHTML = r.html;
+      code = r.code;
+      if (!onUseCode) body.querySelectorAll('[data-md-act="use"]').forEach(b => b.remove());
+    };
+    card.addEventListener('click', async (e) => {
+      const btn = e.target.closest('[data-md-act], [data-ans]');
+      if (!btn) return;
+      if (btn.dataset.ans === 'chat') { this.closeSheets(); return; }
+      if (btn.dataset.ans === 'toggle') { card.classList.toggle('collapsed'); return; }
+      const block = code[Number(btn.closest('[data-code-index]')?.dataset.codeIndex)];
+      if (!block) return;
+      const act = btn.dataset.mdAct;
+      if (act === 'copy') {
+        try { await navigator.clipboard.writeText(block.code); btn.textContent = 'Copied ✓'; } catch (err) { /* ignore */ }
+        setTimeout(() => { btn.textContent = 'Copy'; }, 1400);
+      } else if (act === 'run') {
+        this.openRunPanel({ lang: runnableLang(block.lang), code: block.code, autoRun: true });
+      } else if (act === 'use' && onUseCode) {
+        onUseCode(block.code, runnableLang(block.lang));
+      }
+    });
+    if (collapsible) {
+      card.querySelector('.answer-title').insertAdjacentHTML('afterend',
+        '<button type="button" class="answer-link" data-ans="toggle" title="Collapse / expand">▾</button>');
+    }
+    return {
+      el: card,
+      // Streaming updates are painted at most once per frame
+      update: (text) => {
+        if (pending == null) requestAnimationFrame(() => { paint(pending); pending = null; });
+        pending = text;
+      },
+      done: (text) => {
+        pending = null;
+        paint(text);
+        card.classList.remove('is-writing');
+        card.querySelector('.answer-status').textContent = '';
+      },
+      fail: (msg) => {
+        card.classList.remove('is-writing');
+        card.classList.add('is-failed');
+        card.querySelector('.answer-status').textContent = '⚠️ ' + msg;
+      }
+    };
   }
 
   // Long chats get slow and hit free-plan limits. Ask the AI for a compact
@@ -2601,7 +2736,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
           `<span>(~${formatCount(estimateTokens(bytes))} tokens${this.selectedFiles.size ? ', your selection' : ', picked automatically'})</span>` +
           `<div class="rebuild-file-list">${core.map(p => `<code>${esc(p)}</code>`).join(' ')}</div></div>` +
           (this._planPending
-            ? `<div class="rebuild-wait"><span class="files-spinner"></span>The AI is writing your plan in the chat…</div>`
+            ? `<div class="rebuild-wait"><span class="files-spinner"></span>The AI is writing your plan…<div class="rebuild-live"></div></div>`
             : `<button type="button" class="files-send" data-rb="create"${core.length ? '' : ' disabled'}>Create my plan</button>`) +
           `<button type="button" class="files-link-btn rebuild-load" data-rb="load">Already have a plan in the chat? Load it</button>` +
         `</div>`;
@@ -2640,7 +2775,10 @@ Begin: state a one-line plan, then issue your first tool call.`;
           `<button type="button" class="files-chip-btn" data-rb="hint">💡 Hint</button>` +
           `<button type="button" class="files-chip-btn" data-rb="check">Check my code</button>` +
           (lang ? `<button type="button" class="files-chip-btn" data-rb="try">▶ Try it</button>` : '') +
+          `<span class="rebuild-run-status"></span>` +
         `</div>` +
+        `<pre class="run-output rebuild-out hidden" aria-label="Output of your code"></pre>` +
+        `<div class="rebuild-mentor"></div>` +
         `<div class="rebuild-nav">` +
           `<button type="button" class="files-link-btn" data-rb="prev"${i === 0 ? ' disabled' : ''}>← Previous</button>` +
           `<button type="button" class="files-send" data-rb="next">${done.includes(i) ? (i === n - 1 ? 'All done' : 'Next step →') : (i === n - 1 ? 'Mark done 🎉' : 'Mark done & next →')}</button>` +
@@ -2658,7 +2796,33 @@ Begin: state a one-line plan, then issue your first tool call.`;
     });
     ta?.addEventListener('keydown', (e) => {
       if (e.key === 'Tab') { e.preventDefault(); ta.setRangeText('    ', ta.selectionStart, ta.selectionEnd, 'end'); }
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && lang) { e.preventDefault(); this.rebuildBody.querySelector('[data-rb="try"]')?.click(); }
     });
+
+    // Earlier hints and reviews for this step
+    const mentor = this.rebuildBody.querySelector('.rebuild-mentor');
+    for (const note of (st.mentor?.[i] || [])) {
+      const card = this.answerCard(mentor, { title: note.title, onUseCode: (c) => this.setStepCode(c), collapsible: true });
+      card.done(note.text);
+      card.el.classList.add('collapsed');
+    }
+  }
+
+  // Put code into the current step's editor (e.g. "Use in editor" on an answer)
+  setStepCode(code) {
+    const ta = this.rebuildBody.querySelector('.rebuild-code');
+    if (!ta) return;
+    ta.value = code;
+    ta.dispatchEvent(new Event('input'));
+    ta.focus();
+  }
+
+  async addMentorNote(i, title, text) {
+    const st = this.rebuild;
+    if (!st?.plan) return;
+    const mentor = { ...(st.mentor || {}) };
+    mentor[i] = [...(mentor[i] || []), { title, text, ts: Date.now() }].slice(-6);
+    await this.saveRebuild({ ...st, mentor });
   }
 
   async onRebuildClick(e) {
@@ -2689,23 +2853,37 @@ Begin: state a one-line plan, then issue your first tool call.`;
     } else if (act === 'study') {
       this.rebuildPanel.classList.add('hidden');
       this.sendRepoFiles([el.dataset.path], 'explain');
-    } else if (act === 'hint') {
-      this.forwardToIframe({ prompt: hintPrompt(st.plan, i), autoSubmit: false });
-      this.rebuildPanel.classList.add('hidden');
-      this.showNotification('💡 Hint request added to the chat input');
-    } else if (act === 'check') {
-      if (!code.trim()) { this.showNotification('Write your code for this step first'); return; }
-      const study = (st.plan.steps[i].study || []).filter(p => this.repoTree.fileSet.has(p));
-      const files = study.length ? (await this.fetchRepoFilesMany(study)).filter(f => !f.error) : [];
-      if (files.length) {
-        this.attachThenPrompt(`step-${i + 1}-original.md`, this.packFor(files), checkPrompt(st.plan, i, code, true));
-      } else {
-        this.forwardToIframe({ prompt: checkPrompt(st.plan, i, code, false), autoSubmit: false });
+    } else if (act === 'hint' || act === 'check') {
+      // Answered right here in the step; the chat keeps the conversation
+      if (act === 'check' && !code.trim()) { this.showNotification('Write your code for this step first'); return; }
+      const mentor = this.rebuildBody.querySelector('.rebuild-mentor');
+      let prompt = hintPrompt(st.plan, i);
+      let attachments = [];
+      if (act === 'check') {
+        const study = (st.plan.steps[i].study || []).filter(p => this.repoTree.fileSet.has(p));
+        const files = study.length ? (await this.fetchRepoFilesMany(study)).filter(f => !f.error) : [];
+        if (files.length) attachments = [{ filename: `step-${i + 1}-original.md`, content: this.packFor(files) }];
+        prompt = checkPrompt(st.plan, i, code, attachments.length > 0);
       }
-      this.rebuildPanel.classList.add('hidden');
-      this.showNotification('🧑‍🏫 Your code is in the chat input, press send for a review');
+      const title = act === 'hint' ? '💡 Hint' : '🧑‍🏫 Review';
+      el.disabled = true;
+      await this.showAnswerIn(mentor, title, prompt, {
+        attachments,
+        onUseCode: (c) => this.setStepCode(c),
+        onDone: (text) => this.addMentorNote(i, title, text)
+      });
+      el.disabled = false;
     } else if (act === 'try') {
-      this.openRunPanel({ lang: this.rebuildLang(st.plan), code, autoRun: !!code.trim() });
+      // Run inline under the code, so hints and output stay in view together
+      if (!code.trim()) { this.showNotification('Write some code first'); return; }
+      const out = this.rebuildBody.querySelector('.rebuild-out');
+      out.classList.remove('hidden');
+      el.disabled = true;
+      await this.runSnippet({
+        lang: this.rebuildLang(st.plan), code, outEl: out,
+        statusEl: this.rebuildBody.querySelector('.rebuild-run-status')
+      });
+      el.disabled = false;
     }
   }
 
@@ -2722,11 +2900,17 @@ Begin: state a one-line plan, then issue your first tool call.`;
     try {
       const files = (await this.fetchRepoFilesMany(paths)).filter(f => !f.error);
       if (!files.length) throw new Error('could not read the project files');
-      this.forwardAttachToIframe(`${this.repoTree.repo}-core-files.md`.replace(/[^\w.-]+/g, '-'), this.packFor(files), 'text/markdown');
-      this.rebuildPanel.classList.add('hidden');
-      this.showNotification('🛠 Sent the core files, the AI is writing your plan…');
-      await new Promise(r => setTimeout(r, 2500)); // let the attachment upload
-      const reply = await this.askAndCapture(planPrompt(this.repoDisplayName()));
+      const attachments = [{ filename: `${this.repoTree.repo}-core-files.md`.replace(/[^\w.-]+/g, '-'), content: this.packFor(files) }];
+      // Show the step titles as the AI writes them
+      const onProgress = (text) => {
+        const box = this.rebuildBody.querySelector('.rebuild-live');
+        if (!box) return;
+        const titles = [...text.matchAll(/"(?:title|name)"\s*:\s*"((?:[^"\\]|\\.)+)"/g)].map(m => m[1]);
+        box.innerHTML = titles.length
+          ? `<ol>${titles.map(t => `<li>${this.escapeHtml(t)}</li>`).join('')}</ol>`
+          : '<span class="rebuild-live-hint">Reading the code…</span>';
+      };
+      const reply = await this.askInPanel(planPrompt(this.repoDisplayName()), { attachments, onProgress });
       await this.adoptPlan(reply);
     } catch (e) {
       this.showNotification('⚠️ ' + e.message + '. When the plan is in the chat, use "Load it".');
@@ -3902,6 +4086,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
     this.runOutput.classList.remove('has-error');
     this.runFollowups.classList.add('hidden');
     this.runStatus.textContent = autoRun ? '' : 'Ctrl+Enter to run';
+    document.getElementById('run-answers').innerHTML = '';
     if (autoRun) this.runCode();
   }
 
@@ -3929,65 +4114,79 @@ Begin: state a one-line plan, then issue your first tool call.`;
     return this._runnerReady;
   }
 
+  // Run a snippet in the sandbox, streaming output into outEl (batched per
+  // animation frame). Used by the Run panel and inline by Rebuild steps.
+  // Resolves with { ok, output, error, ms }.
+  async runSnippet({ lang, code, outEl, statusEl = null }) {
+    await this.ensureRunner();
+    const id = 'run_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+    outEl.textContent = '';
+    outEl.classList.remove('has-error');
+    if (statusEl) statusEl.textContent = 'Running…';
+    this._runSinks = this._runSinks || new Map();
+    return new Promise((resolve) => {
+      let output = '';
+      let frag = null;
+      const flush = () => {
+        if (!frag) return;
+        outEl.appendChild(frag);
+        frag = null;
+        outEl.scrollTop = outEl.scrollHeight;
+      };
+      this._runSinks.set(id, (m) => {
+        if (m.type === 'status') {
+          if (statusEl) statusEl.textContent = m.text || 'Running…';
+        } else if (m.type === 'output') {
+          const span = document.createElement('span');
+          if (m.stream === 'stderr') span.className = 'run-err';
+          span.textContent = m.text;
+          if (!frag) { frag = document.createDocumentFragment(); requestAnimationFrame(flush); }
+          frag.appendChild(span);
+          output += m.text;
+        } else if (m.type === 'done') {
+          flush();
+          this._runSinks.delete(id);
+          outEl.classList.toggle('has-error', !m.ok);
+          if (!outEl.textContent) outEl.textContent = m.ok ? '(no output)' : (m.error || 'Error');
+          if (statusEl) {
+            statusEl.textContent = m.ok
+              ? `Done in ${m.ms < 1000 ? m.ms + ' ms' : (m.ms / 1000).toFixed(1) + ' s'}`
+              : '⚠️ ' + (m.error === 'timeout' ? 'Stopped' : 'Error');
+          }
+          resolve({ ok: m.ok, output, error: m.error, ms: m.ms });
+        }
+      });
+      this._lastRunId = id;
+      this.runnerFrame.contentWindow.postMessage({ type: 'run', id, lang, code, timeoutMs: 10000 }, '*');
+    });
+  }
+
   async runCode() {
-    if (!this.runEditor || this._runId) return;
+    if (!this.runEditor || this._runBusy) return;
     const code = this.runEditor.getValue();
     if (!code.trim()) return;
-    const id = 'run_' + Date.now();
-    this._runId = id;
-    this._runResult = { code, lang: this.runLang, output: '' };
-    this._runPending = null;
-    this.runOutput.textContent = '';
-    this.runOutput.classList.remove('has-error');
+    this._runBusy = true;
     this.runFollowups.classList.add('hidden');
-    this.runStatus.textContent = 'Running…';
     this.runGo.disabled = true;
     this.runStop.classList.remove('hidden');
-    await this.ensureRunner();
-    this.runnerFrame.contentWindow.postMessage({ type: 'run', id, lang: this.runLang, code, timeoutMs: 10000 }, '*');
+    const lang = this.runLang;
+    const r = await this.runSnippet({ lang, code, outEl: this.runOutput, statusEl: this.runStatus });
+    this._runBusy = false;
+    this._runResult = { code, lang, output: r.output, ok: r.ok };
+    this.runGo.disabled = false;
+    this.runStop.classList.add('hidden');
+    this.runFollowups.classList.remove('hidden');
+    const fix = this.runFollowups.querySelector('[data-ask="fix"]');
+    fix.classList.toggle('hidden', r.ok);
+    fix.classList.toggle('primary', !r.ok);
   }
 
   stopCode() {
-    if (this._runId) this.runnerFrame?.contentWindow?.postMessage({ type: 'stop', id: this._runId }, '*');
+    if (this._lastRunId) this.runnerFrame?.contentWindow?.postMessage({ type: 'stop', id: this._lastRunId }, '*');
   }
 
   onRunnerMessage(m) {
-    if (!m.id || m.id !== this._runId) return;
-    if (m.type === 'status') {
-      this.runStatus.textContent = m.text || 'Running…';
-    } else if (m.type === 'output') {
-      const span = document.createElement('span');
-      if (m.stream === 'stderr') span.className = 'run-err';
-      span.textContent = m.text;
-      // Batch DOM appends: a print loop can send thousands of lines
-      this._runPending = this._runPending || document.createDocumentFragment();
-      this._runPending.appendChild(span);
-      if (!this._runFlushQueued) {
-        this._runFlushQueued = true;
-        requestAnimationFrame(() => this.flushRunOutput());
-      }
-      this._runResult.output += m.text;
-    } else if (m.type === 'done') {
-      this.flushRunOutput();
-      this._runId = null;
-      this.runGo.disabled = false;
-      this.runStop.classList.add('hidden');
-      this.runOutput.classList.toggle('has-error', !m.ok);
-      if (!this.runOutput.textContent) this.runOutput.textContent = m.ok ? '(no output)' : (m.error || 'Error');
-      this.runStatus.textContent = m.ok ? `Done in ${m.ms < 1000 ? m.ms + ' ms' : (m.ms / 1000).toFixed(1) + ' s'}` : '⚠️ ' + (m.error === 'timeout' ? 'Stopped' : 'Error');
-      this.runFollowups.classList.remove('hidden');
-      const fix = this.runFollowups.querySelector('[data-ask="fix"]');
-      fix.classList.toggle('hidden', m.ok);
-      fix.classList.toggle('primary', !m.ok);
-    }
-  }
-
-  flushRunOutput() {
-    this._runFlushQueued = false;
-    if (!this._runPending) return;
-    this.runOutput.appendChild(this._runPending);
-    this._runPending = null;
-    this.runOutput.scrollTop = this.runOutput.scrollHeight;
+    this._runSinks?.get(m.id)?.(m);
   }
 
   askAboutRun(kind) {
@@ -4002,9 +4201,33 @@ Begin: state a one-line plan, then issue your first tool call.`;
       explain: `I ran this ${name} code:\n\n${block}\n\nWalk me through why it produces exactly this output, step by step.`,
       next: `I ran this ${name} code:\n\n${block}\n\nSuggest 3 small changes I could try next to learn more from it (from easy to harder), and what I should expect to see for each.`
     };
-    this.forwardToIframe({ prompt: asks[kind], autoSubmit: false });
-    this.closeRunPanel();
-    this.showNotification('💬 Added to the chat input');
+    const titles = { fix: 'Fix', explain: 'Why this output', next: 'Try next' };
+    this.showAnswerIn(document.getElementById('run-answers'), titles[kind], asks[kind], {
+      onUseCode: (code) => { this.runEditor.setValue(code); this.runEditor.focus(); }
+    });
+  }
+
+  // Ask in the background and stream the answer into a card in `container`
+  async showAnswerIn(container, title, prompt, { attachments = [], onUseCode = null, onDone = null } = {}) {
+    const card = this.answerCard(container, { title, onUseCode, collapsible: true });
+    card.el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    try {
+      // Bring the answer's top into view once it starts arriving
+      let shown = false;
+      const text = await this.askInPanel(prompt, {
+        attachments,
+        onProgress: (t) => {
+          card.update(t);
+          if (!shown) { shown = true; card.el.scrollIntoView({ block: 'start', behavior: 'smooth' }); }
+        }
+      });
+      card.done(text);
+      onDone?.(text);
+      return text;
+    } catch (e) {
+      card.fail(e.message);
+      return null;
+    }
   }
 
   // ========== Input Dialog ==========
