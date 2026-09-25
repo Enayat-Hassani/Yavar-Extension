@@ -1,6 +1,8 @@
 // Side Panel - Main Logic (2026 Redesign)
 // Full viewport chat with bottom navigation and model management
 
+import { isPublicWebUrl } from './utils/net.js';
+
 class YavarSidePanel {
   constructor() {
     // Default AI models
@@ -1109,23 +1111,9 @@ Begin: state a one-line plan, then issue your first tool call.`;
 
   // ---- Research tool implementations ----
 
-  // The AI picks these URLs and may be steered by text on pages it read, so
-  // never let it reach local/intranet hosts or send the user's cookies.
-  isPublicWebUrl(url) {
-    let u;
-    try { u = new URL(url); } catch (e) { return false; }
-    if (!/^https?:$/.test(u.protocol)) return false;
-    const h = u.hostname.toLowerCase().replace(/^\[|\]$/g, '');
-    if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.local') || h.endsWith('.internal')) return false;
-    if (!h.includes('.') && !h.includes(':')) return false;          // bare intranet names
-    if (/^(127\.|10\.|0\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(h)) return false;
-    if (h.includes(':') && (h === '::1' || /^(fc|fd|fe80)/.test(h))) return false; // IPv6 loopback/private
-    return true;
-  }
-
   async readUrl(url) {
     if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
-    if (!this.isPublicWebUrl(url)) throw new Error('blocked: only public http(s) pages can be read');
+    if (!isPublicWebUrl(url)) throw new Error('blocked: only public http(s) pages can be read');
     const res = await fetch(url, {
       headers: { 'Accept': 'text/html,application/json,*/*' },
       credentials: 'omit'

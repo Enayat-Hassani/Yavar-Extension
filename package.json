@@ -1,0 +1,11 @@
+{
+  "name": "yavar-extension",
+  "private": true,
+  "description": "Dev tooling for the Yavar Chrome extension (the extension itself needs no build).",
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "check": "node scripts/check.mjs",
+    "ci": "npm run check && npm test"
+  }
+}
