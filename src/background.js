@@ -65,7 +65,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // so no follow-up messages are needed.
   if (message.action === 'trigger_auto_submit') {
     const tabId = sender.tab?.id;
-    chrome.storage.session.set({ pendingAutoSubmit: message.prompt, lastSubmitTime: Date.now() });
+    chrome.storage.session.set({ pendingAutoSubmit: message.prompt, pendingPromptLabel: message.label || '', lastSubmitTime: Date.now() });
     // Open synchronously: an await before this would lose the user gesture
     if (tabId) openPanel({ tabId, windowId: sender.tab?.windowId });
     sendResponse({ success: true });
