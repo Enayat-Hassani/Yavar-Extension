@@ -145,10 +145,11 @@ class YavarSidePanel {
         await this.saveModels();
       }
       
-      // Load current model
-      const currentResult = await chrome.storage.sync.get('currentModelId');
-      if (currentResult.currentModelId) {
-        this.currentModelId = currentResult.currentModelId;
+      // Current model: last used, else the Default AI from Settings
+      const { currentModelId, settings } = await chrome.storage.sync.get(['currentModelId', 'settings']);
+      const wanted = currentModelId || settings?.defaultAI;
+      if (wanted && this.models.some(m => m.id === wanted)) {
+        this.currentModelId = wanted;
       }
     } catch (error) {
       console.error('[Yavar] Failed to load models:', error);
@@ -173,7 +174,9 @@ class YavarSidePanel {
   }
 
   getCurrentModel() {
-    return this.models.find(m => m.id === this.currentModelId) || this.models[0];
+    return this.models.find(m => m.id === this.currentModelId)
+      || this.models.find(m => m.enabled)
+      || this.models[0];
   }
 
   bindEvents() {
