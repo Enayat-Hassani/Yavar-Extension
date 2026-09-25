@@ -1,10 +1,33 @@
-// Options Page - Settings Management
+// Options Page - the one place for Yavar's settings
 
 import { loadTemplates, saveTemplates, DEFAULT_TEMPLATES } from './utils/templates.js';
+import { loadModels } from './utils/models.js';
+
+const DEFAULT_SETTINGS = {
+  defaultAI: 'chatgpt',
+  enableFloatingMenu: true,
+  disabledSites: [],
+  autoSubmit: false,
+  tempChats: true,
+  deepResearch: false,
+  inChatButtons: true,
+  ytxBaseUrl: 'http://localhost:8722',
+  ytxVideoCount: 12
+};
+
+// Toggles that map one checkbox to one boolean setting
+const TOGGLES = {
+  'enable-floating-menu': 'enableFloatingMenu',
+  'setting-auto-submit': 'autoSubmit',
+  'setting-temp-chats': 'tempChats',
+  'setting-deep-research': 'deepResearch',
+  'setting-inchat': 'inChatButtons'
+};
 
 class OptionsPage {
   constructor() {
-    this.settings = {};
+    this.settings = { ...DEFAULT_SETTINGS };
+    this.models = [];
     this.templates = [];
     this.init();
   }
@@ -13,41 +36,38 @@ class OptionsPage {
     this.cacheElements();
     this.bindEvents();
     await this.loadSettings();
-    await this.populateModelSelect();
-    this.renderDisabledSites();
+    await this.loadModelsList();
     this.renderShortcuts();
+    this.loadGithubToken();
     const version = document.getElementById('app-version');
     if (version) version.textContent = 'v' + chrome.runtime.getManifest().version;
     this.templates = await loadTemplates();
     this.renderTemplates();
+    // The panel's model menu changes the current model: keep the select in step
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area === 'sync' && (changes.aiModels || changes.currentModelId)) this.loadModelsList();
+    });
   }
 
   cacheElements() {
-    // Default AI
     this.defaultAiSelect = document.getElementById('default-ai');
-    
-    // Feature toggles
-    this.floatingMenuToggle = document.getElementById('enable-floating-menu');
+    this.modelsList = document.getElementById('models-list');
+    this.addModelForm = document.getElementById('add-model-form');
 
-    // Video research (ytx)
     this.ytxBaseUrlInput = document.getElementById('ytx-base-url');
     this.ytxVideoCountInput = document.getElementById('ytx-video-count');
 
-    // Disabled sites
     this.disabledSiteInput = document.getElementById('disabled-site');
     this.addSiteBtn = document.getElementById('add-site-btn');
     this.disabledSitesList = document.getElementById('disabled-sites-list');
-    
-    // Data management
+
     this.exportSettingsBtn = document.getElementById('export-settings-btn');
     this.importSettingsBtn = document.getElementById('import-settings-btn');
     this.resetSettingsBtn = document.getElementById('reset-settings-btn');
     this.importFileInput = document.getElementById('import-file');
-    
-    // Shortcuts
+
     this.configureShortcutsBtn = document.getElementById('configure-shortcuts-btn');
 
-    // Prompt templates
     this.templatesList = document.getElementById('templates-list');
     this.addTemplateBtn = document.getElementById('add-template-btn');
     this.resetTemplatesBtn = document.getElementById('reset-templates-btn');
@@ -57,17 +77,31 @@ class OptionsPage {
   }
 
   bindEvents() {
-    // Default AI change
     this.defaultAiSelect.addEventListener('change', () => this.saveDefaultModel());
-    
-    // Feature toggles
-    this.floatingMenuToggle.addEventListener('change', () => this.saveSettings());
+    this.addModelForm.addEventListener('submit', (e) => this.addModel(e));
+    this.modelsList.addEventListener('change', (e) => {
+      const id = e.target.closest('[data-model-toggle]')?.dataset.modelToggle;
+      if (id) this.setModelEnabled(id, e.target.checked);
+    });
+    this.modelsList.addEventListener('click', (e) => {
+      const id = e.target.closest('[data-model-delete]')?.dataset.modelDelete;
+      if (id) this.deleteModel(id);
+    });
 
-    // Video research (ytx)
-    this.ytxBaseUrlInput?.addEventListener('change', () => this.saveSettings());
-    this.ytxVideoCountInput?.addEventListener('change', () => this.saveSettings());
+    for (const [elId, key] of Object.entries(TOGGLES)) {
+      document.getElementById(elId)?.addEventListener('change', (e) => this.saveSetting({ [key]: e.target.checked }));
+    }
 
-    // Add disabled site
+    this.ytxBaseUrlInput?.addEventListener('change', () => this.saveSetting({
+      ytxBaseUrl: this.ytxBaseUrlInput.value.trim().replace(/\/+$/, '') || DEFAULT_SETTINGS.ytxBaseUrl
+    }));
+    this.ytxVideoCountInput?.addEventListener('change', () => {
+      const count = parseInt(this.ytxVideoCountInput.value, 10);
+      this.saveSetting({ ytxVideoCount: Number.isFinite(count) ? Math.min(50, Math.max(1, count)) : 12 });
+    });
+
+    document.getElementById('save-github-token')?.addEventListener('click', () => this.saveGithubToken());
+
     this.addSiteBtn.addEventListener('click', () => this.addDisabledSite());
     // Delegated: inline onclick handlers are blocked by the extension CSP
     this.disabledSitesList.addEventListener('click', (e) => {
@@ -77,19 +111,16 @@ class OptionsPage {
     this.disabledSiteInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') this.addDisabledSite();
     });
-    
-    // Data management
+
     this.exportSettingsBtn.addEventListener('click', () => this.exportSettings());
     this.importSettingsBtn.addEventListener('click', () => this.importFileInput.click());
     this.importFileInput.addEventListener('change', (e) => this.handleImport(e));
     this.resetSettingsBtn.addEventListener('click', () => this.resetSettings());
-    
-    // Configure shortcuts - opens Chrome shortcuts page
+
     this.configureShortcutsBtn.addEventListener('click', () => {
       chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
     });
 
-    // Prompt templates
     this.addTemplateBtn?.addEventListener('click', () => this.addTemplate());
     this.resetTemplatesBtn?.addEventListener('click', () => this.resetTemplates());
     this.templatesList?.addEventListener('input', (e) => this.handleTemplateEdit(e));
@@ -106,56 +137,147 @@ class OptionsPage {
 
   async loadSettings() {
     try {
-      const response = await chrome.runtime.sendMessage({ type: 'GET_SETTINGS' });
-      this.settings = response.settings || this.getDefaultSettings();
-      this.populateForm();
+      const { settings } = await chrome.storage.sync.get('settings');
+      this.settings = { ...DEFAULT_SETTINGS, ...settings };
     } catch (error) {
       console.error('[Yavar] Failed to load settings:', error);
-      this.settings = this.getDefaultSettings();
-      this.populateForm();
+    }
+    this.populateForm();
+  }
+
+  // Merge into what's stored now, not into what this page loaded: the panel
+  // writes settings too
+  async saveSetting(patch) {
+    try {
+      const { settings } = await chrome.storage.sync.get('settings');
+      this.settings = { ...DEFAULT_SETTINGS, ...settings, ...patch };
+      await chrome.storage.sync.set({ settings: this.settings });
+    } catch (error) {
+      console.error('[Yavar] Failed to save settings:', error);
+      this.showToast('Could not save the setting', true);
     }
   }
 
-  getDefaultSettings() {
-    return {
-      defaultAI: 'chatgpt',
-      enableFloatingMenu: true,
-      disabledSites: [],
-      ytxBaseUrl: 'http://localhost:8722',
-      ytxVideoCount: 12
-    };
+  populateForm() {
+    for (const [elId, key] of Object.entries(TOGGLES)) {
+      const el = document.getElementById(elId);
+      if (el) el.checked = !!this.settings[key];
+    }
+    if (this.ytxBaseUrlInput) this.ytxBaseUrlInput.value = this.settings.ytxBaseUrl;
+    if (this.ytxVideoCountInput) this.ytxVideoCountInput.value = this.settings.ytxVideoCount;
+    this.renderDisabledSites();
   }
 
-  // Offer every enabled model (custom ones included), selecting the one the
-  // side panel will actually open with.
-  async populateModelSelect() {
+  // ===== Models =====
+  async loadModelsList() {
     try {
-      const { aiModels, currentModelId } = await chrome.storage.sync.get(['aiModels', 'currentModelId']);
-      if (Array.isArray(aiModels) && aiModels.length) {
-        this.defaultAiSelect.innerHTML = '';
-        for (const m of aiModels.filter(m => m.enabled)) {
-          const opt = document.createElement('option');
-          opt.value = m.id;
-          opt.textContent = m.name;
-          this.defaultAiSelect.appendChild(opt);
-        }
-      }
-      const wanted = currentModelId || this.settings.defaultAI;
-      if ([...this.defaultAiSelect.options].some(o => o.value === wanted)) this.defaultAiSelect.value = wanted;
+      this.models = await loadModels();
+      const { currentModelId } = await chrome.storage.sync.get('currentModelId');
+      this.currentModelId = currentModelId || this.settings.defaultAI;
     } catch (error) {
       console.error('[Yavar] Failed to load models:', error);
     }
+    this.renderModels();
+  }
+
+  renderModels() {
+    const enabled = this.models.filter(m => m.enabled);
+    this.defaultAiSelect.innerHTML = enabled.map(m =>
+      `<option value="${this.escapeHtml(m.id)}">${this.escapeHtml(m.name)}</option>`).join('');
+    if (enabled.some(m => m.id === this.currentModelId)) this.defaultAiSelect.value = this.currentModelId;
+
+    this.modelsList.innerHTML = this.models.map(m => `
+      <div class="model-row">
+        <span class="model-row-icon" aria-hidden="true">${this.escapeHtml(m.icon || '🌐')}</span>
+        <span class="model-row-info">
+          <span class="model-row-name">${this.escapeHtml(m.name)}</span>
+          <span class="model-row-url">${this.escapeHtml(m.url)}</span>
+        </span>
+        ${m.custom ? `<button type="button" class="btn-icon-danger" data-model-delete="${this.escapeHtml(m.id)}" title="Delete ${this.escapeHtml(m.name)}" aria-label="Delete ${this.escapeHtml(m.name)}">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>` : ''}
+        <label class="toggle-label" title="Show in the model menu">
+          <input type="checkbox" data-model-toggle="${this.escapeHtml(m.id)}" ${m.enabled ? 'checked' : ''}
+                 aria-label="Show ${this.escapeHtml(m.name)} in the model menu">
+          <span class="toggle"></span>
+        </label>
+      </div>`).join('');
+  }
+
+  async saveModels() {
+    try {
+      await chrome.storage.sync.set({ aiModels: this.models });
+    } catch (error) {
+      console.error('[Yavar] Failed to save models:', error);
+      this.showToast('Could not save the models', true);
+    }
+  }
+
+  async setModelEnabled(id, enabled) {
+    const model = this.models.find(m => m.id === id);
+    if (!model) return;
+    if (!enabled && this.models.filter(m => m.enabled).length === 1) {
+      this.showToast('Keep at least one model on', true);
+      this.renderModels();
+      return;
+    }
+    model.enabled = enabled;
+    await this.saveModels();
+    this.renderModels();
+  }
+
+  async deleteModel(id) {
+    const model = this.models.find(m => m.id === id);
+    if (!model?.custom) return;
+    if (!confirm(`Delete ${model.name}?`)) return;
+    this.models = this.models.filter(m => m.id !== id);
+    await this.saveModels();
+    this.renderModels();
+  }
+
+  async addModel(e) {
+    e.preventDefault();
+    const name = document.getElementById('model-name').value.trim();
+    const url = document.getElementById('model-url').value.trim();
+    if (!name || !url) return;
+    // Only real web pages can be framed; reject javascript:, file:, typos, etc.
+    let parsed;
+    try { parsed = new URL(/^https?:\/\//i.test(url) ? url : 'https://' + url); } catch (err) { parsed = null; }
+    if (!parsed || !/^https?:$/.test(parsed.protocol)) {
+      this.showToast('Enter a valid http(s) URL', true);
+      return;
+    }
+    this.models.push({ id: 'custom_' + Date.now(), name, url: parsed.href, icon: '🌐', enabled: true, custom: true });
+    await this.saveModels();
+    this.addModelForm.reset();
+    this.renderModels();
+    this.showToast(`${name} added`);
   }
 
   // The side panel opens whichever model is current, so set both.
   async saveDefaultModel() {
-    await this.saveSettings();
+    this.currentModelId = this.defaultAiSelect.value;
+    await this.saveSetting({ defaultAI: this.currentModelId });
     try {
-      await chrome.storage.sync.set({ currentModelId: this.defaultAiSelect.value });
-      this.showToast('Default AI saved');
+      await chrome.storage.sync.set({ currentModelId: this.currentModelId });
+      this.showToast('Saved');
     } catch (error) {
       console.error('[Yavar] Failed to save default model:', error);
     }
+  }
+
+  // ===== GitHub token (local only) =====
+  async loadGithubToken() {
+    try {
+      const { githubToken } = await chrome.storage.local.get('githubToken');
+      document.getElementById('github-token').value = githubToken || '';
+    } catch (e) { /* leave empty */ }
+  }
+
+  async saveGithubToken() {
+    const token = document.getElementById('github-token').value.trim();
+    await chrome.storage.local.set({ githubToken: token });
+    this.showToast(token ? 'Token saved' : 'Token removed');
   }
 
   renderShortcuts() {
@@ -170,7 +292,7 @@ class OptionsPage {
           return `<p><strong>${this.escapeHtml(c.description)}:</strong> ${keys}</p>`;
         });
       this.shortcutsList.innerHTML = rows.join('') +
-        '<p class="help-text">In the sidebar: <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>S</kbd> saves the AI\'s last answer.</p>';
+        '<p class="help-text">In the chat view: <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>S</kbd> saves the AI\'s last answer.</p>';
     });
   }
 
@@ -183,94 +305,32 @@ class OptionsPage {
     this._toastTimer = setTimeout(() => { this.toast.hidden = true; }, 2200);
   }
 
-  populateForm() {
-    this.floatingMenuToggle.checked = this.settings.enableFloatingMenu ?? true;
-    if (this.ytxBaseUrlInput) this.ytxBaseUrlInput.value = this.settings.ytxBaseUrl || 'http://localhost:8722';
-    if (this.ytxVideoCountInput) this.ytxVideoCountInput.value = this.settings.ytxVideoCount ?? 12;
-  }
-
-  async saveSettings() {
-    const count = parseInt(this.ytxVideoCountInput?.value, 10);
-    this.settings = {
-      ...this.settings,
-      defaultAI: this.defaultAiSelect.value || this.settings.defaultAI,
-      enableFloatingMenu: this.floatingMenuToggle.checked,
-      ytxBaseUrl: (this.ytxBaseUrlInput?.value || '').trim().replace(/\/+$/, '') || 'http://localhost:8722',
-      ytxVideoCount: Number.isFinite(count) ? Math.min(50, Math.max(1, count)) : 12
-    };
-    
-    try {
-      await chrome.runtime.sendMessage({ 
-        type: 'UPDATE_SETTINGS', 
-        settings: this.settings 
-      });
-      console.log('[Yavar] Settings saved');
-    } catch (error) {
-      console.error('[Yavar] Failed to save settings:', error);
-    }
-  }
-
-  // Disabled Sites
+  // ===== Floating menu: sites where it never shows =====
   async addDisabledSite() {
     const site = this.disabledSiteInput.value.trim();
-    
     if (!site) return;
-    
-    // Basic validation - extract domain
     let domain = site;
     try {
       domain = new URL(site.startsWith('http') ? site : `https://${site}`).hostname;
-    } catch (e) {
-      // Use as-is if not a valid URL
-    }
-    
-    if (!this.settings.disabledSites) {
-      this.settings.disabledSites = [];
-    }
-    
-    if (!this.settings.disabledSites.includes(domain)) {
-      this.settings.disabledSites.push(domain);
-      
-      try {
-        await chrome.runtime.sendMessage({ 
-          type: 'UPDATE_SETTINGS', 
-          settings: this.settings 
-        });
-        
-        this.disabledSiteInput.value = '';
-        this.renderDisabledSites();
-      } catch (error) {
-        console.error('[Yavar] Failed to add disabled site:', error);
-      }
-    }
+    } catch (e) { /* use as typed */ }
+    const sites = this.settings.disabledSites || [];
+    if (!sites.includes(domain)) await this.saveSetting({ disabledSites: [...sites, domain] });
+    this.disabledSiteInput.value = '';
+    this.renderDisabledSites();
   }
 
   async removeDisabledSite(site) {
-    this.settings.disabledSites = this.settings.disabledSites.filter(s => s !== site);
-    
-    try {
-      await chrome.runtime.sendMessage({ 
-        type: 'UPDATE_SETTINGS', 
-        settings: this.settings 
-      });
-      this.renderDisabledSites();
-    } catch (error) {
-      console.error('[Yavar] Failed to remove disabled site:', error);
-    }
+    await this.saveSetting({ disabledSites: (this.settings.disabledSites || []).filter(s => s !== site) });
+    this.renderDisabledSites();
   }
 
   renderDisabledSites() {
     const sites = this.settings.disabledSites || [];
-    
-    if (sites.length === 0) {
-      this.disabledSitesList.innerHTML = '<div class="empty-state">No disabled sites. The sidebar works on all websites.</div>';
-      return;
-    }
-    
+    this.disabledSitesList.hidden = !sites.length;
     this.disabledSitesList.innerHTML = sites.map(site => `
       <div class="disabled-site-tag">
         ${this.escapeHtml(site)}
-        <button type="button" data-remove-site="${this.escapeHtml(site)}" title="Remove">
+        <button type="button" data-remove-site="${this.escapeHtml(site)}" title="Remove" aria-label="Remove ${this.escapeHtml(site)}">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <line x1="18" y1="6" x2="6" y2="18"></line>
             <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -319,11 +379,10 @@ class OptionsPage {
         if (Array.isArray(imported.disabledSites)) clean.disabledSites = imported.disabledSites.filter(x => typeof x === 'string');
         if (typeof imported.ytxBaseUrl === 'string') clean.ytxBaseUrl = imported.ytxBaseUrl;
         if (Number.isFinite(imported.ytxVideoCount)) clean.ytxVideoCount = imported.ytxVideoCount;
-        for (const k of ['autoPaste', 'autoSubmit', 'showScreenshotPreview', 'deepResearch']) {
+        for (const k of ['autoSubmit', 'tempChats', 'deepResearch', 'inChatButtons']) {
           if (typeof imported[k] === 'boolean') clean[k] = imported[k];
         }
-        this.settings = { ...this.settings, ...clean };
-        await chrome.runtime.sendMessage({ type: 'UPDATE_SETTINGS', settings: this.settings });
+        await this.saveSetting(clean);
       }
 
       if (parsed.yavarExport && Array.isArray(parsed.promptTemplates)) {
@@ -348,8 +407,7 @@ class OptionsPage {
       }
 
       this.populateForm();
-      await this.populateModelSelect();
-      this.renderDisabledSites();
+      await this.loadModelsList();
       this.showToast('Settings imported');
     } catch (error) {
       console.error('[Yavar] Failed to import settings:', error);
@@ -359,21 +417,17 @@ class OptionsPage {
     event.target.value = '';
   }
 
+  // Settings only: templates, models and the token have their own resets
   async resetSettings() {
-    if (!confirm('Are you sure you want to reset all settings to defaults?')) return;
-    
-    this.settings = this.getDefaultSettings();
-    
+    if (!confirm('Reset all settings to their defaults? Templates, models and your GitHub token are kept.')) return;
     try {
-      await chrome.runtime.sendMessage({ 
-        type: 'UPDATE_SETTINGS', 
-        settings: this.settings 
-      });
-      
+      await chrome.storage.sync.set({ settings: { ...DEFAULT_SETTINGS } });
+      this.settings = { ...DEFAULT_SETTINGS };
       this.populateForm();
-      this.renderDisabledSites();
+      this.showToast('Settings reset');
     } catch (error) {
       console.error('[Yavar] Failed to reset settings:', error);
+      this.showToast('Could not reset settings', true);
     }
   }
 

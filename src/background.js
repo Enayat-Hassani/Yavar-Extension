@@ -3,7 +3,6 @@
 
 import { ContextMenuHandler } from './utils/contextMenu.js';
 import { CommandHandler } from './utils/commands.js';
-import { MessageHandler } from './utils/messageHandler.js';
 import { syncFrameRules } from './utils/frameRules.js';
 import { openPanel, trackPanels, setupActionClick } from './utils/panel.js';
 
@@ -141,13 +140,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       openPanel({ tabId, windowId: sender.tab?.windowId });
     }
     sendResponse({ success: true });
-    return true;
-  }
-  
-  // Let MessageHandler handle OTHER messages (not GitHub API)
-  // Only call MessageHandler if message has a type we don't handle above
-  if (message.type) {
-    MessageHandler.handle(message, sender, sendResponse);
     return true;
   }
   

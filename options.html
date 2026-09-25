@@ -11,114 +11,156 @@
   <div class="container">
     <header class="header">
       <h1>Yavar Settings</h1>
-      <p class="subtitle">Your AI sidekick for coding</p>
     </header>
 
     <main class="settings-container">
-      <!-- Default AI Service -->
-      <section class="settings-section">
-        <h2>Default AI Service</h2>
+      <!-- Models -->
+      <section class="settings-section" id="models">
+        <h2>Models</h2>
         <div class="setting-item">
-          <label for="default-ai">Default AI:</label>
-          <select id="default-ai">
-            <option value="gemini">Gemini</option>
-            <option value="chatgpt">ChatGPT</option>
-            <option value="claude">Claude</option>
-          </select>
-          <p class="help-text">Loaded when you open the sidebar. Switching models in the sidebar updates this too.</p>
+          <label for="default-ai">Open Yavar with</label>
+          <select id="default-ai"></select>
+          <p class="help-text">Switching models in Yavar changes this too.</p>
+        </div>
+
+        <div id="models-list" class="models-list"></div>
+
+        <form id="add-model-form" class="add-model-form">
+          <input type="text" id="model-name" placeholder="Name, e.g. My local LLM" required>
+          <input type="text" id="model-url" placeholder="https://…" required>
+          <button type="submit" class="btn-primary">Add model</button>
+        </form>
+        <p class="help-text">Any chat site that can open in a frame. Off hides a model from the model menu.</p>
+      </section>
+
+      <!-- How Yavar asks -->
+      <section class="settings-section">
+        <h2>Asking the AI</h2>
+
+        <div class="setting-item">
+          <label class="toggle-label">
+            <span>Send floating-menu prompts right away</span>
+            <input type="checkbox" id="setting-auto-submit">
+            <span class="toggle"></span>
+          </label>
+          <p class="help-text">Off: the prompt waits in Yavar's message box so you can add to it before sending.</p>
+        </div>
+
+        <div class="setting-item">
+          <label class="toggle-label">
+            <span>Private chats</span>
+            <input type="checkbox" id="setting-temp-chats">
+            <span class="toggle"></span>
+          </label>
+          <p class="help-text">Yavar's questions run in a temporary chat (ChatGPT, Claude, Gemini), so they don't fill your chat history. Save the answers you want to keep.</p>
+        </div>
+
+        <div class="setting-item">
+          <label class="toggle-label">
+            <span>Deep research</span>
+            <input type="checkbox" id="setting-deep-research">
+            <span class="toggle"></span>
+          </label>
+          <p class="help-text">Web research searches from more angles and reads 6-8+ sources. Slower, and uses more of your chat quota.</p>
+        </div>
+
+        <div class="setting-item">
+          <label class="toggle-label">
+            <span>Buttons under answers in the chat</span>
+            <input type="checkbox" id="setting-inchat">
+            <span class="toggle"></span>
+          </label>
+          <p class="help-text">Save, → Notes and Copy MD under each answer, and ▶ Run on code, when you open the chat itself.</p>
         </div>
       </section>
 
-      <!-- Feature Toggles -->
+      <!-- Floating menu -->
       <section class="settings-section">
-        <h2>Features</h2>
-        
+        <h2>Floating menu</h2>
         <div class="setting-item">
           <label class="toggle-label">
-            <span>Floating Menu on Text Selection</span>
+            <span>Show a menu when you select text</span>
             <input type="checkbox" id="enable-floating-menu" checked>
             <span class="toggle"></span>
           </label>
-          <p class="help-text">Show a menu with AI actions when you select text on any page</p>
-        </div>
-      </section>
-
-      <!-- Video Research (ytx) -->
-      <section class="settings-section">
-        <h2>Video Research (ytx)</h2>
-        <p class="help-text">
-          The "Videos" dock tab searches YouTube for a topic, pulls the top
-          videos' transcripts from your local <strong>ytx</strong> server, and
-          hands them to the AI to synthesize against your Notes.
-          Start it with <code>uv run uvicorn ytx_api.main:app --port 8722</code>
-          (or set it to auto-start at login — see the extension README).
-        </p>
-
-        <div class="setting-item">
-          <label for="ytx-base-url">ytx server URL:</label>
-          <input type="text" id="ytx-base-url" placeholder="http://localhost:8722">
-          <p class="help-text">Base URL of your running ytx REST API.</p>
         </div>
 
         <div class="setting-item">
-          <label for="ytx-video-count">Videos per topic:</label>
-          <input type="number" id="ytx-video-count" min="1" max="50" step="1" placeholder="12">
-          <p class="help-text">How many top search results to fetch transcripts for.</p>
-        </div>
-      </section>
-
-      <!-- Keyboard Shortcuts -->
-      <section class="settings-section">
-        <h2>Keyboard Shortcuts</h2>
-        <div class="shortcuts-info" id="shortcuts-list">
-          <!-- Filled from chrome.commands so it always shows your current bindings -->
-        </div>
-        <button id="configure-shortcuts-btn" class="btn-secondary">Change Shortcuts in Chrome</button>
-      </section>
-
-      <!-- Site-specific Settings -->
-      <section class="settings-section">
-        <h2>Site-Specific Settings</h2>
-        <p class="help-text">Turn off the floating text-selection menu on specific websites</p>
-        
-        <div class="disabled-sites-input">
-          <input type="text" id="disabled-site" placeholder="Enter domain (e.g., github.com)">
-          <button id="add-site-btn" class="btn-primary">Add Site</button>
-        </div>
-
-        <div id="disabled-sites-list" class="disabled-sites-list">
-          <!-- Disabled sites will be listed here -->
+          <label for="disabled-site">Never show it on</label>
+          <div class="input-row">
+            <input type="text" id="disabled-site" placeholder="A domain, e.g. docs.google.com">
+            <button id="add-site-btn" class="btn-secondary">Add</button>
+          </div>
+          <div id="disabled-sites-list" class="disabled-sites-list"></div>
         </div>
       </section>
 
       <!-- Prompt Templates -->
       <section class="settings-section">
-        <h2>Prompt Templates</h2>
+        <h2>Prompt templates</h2>
         <p class="help-text">
-          Reusable prompts. Placeholders get filled in when you run them:
+          Used by the floating menu and by <strong>+ → Use a prompt</strong> in Yavar.
+          Placeholders are filled in when a prompt runs:
           <code>{{selection}}</code>, <code>{{page}}</code>, <code>{{clipboard}}</code>,
           <code>{{url}}</code>, <code>{{title}}</code>, <code>{{repo}}</code>.
-          Turn on <strong>In menu</strong> to pin a template as a button in the floating
-          text-selection menu; the rest are one click away under its <strong>⋯</strong> button.
+          <strong>In menu</strong> pins a template to the floating menu; the rest sit behind its <strong>⋯</strong>.
         </p>
 
-        <div id="templates-list" class="templates-list">
-          <!-- Templates render here -->
-        </div>
+        <div id="templates-list" class="templates-list"></div>
 
         <div class="templates-actions">
-          <button id="add-template-btn" class="btn-primary">+ Add Template</button>
-          <button id="reset-templates-btn" class="btn-secondary">Reset to Defaults</button>
+          <button id="add-template-btn" class="btn-primary">Add template</button>
+          <button id="reset-templates-btn" class="btn-secondary">Reset to defaults</button>
         </div>
+      </section>
+
+      <!-- GitHub -->
+      <section class="settings-section">
+        <h2>GitHub access</h2>
+        <div class="setting-item">
+          <label for="github-token">Personal access token (optional)</label>
+          <div class="input-row">
+            <input type="password" id="github-token" placeholder="ghp_…" autocomplete="off">
+            <button id="save-github-token" class="btn-secondary">Save</button>
+          </div>
+          <p class="help-text">Raises the rate limit from 60 to 5,000 requests an hour and lets Yavar read your private repos. A read-only token is enough (classic <code>public_repo</code>, or fine-grained "Contents: read"). Stored on this device only, never synced or exported.</p>
+        </div>
+      </section>
+
+      <!-- Video Research (ytx) -->
+      <section class="settings-section">
+        <h2>Video research</h2>
+        <p class="help-text">
+          Video research pulls transcripts of the top YouTube results from your local
+          <strong>ytx</strong> server. Start it with <code>uv run uvicorn ytx_api.main:app --port 8722</code>
+          (or set it to start at login; see the README).
+        </p>
+
+        <div class="setting-item">
+          <label for="ytx-base-url">ytx server URL</label>
+          <input type="text" id="ytx-base-url" placeholder="http://localhost:8722">
+        </div>
+
+        <div class="setting-item">
+          <label for="ytx-video-count">Videos per topic</label>
+          <input type="number" id="ytx-video-count" min="1" max="50" step="1" placeholder="12">
+        </div>
+      </section>
+
+      <!-- Keyboard Shortcuts -->
+      <section class="settings-section">
+        <h2>Keyboard shortcuts</h2>
+        <div class="shortcuts-info" id="shortcuts-list"></div>
+        <button id="configure-shortcuts-btn" class="btn-secondary">Change shortcuts in Chrome</button>
       </section>
 
       <!-- Data Management -->
       <section class="settings-section">
-        <h2>Data Management</h2>
+        <h2>Your data</h2>
         <div class="data-actions">
-          <button id="export-settings-btn" class="btn-secondary" title="Settings, prompt templates and custom models">Export Settings</button>
-          <button id="import-settings-btn" class="btn-secondary">Import Settings</button>
-          <button id="reset-settings-btn" class="btn-danger">Reset to Defaults</button>
+          <button id="export-settings-btn" class="btn-secondary" title="Settings, prompt templates and models">Export settings</button>
+          <button id="import-settings-btn" class="btn-secondary">Import settings</button>
+          <button id="reset-settings-btn" class="btn-danger">Reset settings</button>
         </div>
       </section>
     </main>
@@ -128,7 +170,7 @@
     </footer>
   </div>
 
-  <input type="file" id="import-file" accept=".json" style="display: none;">
+  <input type="file" id="import-file" accept=".json" hidden>
 
   <script src="src/options.js" type="module"></script>
 </body>
