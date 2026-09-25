@@ -273,24 +273,9 @@
         
         <div class="settings-section">
           <h3>Keyboard Shortcuts</h3>
-          <div class="shortcuts-list">
-            <div class="shortcut-item">
-              <span>Copy selected text</span>
-              <kbd>Cmd+H</kbd>
-            </div>
-            <div class="shortcut-item">
-              <span>Capture screenshot</span>
-              <kbd>Cmd+Shift+I</kbd>
-            </div>
-            <div class="shortcut-item">
-              <span>Analyze GitHub repo</span>
-              <kbd>Cmd+Shift+L</kbd>
-            </div>
-            <div class="shortcut-item">
-              <span>Save AI answer to history</span>
-              <kbd>Ctrl+Shift+S</kbd>
-            </div>
-          </div>
+          <div class="shortcuts-list" id="shortcuts-list">
+            <!-- Filled from chrome.commands so it matches your current bindings -->
+</div>
         </div>
 
         <div class="settings-section">
@@ -298,8 +283,7 @@
           <p class="settings-description">Control how selected text and screenshots are sent to AI</p>
 
           <div class="toggle-setting">
-            <label class="toggle-label">
-              <input type="checkbox" id="setting-auto-paste" checked>
+            <label class="toggle-label" for="setting-auto-paste-toggle">
               <span class="toggle-text">
                 <strong>Auto-paste to chat</strong>
                 <span>Automatically paste selected text and screenshots into the AI chat input</span>
@@ -312,8 +296,7 @@
           </div>
 
           <div class="toggle-setting">
-            <label class="toggle-label">
-              <input type="checkbox" id="setting-auto-submit">
+            <label class="toggle-label" for="setting-auto-submit-toggle">
               <span class="toggle-text">
                 <strong>Auto-submit after paste</strong>
                 <span>Automatically click send after pasting (disable to review before sending)</span>
@@ -326,8 +309,7 @@
           </div>
 
           <div class="toggle-setting">
-            <label class="toggle-label">
-              <input type="checkbox" id="setting-screenshot-preview">
+            <label class="toggle-label" for="setting-screenshot-preview-toggle">
               <span class="toggle-text">
                 <strong>Show screenshot preview</strong>
                 <span>Display captured screenshots in the sidebar for manual copying</span>
@@ -347,8 +329,7 @@
           <p class="settings-description">Controls how thoroughly the web research agent (🔍) explores</p>
 
           <div class="toggle-setting">
-            <label class="toggle-label">
-              <input type="checkbox" id="setting-deep-research">
+            <label class="toggle-label" for="setting-deep-research-toggle">
               <span class="toggle-text">
                 <strong>Deep research mode</strong>
                 <span>Search from more angles and read 6-8+ sources before concluding (slower, uses more of your chat quota)</span>
