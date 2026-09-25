@@ -28,7 +28,24 @@ class YavarSidePanel {
     this.init();
   }
 
+  // The tab the user is looking at. In Chrome's side panel that's the active
+  // tab of this window; when Yavar runs in its own window (browsers without
+  // a side panel API) it's the active tab of the last focused normal window.
+  async getActiveTabs() {
+    const own = chrome.runtime.getURL('');
+    let tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tabs[0] || (tabs[0].url || '').startsWith(own)) {
+      try {
+        const win = await chrome.windows.getLastFocused({ windowTypes: ['normal'] });
+        tabs = await chrome.tabs.query({ active: true, windowId: win.id });
+      } catch (e) { /* keep what we have */ }
+    }
+    return tabs;
+  }
+
   async init() {
+    // Let the background know a panel is open (used where there's no side panel API)
+    try { chrome.runtime.connect({ name: 'yavar-panel' }); } catch (e) { /* ignore */ }
     this.cacheElements();
     await this.loadModels();
     this.bindEvents();
@@ -736,7 +753,7 @@ class YavarSidePanel {
   // ========== GitHub Analysis ==========
 
   async analyzeGitHubRepo() {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const [tab] = await this.getActiveTabs();
 
     const gh = parseGitHubUrl(tab?.url || '');
     if (!gh) {
@@ -938,7 +955,7 @@ First Task: Based on the tree and tech stack, what is the single most important 
       return;
     }
 
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const [tab] = await this.getActiveTabs();
     const gh = parseGitHubUrl(tab?.url || '');
     if (!gh) {
       this.showNotification('⚠️ Open a GitHub repository to use the deep-dive agent');
@@ -1611,7 +1628,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
   async updateFilesRailVisibility() {
     let url = '';
     try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      const [tab] = await this.getActiveTabs();
       url = tab?.url || '';
     } catch (e) { /* default hidden */ }
 
@@ -1699,7 +1716,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
   // works even when the content script isn't loaded in that tab yet (e.g. the
   // tab was open before the extension was reloaded); falls back to messaging.
   async getActivePageText(maxChars = 40000) {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const [tab] = await this.getActiveTabs();
     if (!tab?.id) throw new Error('No active tab');
 
     // Primary: inject the extractor directly (no content script required)
@@ -1772,7 +1789,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
   // YouTube's in-page navigation. Fetches the caption track from page context
   // (correct origin/cookies) and flattens it to text.
   async getVideoTranscript(maxChars = 100000) {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const [tab] = await this.getActiveTabs();
     if (!tab?.id) throw new Error('No active tab');
 
     const [res] = await chrome.scripting.executeScript({
@@ -1829,7 +1846,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
 
       // Try ytx first (if reachable) — it's far more reliable than page scraping.
       try {
-        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        const [tab] = await this.getActiveTabs();
         const vid = this.parseYouTubeId(tab?.url || '');
         if (vid) {
           const { base } = await this.getYtxSettings();
@@ -2080,7 +2097,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
 
   async getActiveGitHub() {
     try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      const [tab] = await this.getActiveTabs();
       const info = parseGitHubUrl(tab?.url || '');
       if (info) info.title = tab.title || '';
       return info;
@@ -3861,7 +3878,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
 
   async copyPageContent() {
     try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      const [tab] = await this.getActiveTabs();
 
       const result = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
@@ -3885,7 +3902,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
 
   async copyLink() {
     try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      const [tab] = await this.getActiveTabs();
       await navigator.clipboard.writeText(tab.url);
       this.showNotification('🔗 URL copied to clipboard!');
     } catch (error) {
@@ -4174,7 +4191,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
     const vars = varsInTemplate(tpl.body);
     const ctx = { selection: inputText || '' };
     try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      const [tab] = await this.getActiveTabs();
       ctx.url = tab?.url || '';
       ctx.title = tab?.title || '';
       const gh = parseGitHubUrl(ctx.url);

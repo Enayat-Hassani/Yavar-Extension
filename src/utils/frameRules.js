@@ -1,4 +1,4 @@
-// Frame Rules - let the AI chat sites load inside the side panel.
+// Frame Rules - let the AI chat sites load inside the Yavar panel.
 //
 // ChatGPT, Claude and Gemini send X-Frame-Options / CSP frame-ancestors headers
 // that block iframing. We strip those headers, but ONLY for sub-frames loaded
@@ -31,13 +31,15 @@ async function customModelDomains() {
 
 export async function syncFrameRules() {
   const domains = [...new Set([...BUILT_IN_DOMAINS, ...(await customModelDomains())])];
+  const action = {
+    type: 'modifyHeaders',
+    responseHeaders: STRIPPED_HEADERS.map(header => ({ header, operation: 'remove' }))
+  };
+  // Chrome's side panel: requests from extension pages that aren't tabs
   const rule = {
     id: RULE_ID_BASE,
     priority: 1,
-    action: {
-      type: 'modifyHeaders',
-      responseHeaders: STRIPPED_HEADERS.map(header => ({ header, operation: 'remove' }))
-    },
+    action,
     condition: {
       requestDomains: domains,
       resourceTypes: ['sub_frame'],
@@ -45,11 +47,24 @@ export async function syncFrameRules() {
     }
   };
 
+  // Opera's sidebar and the fallback panel window: frames loaded by Yavar's
+  // own pages (initiator chrome-extension://<id>), whatever tab they're in
+  const ownPagesRule = {
+    id: RULE_ID_BASE + 1,
+    priority: 1,
+    action,
+    condition: {
+      requestDomains: domains,
+      resourceTypes: ['sub_frame'],
+      initiatorDomains: [chrome.runtime.id]
+    }
+  };
+
   try {
     const existing = await chrome.declarativeNetRequest.getSessionRules();
     await chrome.declarativeNetRequest.updateSessionRules({
       removeRuleIds: existing.map(r => r.id),
-      addRules: [rule]
+      addRules: [rule, ownPagesRule]
     });
   } catch (error) {
     console.error('[Yavar] Failed to register frame rules:', error);

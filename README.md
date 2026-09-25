@@ -94,6 +94,14 @@ In-sidebar keybinding (when the sidebar is focused):
 | Claude | `https://claude.ai` | ✅ |
 | Gemini | `https://gemini.google.com` | ✅ |
 
+## Browser support
+
+| Browser | How Yavar opens |
+|---------|-----------------|
+| Chrome, Edge, Brave (Windows / macOS / Linux) | Side panel (toolbar icon or `Ctrl/Cmd+Space`) |
+| Opera, Opera GX | Opera's left sidebar (click the Yavar icon there), or the toolbar icon, which opens Yavar as a slim window docked to the right |
+| Other Chromium browsers without a side panel | The same docked window |
+
 ## Installation
 
 1. Go to `chrome://extensions/`
@@ -137,7 +145,7 @@ Yavar-Extension/
 Yavar asks for broad permissions to do its job. Here's what they are and why:
 
 - **`<all_urls>`** — the floating text-selection menu needs to run on every page. This is the widest possible ask; you can review exactly what the content script does in `src/content.js`.
-- **Declarative Net Request (frame headers)** — ChatGPT, Claude, and Gemini send `X-Frame-Options` / `Content-Security-Policy` headers that stop them loading in an iframe. Yavar removes those headers **only for frames loaded by its own sidebar** (a session rule scoped to `tabIds: [-1]`, the ID Chrome gives requests that don't belong to a tab), and only for the chat sites plus any custom models you add. Your normal tabs keep the sites' full headers, and other websites can't use Yavar to frame your logged-in chats. See `src/utils/frameRules.js`.
+- **Declarative Net Request (frame headers)** — ChatGPT, Claude, and Gemini send `X-Frame-Options` / `Content-Security-Policy` headers that stop them loading in an iframe. Yavar removes those headers **only for frames loaded by Yavar itself**: one session rule for Chrome's side panel (`tabIds: [-1]`, the ID Chrome gives requests that don't belong to a tab) and one for Yavar's own pages elsewhere, such as Opera's sidebar or the docked window (`initiatorDomains: [<extension id>]`). Both apply only to the chat sites plus any custom models you add. Your normal tabs keep the sites' full headers, and other websites can't use Yavar to frame your logged-in chats. See `src/utils/frameRules.js`.
 - **Talking to the chat frame** — the in-chat helper (`src/ai-bridge.js`) only accepts instructions from the Yavar sidebar's own origin and only sends answers back to it.
 - **Research agent** — pages the AI asks to READ are fetched without your cookies, and local or private-network addresses (localhost, `192.168.x.x`, cloud metadata, etc.) are refused, so text on a web page can't steer the agent into your LAN.
 
