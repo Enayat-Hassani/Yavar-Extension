@@ -1963,3 +1963,4 @@ button.lens-item:focus-visible {
 
 /* A research mode set on the message box */
 .composer-tool { color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface)); border-color: color-mix(in srgb, var(--accent) 30%, var(--border)); }
+.model-mark[data-model="api"] { background: linear-gradient(135deg, #5e5ce6, #bf5af2); }
