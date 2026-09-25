@@ -133,6 +133,12 @@ class YavarSidePanel {
     this.sidebarBtnScreenshot = document.getElementById('sidebar-btn-screenshot');
     this.sidebarBtnNewChat = document.getElementById('sidebar-btn-new-chat');
     this.sidebarBtnCarryOver = document.getElementById('sidebar-btn-carry-over');
+    this.runPanel = document.getElementById('run-panel');
+    this.runOutput = document.getElementById('run-output');
+    this.runStatus = document.getElementById('run-status');
+    this.runGo = document.getElementById('run-go');
+    this.runStop = document.getElementById('run-stop');
+    this.runFollowups = document.getElementById('run-followups');
     this.sidebarBtnSettings = document.getElementById('sidebar-btn-settings');
     this.rightSidebar = document.getElementById('right-sidebar');
 
@@ -282,6 +288,21 @@ class YavarSidePanel {
     this.sidebarBtnScreenshot.addEventListener('click', () => this.captureScreenshot());
     this.sidebarBtnNewChat.addEventListener('click', () => this.openNewChat());
     this.sidebarBtnCarryOver?.addEventListener('click', () => this.carryOverToNewChat());
+    document.getElementById('sidebar-btn-run')?.addEventListener('click', () => this.openRunPanel());
+    document.getElementById('run-close')?.addEventListener('click', () => this.closeRunPanel());
+    this.runGo?.addEventListener('click', () => this.runCode());
+    this.runStop?.addEventListener('click', () => this.stopCode());
+    this.runPanel?.querySelector('.run-lang')?.addEventListener('click', (e) => {
+      const lang = e.target.closest('[data-lang]')?.dataset.lang;
+      if (lang) this.setRunLang(lang);
+    });
+    this.runFollowups?.addEventListener('click', (e) => {
+      const ask = e.target.closest('[data-ask]')?.dataset.ask;
+      if (ask) this.askAboutRun(ask);
+    });
+    this.runPanel?.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') this.closeRunPanel();
+    });
     this.sidebarBtnSettings.addEventListener('click', () => this.showSettings());
 
     // Close popovers when clicking outside
@@ -2976,6 +2997,12 @@ Begin: state a one-line plan, then issue your first tool call.`;
         this.showNotification('⚠️ ' + msg);
       }
 
+      // "▶ Run" clicked on a code block in an answer
+      if (data.action === 'RUN_CODE' && typeof data.code === 'string') {
+        this.openRunPanel({ lang: data.lang, code: data.code, autoRun: true });
+        return;
+      }
+
       // ----- One-shot question (e.g. the fresh-chat handoff) -----
       if (this._oneShot && data.requestId === this._oneShot.id) {
         const { resolve, reject } = this._oneShot;
@@ -3366,6 +3393,157 @@ Begin: state a one-line plan, then issue your first tool call.`;
     } catch (error) {
       console.error('[Yavar] Failed to copy link:', error);
     }
+  }
+
+  // ========== Code Runner ==========
+  // Runs snippets in runner.html, a sandboxed page (no extension APIs,
+  // opaque origin) that executes each run in a killable Web Worker.
+
+  ensureRunEditor() {
+    if (this.runEditor) return;
+    this.runEditor = CodeMirror(document.getElementById('run-editor'), {
+      mode: 'python',
+      theme: 'material-darker',
+      lineNumbers: true,
+      lineWrapping: false,
+      tabSize: 4,
+      indentUnit: 4,
+      indentWithTabs: false,
+      extraKeys: {
+        'Ctrl-Enter': () => this.runCode(),
+        'Cmd-Enter': () => this.runCode(),
+        Tab: (cm) => cm.somethingSelected() ? cm.indentSelection('add') : cm.replaceSelection(' '.repeat(cm.getOption('indentUnit')))
+      }
+    });
+    this.runEditor.on('change', () => {
+      clearTimeout(this._runSaveTimer);
+      this._runSaveTimer = setTimeout(() => {
+        try { chrome.storage.local.set({ yavarPlayground: { lang: this.runLang, code: this.runEditor.getValue() } }); } catch (e) { /* ignore */ }
+      }, 500);
+    });
+  }
+
+  setRunLang(lang) {
+    this.runLang = lang === 'javascript' ? 'javascript' : 'python';
+    this.runPanel.querySelectorAll('.run-lang [data-lang]').forEach(b => {
+      const on = b.dataset.lang === this.runLang;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-selected', String(on));
+    });
+    this.runEditor?.setOption('mode', this.runLang);
+    this.runEditor?.setOption('indentUnit', this.runLang === 'python' ? 4 : 2);
+  }
+
+  async openRunPanel({ lang, code, autoRun = false } = {}) {
+    this.ensureRunEditor();
+    if (code == null) {
+      // Playground: restore the last snippet
+      let saved = null;
+      try { saved = (await chrome.storage.local.get('yavarPlayground')).yavarPlayground; } catch (e) { /* ignore */ }
+      lang = saved?.lang || lang || 'python';
+      code = saved?.code ?? (lang === 'python'
+        ? '# Write Python here and press Ctrl+Enter\nname = "world"\nprint(f"Hello, {name}!")\n'
+        : '// Write JavaScript here and press Ctrl+Enter\nconst name = "world";\nconsole.log(`Hello, ${name}!`);\n');
+    }
+    this.setRunLang(lang);
+    this.runPanel.classList.remove('hidden');
+    this.runEditor.setValue(code);
+    this.runEditor.refresh();
+    this.runEditor.focus();
+    this.runOutput.textContent = '';
+    this.runOutput.classList.remove('has-error');
+    this.runFollowups.classList.add('hidden');
+    this.runStatus.textContent = autoRun ? '' : 'Ctrl+Enter to run';
+    if (autoRun) this.runCode();
+  }
+
+  closeRunPanel() {
+    this.runPanel?.classList.add('hidden');
+  }
+
+  // The sandbox iframe is created on first use
+  ensureRunner() {
+    if (this._runnerReady) return this._runnerReady;
+    this._runnerReady = new Promise((resolve) => {
+      const frame = document.createElement('iframe');
+      frame.src = 'runner.html';
+      frame.hidden = true;
+      frame.setAttribute('aria-hidden', 'true');
+      this.runnerFrame = frame;
+      window.addEventListener('message', (e) => {
+        if (e.source !== frame.contentWindow) return;
+        const m = e.data || {};
+        if (m.type === 'ready') resolve();
+        else this.onRunnerMessage(m);
+      });
+      document.body.appendChild(frame);
+    });
+    return this._runnerReady;
+  }
+
+  async runCode() {
+    if (!this.runEditor || this._runId) return;
+    const code = this.runEditor.getValue();
+    if (!code.trim()) return;
+    const id = 'run_' + Date.now();
+    this._runId = id;
+    this._runResult = { code, lang: this.runLang, output: '', ok: null };
+    this.runOutput.textContent = '';
+    this.runOutput.classList.remove('has-error');
+    this.runFollowups.classList.add('hidden');
+    this.runStatus.textContent = 'Running…';
+    this.runGo.disabled = true;
+    this.runStop.classList.remove('hidden');
+    await this.ensureRunner();
+    this.runnerFrame.contentWindow.postMessage({ type: 'run', id, lang: this.runLang, code, timeoutMs: 10000 }, '*');
+  }
+
+  stopCode() {
+    if (this._runId) this.runnerFrame?.contentWindow?.postMessage({ type: 'stop', id: this._runId }, '*');
+  }
+
+  onRunnerMessage(m) {
+    if (!m.id || m.id !== this._runId) return;
+    if (m.type === 'status') {
+      this.runStatus.textContent = m.text || 'Running…';
+    } else if (m.type === 'output') {
+      const span = document.createElement('span');
+      if (m.stream === 'stderr') span.className = 'run-err';
+      span.textContent = m.text;
+      this.runOutput.appendChild(span);
+      this.runOutput.scrollTop = this.runOutput.scrollHeight;
+      this._runResult.output += m.text;
+    } else if (m.type === 'done') {
+      this._runId = null;
+      this._runResult.ok = m.ok;
+      this._runResult.error = m.error;
+      this.runGo.disabled = false;
+      this.runStop.classList.add('hidden');
+      this.runOutput.classList.toggle('has-error', !m.ok);
+      if (!this.runOutput.textContent) this.runOutput.textContent = m.ok ? '(no output)' : (m.error || 'Error');
+      this.runStatus.textContent = m.ok ? `Done in ${m.ms < 1000 ? m.ms + ' ms' : (m.ms / 1000).toFixed(1) + ' s'}` : '⚠️ ' + (m.error === 'timeout' ? 'Stopped' : 'Error');
+      this.runFollowups.classList.remove('hidden');
+      const fix = this.runFollowups.querySelector('[data-ask="fix"]');
+      fix.classList.toggle('hidden', m.ok);
+      fix.classList.toggle('primary', !m.ok);
+    }
+  }
+
+  askAboutRun(kind) {
+    const r = this._runResult;
+    if (!r) return;
+    const lang = r.lang === 'python' ? 'python' : 'javascript';
+    const name = lang === 'python' ? 'Python' : 'JavaScript';
+    const output = (r.output || '(no output)').slice(0, 8000);
+    const block = `\`\`\`${lang}\n${r.code.replace(/\n$/, '')}\n\`\`\`\n\nOutput:\n\`\`\`\n${output.replace(/\n$/, '')}\n\`\`\``;
+    const asks = {
+      fix: `I ran this ${name} code and it failed:\n\n${block}\n\nExplain in simple terms what went wrong and why, then give the corrected code. (It runs in a browser sandbox with only the standard library${lang === 'python' ? ', and input() is not available' : ''}.)`,
+      explain: `I ran this ${name} code:\n\n${block}\n\nWalk me through why it produces exactly this output, step by step.`,
+      next: `I ran this ${name} code:\n\n${block}\n\nSuggest 3 small changes I could try next to learn more from it (from easy to harder), and what I should expect to see for each.`
+    };
+    this.forwardToIframe({ prompt: asks[kind], autoSubmit: false });
+    this.closeRunPanel();
+    this.showNotification('💬 Added to the chat input');
   }
 
   // ========== Input Dialog ==========

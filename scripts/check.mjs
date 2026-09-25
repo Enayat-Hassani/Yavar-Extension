@@ -32,7 +32,7 @@ Object.values(manifest.action?.default_icon || {}).forEach(p => need(p, 'action.
 (manifest.declarative_net_request?.rule_resources || []).forEach(r => need(r.path, 'rule_resources'));
 
 // ---- extension pages ----
-for (const page of [manifest.side_panel?.default_path, manifest.options_page].filter(Boolean)) {
+for (const page of [manifest.side_panel?.default_path, manifest.options_page, ...(manifest.sandbox?.pages || [])].filter(Boolean)) {
   const html = readFileSync(join(root, page), 'utf8');
   for (const m of html.matchAll(/<(?:script[^>]*\ssrc|link[^>]*\shref)="([^"]+)"/g)) {
     if (!/^https?:/.test(m[1])) need(m[1], page);

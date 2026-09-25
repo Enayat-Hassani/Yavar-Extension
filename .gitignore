@@ -133,3 +133,6 @@ artifact.html
 # Misc
 rag_plan.md
 Build-Lessons.md
+# Bundled Python runtime for the code runner (must be committed)
+!lib/pyodide/
+!lib/pyodide/*

@@ -42,9 +42,15 @@
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["src/content.js"],
-      "css": ["styles/content.css"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "src/content.js"
+      ],
+      "css": [
+        "styles/content.css"
+      ],
       "run_at": "document_end"
     },
     {
@@ -54,7 +60,9 @@
         "https://claude.ai/*",
         "https://gemini.google.com/*"
       ],
-      "js": ["src/ai-bridge.js"],
+      "js": [
+        "src/ai-bridge.js"
+      ],
       "run_at": "document_idle",
       "all_frames": true
     }
@@ -89,5 +97,14 @@
       "description": "Toggle Notes Panel"
     }
   },
-  "options_page": "options.html"
+  "options_page": "options.html",
+  "sandbox": {
+    "pages": [
+      "runner.html"
+    ]
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'",
+    "sandbox": "sandbox allow-scripts; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; child-src 'self' blob:; connect-src 'self' blob: data:; object-src 'none'"
+  }
 }

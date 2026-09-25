@@ -2395,3 +2395,120 @@ div.toggle-switch.active::after {
   border-color: var(--danger);
   color: white;
 }
+
+/* ========== Code Runner ========== */
+.run-panel {
+  position: absolute;
+  inset: 0;
+  z-index: 68;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-primary);
+  animation: fadeIn 0.18s ease;
+}
+
+.run-panel.hidden { display: none; }
+
+.run-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+}
+
+.run-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.run-lang .files-tab { padding: 4px 10px; }
+
+.run-editor {
+  flex: 1 1 45%;
+  min-height: 140px;
+  overflow: hidden;
+  border-bottom: 1px solid var(--border);
+}
+
+.run-editor .CodeMirror {
+  height: 100%;
+  font-size: 13px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.run-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+}
+
+.run-go,
+.run-stop {
+  padding: 7px 16px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.run-go {
+  color: #fff;
+  background: var(--success);
+}
+
+.run-go:hover { filter: brightness(1.05); }
+.run-go:disabled { opacity: 0.55; cursor: progress; }
+
+.run-stop {
+  color: #fff;
+  background: var(--danger);
+}
+
+.run-stop.hidden { display: none; }
+
+.run-status {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.run-output {
+  flex: 1 1 35%;
+  min-height: 80px;
+  margin: 0 14px;
+  padding: 10px 12px;
+  overflow: auto;
+  font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-primary);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.run-output:empty::before {
+  content: 'Output appears here';
+  color: var(--text-secondary);
+}
+
+.run-output.has-error { border-color: color-mix(in srgb, var(--danger) 55%, transparent); }
+.run-err { color: var(--danger); }
+
+.run-followups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 14px 14px;
+}
+
+.run-followups.hidden,
+.run-followups .hidden { display: none; }
