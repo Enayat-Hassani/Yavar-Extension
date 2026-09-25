@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Yavar - Your AI Sidekick",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "description": "Your AI sidekick for ChatGPT, Gemini, and Claude. Smart code explanation, screenshot capture, and guided study mode.",
   "icons": {
     "16": "icons/icon16.png",
@@ -23,7 +23,6 @@
     "https://chat.openai.com/*",
     "https://gemini.google.com/*",
     "https://claude.ai/*",
-    "https://www.bing.com/chat/*",
     "<all_urls>"
   ],
   "background": {
@@ -32,6 +31,11 @@
   },
   "side_panel": {
     "default_path": "sidepanel.html"
+  },
+  "sidebar_action": {
+    "default_panel": "sidepanel.html",
+    "default_title": "Yavar",
+    "default_icon": "icons/icon48.png"
   },
   "action": {
     "default_title": "Open AI Sidebar",
@@ -43,9 +47,16 @@
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["src/content.js"],
-      "css": ["styles/content.css"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "src/utils/template-core.js",
+        "src/content.js"
+      ],
+      "css": [
+        "styles/content.css"
+      ],
       "run_at": "document_end"
     },
     {
@@ -55,20 +66,13 @@
         "https://claude.ai/*",
         "https://gemini.google.com/*"
       ],
-      "js": ["src/ai-bridge.js"],
+      "js": [
+        "src/ai-bridge.js"
+      ],
       "run_at": "document_idle",
       "all_frames": true
     }
   ],
-  "declarative_net_request": {
-    "rule_resources": [
-      {
-        "id": "csp_bypass_rules",
-        "enabled": true,
-        "path": "rules/csp-bypass.json"
-      }
-    ]
-  },
   "commands": {
     "toggle-sidebar": {
       "suggested_key": {
@@ -100,10 +104,13 @@
     }
   },
   "options_page": "options.html",
-  "web_accessible_resources": [
-    {
-      "resources": ["src/styles/*.css", "icons/*.png", "src/utils/templates.js"],
-      "matches": ["<all_urls>"]
-    }
-  ]
+  "sandbox": {
+    "pages": [
+      "runner.html"
+    ]
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'",
+    "sandbox": "sandbox allow-scripts; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; child-src 'self' blob:; connect-src 'self' blob: data:; object-src 'none'"
+  }
 }

@@ -4,6 +4,19 @@
 import { ContextMenuHandler } from './utils/contextMenu.js';
 import { CommandHandler } from './utils/commands.js';
 import { MessageHandler } from './utils/messageHandler.js';
+import { syncFrameRules } from './utils/frameRules.js';
+import { openPanel, trackPanels, setupActionClick } from './utils/panel.js';
+
+trackPanels();
+setupActionClick();
+
+// Session rules are cleared when the browser restarts, so register them on
+// every worker start (cheap and idempotent), and again when models change.
+syncFrameRules();
+chrome.runtime.onStartup.addListener(syncFrameRules);
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'sync' && changes.aiModels) syncFrameRules();
+});
 
 // Initialize on install
 chrome.runtime.onInstalled.addListener(async (details) => {
@@ -32,8 +45,8 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 });
 
 // Command handler (keyboard shortcuts)
-chrome.commands.onCommand.addListener(async (command) => {
-  await CommandHandler.handleCommand(command);
+chrome.commands.onCommand.addListener((command, tab) => {
+  CommandHandler.handleCommand(command, tab);
 });
 
 // Message routing - single listener for all messages
@@ -47,40 +60,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   // Handle auto-submit: store prompt, open sidebar, notify sidepanel
+  // A prompt from the floating menu: store it and open the panel. The panel
+  // drains pending items from session storage on open and on every change,
+  // so no follow-up messages are needed.
   if (message.action === 'trigger_auto_submit') {
     const tabId = sender.tab?.id;
-    console.log('[Yavar BG] trigger_auto_submit received from tab:', tabId, 'prompt length:', message.prompt?.length);
-
-    // CRITICAL: Store prompt FIRST (sync-safe), then open panel SYNCHRONOUSLY
-    // sidePanel.open() must be called without any await before it to preserve user gesture
-    console.log('[Yavar BG] Storing pendingAutoSubmit in session storage');
-    chrome.storage.session.set({
-      pendingAutoSubmit: message.prompt,
-      lastSubmitTime: Date.now()
-    }, () => {
-      console.log('[Yavar BG] Stored in session storage');
-    });
-
-    // Open sidepanel synchronously — no await before this call
-    if (tabId) {
-      console.log('[Yavar BG] Opening sidepanel for tab:', tabId);
-      chrome.sidePanel.open({ tabId }).catch(err => {
-        console.error('[Yavar BG] sidePanel.open failed:', err);
-      });
-    }
-
-    // Staggered messages to sidepanel — it may not have its listener ready yet
-    const payload = { action: 'AUTO_SUBMIT_PROMPT', prompt: message.prompt };
-    const delays = [300, 800, 1500, 3000];
-    delays.forEach((delay, i) => {
-      setTimeout(() => {
-        chrome.runtime.sendMessage(payload).catch((err) => {
-          console.log(`[Yavar BG] Staggered message ${i+1} failed (sidepanel may not be ready):`, err.message);
-        });
-      }, delay);
-    });
-
-    console.log('[Yavar BG] Sending response to content script');
+    chrome.storage.session.set({ pendingAutoSubmit: message.prompt, lastSubmitTime: Date.now() });
+    // Open synchronously: an await before this would lose the user gesture
+    if (tabId) openPanel({ tabId, windowId: sender.tab?.windowId });
     sendResponse({ success: true });
     return true;
   }
@@ -89,7 +76,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'start_area_select') {
     (async () => {
       try {
-        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        const tab = await getUserTab();
         if (!tab) { sendResponse({ success: false }); return; }
 
         // Inject the area selection overlay into the active tab
@@ -133,20 +120,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // Open sidebar to show the screenshot
         const tabId = sender.tab?.id;
         if (tabId) {
-          chrome.sidePanel.open({ tabId }).catch(err => {
-            console.error('[Yavar BG] sidePanel.open failed:', err);
-          });
+          openPanel({ tabId, windowId: sender.tab?.windowId });
         }
 
-        // Also try to notify sidepanel directly (if it's already open)
-        const payload = {
-          type: 'SCREENSHOT_CAPTURED',
-          imageData: dataUrl,
-          rect: message.rect
-        };
-        chrome.runtime.sendMessage(payload).catch((err) => {
-          console.log('[Yavar BG] Sidepanel not ready, will use storage fallback');
-        });
+        // An already-open panel picks this up via its storage listener
 
         sendResponse({ success: true });
       } catch (error) {
@@ -157,72 +134,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  // Handle storing pending text (content scripts can't use chrome.storage.session)
-  if (message.action === 'store_pending_text') {
-    (async () => {
-      try {
-        await chrome.storage.session.set({
-          pendingText: message.text,
-          pendingNotification: message.notification
-        });
-        console.log('[Background] Stored pending text in session');
-        sendResponse({ success: true });
-      } catch (error) {
-        console.error('[Background] Failed to store pending text:', error);
-        sendResponse({ success: false, error: error.message });
-      }
-    })();
-    return true;
-  }
-
   // Handle opening sidebar — must be synchronous to preserve user gesture
   if (message.action === 'open_sidebar') {
     const tabId = sender.tab?.id;
     if (tabId) {
-      chrome.sidePanel.open({ tabId }).catch(err => {
-        console.error('[Background] Failed to open sidebar:', err);
-      });
+      openPanel({ tabId, windowId: sender.tab?.windowId });
     }
     sendResponse({ success: true });
     return true;
   }
   
-  // Handle screenshot capture from content script
-  if (message.type === 'CAPTURE_SCREENSHOT') {
-    (async () => {
-      try {
-        // Get the tab where the request originated
-        const tab = sender.tab || await chrome.tabs.query({ active: true, currentWindow: true }).then(t => t[0]);
-
-        // Capture visible tab
-        const dataUrl = await chrome.tabs.captureVisibleTab(null, {
-          format: 'png',
-          quality: 90
-        });
-
-        // Store for sidebar to pick up
-        await chrome.storage.session.set({ pendingScreenshot: dataUrl });
-
-        // Notify sidebar if open
-        const views = chrome.extension.getViews({ type: 'panel' });
-        views.forEach(view => {
-          if (view.panel?.handleScreenshotCapture) {
-            view.panel.handleScreenshotCapture(dataUrl);
-          }
-        });
-
-        sendResponse({ success: true, imageData: dataUrl });
-      } catch (error) {
-        console.error('[Yavar] Screenshot capture failed:', error);
-        sendResponse({ success: false, error: error.message });
-      }
-    })();
-    return true;
-  }
-  
   // Let MessageHandler handle OTHER messages (not GitHub API)
   // Only call MessageHandler if message has a type we don't handle above
-  if (message.type && !['CAPTURE_SCREENSHOT'].includes(message.type)) {
+  if (message.type) {
     MessageHandler.handle(message, sender, sendResponse);
     return true;
   }
@@ -232,13 +156,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return true;
 });
 
-// Side panel setup - open on action click
-chrome.action.onClicked.addListener(async (tab) => {
-  await chrome.sidePanel.open({ windowId: tab.windowId });
-});
-
-// Set side panel behavior
-chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+// The tab the user is looking at. When Yavar runs as its own window
+// (browsers without a side panel), the "current window" is Yavar itself, so
+// fall back to the last focused normal browser window.
+async function getUserTab() {
+  const own = chrome.runtime.getURL('');
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (tab && !(tab.url || '').startsWith(own)) return tab;
+  try {
+    const win = await chrome.windows.getLastFocused({ windowTypes: ['normal'] });
+    const [t] = await chrome.tabs.query({ active: true, windowId: win.id });
+    return t || null;
+  } catch (e) {
+    return null;
+  }
+}
 
 // Injected into the active tab to let the user draw a selection rectangle
 function injectAreaSelector() {
@@ -276,6 +208,11 @@ function injectAreaSelector() {
 
   function cleanup() {
     overlay.remove();
+    document.removeEventListener('keydown', escHandler, true);
+  }
+
+  function escHandler(e) {
+    if (e.key === 'Escape') cleanup();
   }
 
   overlay.addEventListener('mousedown', (e) => {
@@ -323,12 +260,7 @@ function injectAreaSelector() {
     chrome.runtime.sendMessage({ action: 'area_selected', rect });
   });
 
-  document.addEventListener('keydown', function escHandler(e) {
-    if (e.key === 'Escape') {
-      cleanup();
-      document.removeEventListener('keydown', escHandler);
-    }
-  });
+  document.addEventListener('keydown', escHandler, true);
 
   document.body.appendChild(overlay);
 }

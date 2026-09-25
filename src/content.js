@@ -1,54 +1,12 @@
 // Content Script - Text Selection & Keyboard Shortcuts
 // Runs on all pages to handle text selection and capture
 //
-// NOTE: this runs on EVERY page, so it must never fail to load. We inline the
-// template helpers here (rather than `import`-ing utils/templates.js) because a
-// module content script whose import fails to resolve executes nothing at all.
-// Keep DEFAULT_TEMPLATES in sync with src/utils/templates.js (used by the
-// options page and sidepanel, which are regular extension pages).
+// NOTE: this runs on EVERY page, so it must never fail to load: it is a
+// classic script (a module whose import fails would run nothing). The
+// template helpers come from utils/template-core.js, which the manifest loads
+// just before this file.
 
-const DEFAULT_TEMPLATES = [
-  { id: 'send',      name: 'Send',            icon: '➤', menu: true,  body: '{{selection}}' },
-  { id: 'explain',   name: 'Explain',         icon: '?', menu: true,  primary: true, body: 'Explain this to me using "Guided Learning" mode:\n\n{{selection}}' },
-  { id: 'summarize', name: 'Summarize',       icon: '≡', menu: true,  body: 'Summarize the key points of this clearly and concisely:\n\n{{selection}}' },
-  { id: 'improve',   name: 'Improve writing', icon: '✎', menu: false, body: 'Improve the clarity, grammar and flow of this text. Return only the rewritten version:\n\n{{selection}}' },
-  { id: 'translate', name: 'Translate → EN',  icon: '文', menu: false, body: 'Translate this into natural English. Return only the translation:\n\n{{selection}}' },
-  { id: 'ask-page',  name: 'Ask about page',  icon: '◆', menu: false, body: 'Here is the page I\'m reading:\n\n{{page}}\n\n---\nAnswer my question about it: ' },
-];
-
-function varsInTemplate(body) {
-  return [...new Set([...String(body).matchAll(/\{\{\s*(\w+)\s*\}\}/g)].map(m => m[1]))];
-}
-
-async function expandTemplate(body, ctx = {}) {
-  const getters = {
-    selection: () => ctx.selection ?? '',
-    page:      () => ctx.page ?? '',
-    repo:      () => ctx.repo ?? '',
-    url:       () => ctx.url ?? '',
-    title:     () => ctx.title ?? '',
-    clipboard: async () => {
-      if (ctx.clipboard != null) return ctx.clipboard;
-      try { return await navigator.clipboard.readText(); } catch { return ''; }
-    },
-  };
-  const used = new Set([...body.matchAll(/\{\{\s*(\w+)\s*\}\}/g)].map(m => m[1]));
-  let out = body;
-  for (const name of used) {
-    const getter = getters[name];
-    const value = getter ? await getter() : '';
-    out = out.replace(new RegExp('\\{\\{\\s*' + name + '\\s*\\}\\}', 'g'), value);
-  }
-  return out.trim();
-}
-
-async function loadTemplates() {
-  try {
-    const { promptTemplates } = await chrome.storage.sync.get('promptTemplates');
-    if (Array.isArray(promptTemplates) && promptTemplates.length) return promptTemplates;
-  } catch { /* fall through to defaults */ }
-  return DEFAULT_TEMPLATES.slice();
-}
+const { DEFAULT_TEMPLATES, expandTemplate, varsInTemplate, loadTemplates } = globalThis.YavarTemplateCore;
 
 // Crisp line icons for the built-in templates. Custom templates fall back to
 // their glyph. Keyed by template id; each is the inner markup of a 24-box SVG.
@@ -58,6 +16,7 @@ const TEMPLATE_ICONS = {
   summarize: '<line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line>',
   improve:   '<path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"></path>',
   translate: '<circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>',
+  more:      '<circle cx="5" cy="12" r="1.6"></circle><circle cx="12" cy="12" r="1.6"></circle><circle cx="19" cy="12" r="1.6"></circle>',
   'ask-page':'<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path>',
 };
 
@@ -82,17 +41,21 @@ class YavarContentHandler {
   async init() {
     await this.loadSettings();
     this.templates = await loadTemplates();
-    if (this.enabled) {
-      // Don't create menu here — lazy-init on first text selection
-      this.addEventListeners();
-      // Rebuild the menu if the user edits their templates in options
-      chrome.storage.onChanged.addListener((changes, area) => {
-        if (area === 'sync' && changes.promptTemplates) {
-          this.templates = changes.promptTemplates.newValue || this.templates;
-          this.rebuildFloatingMenu();
-        }
-      });
-    }
+    // Listeners check this.enabled on each event, so settings changes apply
+    // live without reloading the page. The menu itself is created lazily.
+    this.addEventListeners();
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area !== 'sync') return;
+      if (changes.promptTemplates) {
+        this.templates = changes.promptTemplates.newValue || DEFAULT_TEMPLATES.slice();
+        this.rebuildFloatingMenu();
+      }
+      if (changes.settings) {
+        this.loadSettings().then(() => {
+          if (!this.enabled || !this.enableFloatingMenu) this.forceHide();
+        });
+      }
+    });
   }
 
   async loadSettings() {
@@ -141,7 +104,7 @@ class YavarContentHandler {
     const menuTemplates = (this.templates || []).filter(t => t.menu);
     if (!menuTemplates.length) menuTemplates.push({ id: 'send', name: 'Send', icon: '➤', body: '{{selection}}' });
 
-    for (const tpl of menuTemplates) {
+    const makeBtn = (tpl) => {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'yavar-menu-btn' + (tpl.primary ? ' primary' : '');
@@ -152,31 +115,92 @@ class YavarContentHandler {
       btn.innerHTML = svg
         ? svg
         : `<span class="yavar-glyph" style="pointer-events:none;">${this.escapeHtml(tpl.icon || '•')}</span>`;
-      menuContent.appendChild(btn);
+      return btn;
+    };
+    for (const tpl of menuTemplates) menuContent.appendChild(makeBtn(tpl));
+    menu.appendChild(menuContent);
+
+    // Templates not pinned to the pill live behind a "more" button, so every
+    // template is reachable from the page without a trip to Settings.
+    const extraTemplates = (this.templates || []).filter(t => !t.menu);
+    if (extraTemplates.length) {
+      const moreBtn = document.createElement('button');
+      moreBtn.type = 'button';
+      moreBtn.className = 'yavar-menu-btn';
+      moreBtn.dataset.yavarMore = '1';
+      moreBtn.title = 'More prompts';
+      moreBtn.setAttribute('aria-label', 'More prompts');
+      moreBtn.setAttribute('aria-expanded', 'false');
+      moreBtn.innerHTML = iconSvg('more');
+      menuContent.appendChild(moreBtn);
+
+      const list = document.createElement('div');
+      list.className = 'yavar-menu-more';
+      list.setAttribute('role', 'menu');
+      list.hidden = true;
+      for (const tpl of extraTemplates) {
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.className = 'yavar-menu-item';
+        item.setAttribute('role', 'menuitem');
+        item.dataset.templateId = tpl.id;
+        const svg = iconSvg(tpl.id);
+        item.innerHTML =
+          `<span class="yavar-menu-item-icon">${svg || this.escapeHtml(tpl.icon || '•')}</span>` +
+          `<span class="yavar-menu-item-name">${this.escapeHtml(tpl.name)}</span>`;
+        list.appendChild(item);
+      }
+      menu.appendChild(list);
+      this.moreList = list;
+      this.moreBtn = moreBtn;
+    } else {
+      this.moreList = null;
+      this.moreBtn = null;
     }
 
-    menu.appendChild(menuContent);
     document.body.appendChild(menu);
     this.floatingMenu = menu;
 
     // Hovering the menu should keep it open; leaving arms a hide.
-    menuContent.addEventListener('mouseenter', () => {
+    menu.addEventListener('mouseenter', () => {
       this.isInteracting = true;
       if (this.hideTimeout) clearTimeout(this.hideTimeout);
     });
-    menuContent.addEventListener('mouseleave', () => {
+    menu.addEventListener('mouseleave', () => {
       this.isInteracting = false;
     });
 
     // Use pointerdown + preventDefault so the text selection isn't lost before
     // we read it, and the click always lands even on a quick tap.
-    menuContent.addEventListener('pointerdown', (e) => {
+    menu.addEventListener('pointerdown', (e) => {
+      if (e.target.closest('[data-yavar-more]')) {
+        e.preventDefault();
+        e.stopPropagation();
+        this.toggleMoreList();
+        return;
+      }
       const button = e.target.closest('[data-template-id]');
       if (!button) return;
       e.preventDefault();
       e.stopPropagation();
       this.runTemplate(button.dataset.templateId);
     });
+  }
+
+  // Open the overflow list on the side away from the selection (so it never
+  // covers the text), falling back to the other side when there's no room.
+  toggleMoreList(force) {
+    if (!this.moreList) return;
+    const open = force ?? this.moreList.hidden;
+    this.moreList.hidden = !open;
+    this.moreBtn?.setAttribute('aria-expanded', String(open));
+    if (!open) return;
+    const menuRect = this.floatingMenu.getBoundingClientRect();
+    const listHeight = this.moreList.offsetHeight;
+    const fitsAbove = menuRect.top > listHeight + 12;
+    const fitsBelow = window.innerHeight - menuRect.bottom > listHeight + 12;
+    const above = this.menuAboveSelection ? (fitsAbove || !fitsBelow) : (!fitsBelow && fitsAbove);
+    this.moreList.classList.toggle('above', above);
   }
 
   escapeHtml(text) {
@@ -196,15 +220,26 @@ class YavarContentHandler {
 
       // Let the selection settle after the mouse is released
       setTimeout(() => {
+        // Read-only textareas first (GitHub's code view selects inside one):
+        // the page selection has no usable rect there, so read the textarea
+        // directly and place the menu at the mouse.
+        const ta = this.readOnlyTextareaSelection();
+        if (ta) {
+          this.currentText = ta.text;
+          this.textareaSel = ta;
+          this.showFloatingMenuAt({ left: e.clientX, right: e.clientX, top: e.clientY - 12, bottom: e.clientY + 12, width: 1, height: 24 });
+          return;
+        }
+
         const selection = window.getSelection();
         const text = selection ? selection.toString().trim() : '';
-
-        if (text.length > 0 && text.length < 5000) {
+        if (text.length > 0 && text.length < 20000) {
           this.currentText = text;
+          this.textareaSel = null;
           this.showFloatingMenu(selection);
-        } else {
-          this.forceHide();
+          return;
         }
+        this.forceHide();
       }, 10);
     });
 
@@ -218,7 +253,9 @@ class YavarContentHandler {
     // If the selection is cleared or changed away, drop the menu
     document.addEventListener('selectionchange', () => {
       if (!this.menuVisible() || this.isInteracting) return;
-      const text = (window.getSelection()?.toString() || '').trim();
+      const text = this.textareaSel
+        ? this.hasTextareaSelection()
+        : (window.getSelection()?.toString() || '').trim();
       if (!text) this.forceHide();
     });
 
@@ -238,16 +275,51 @@ class YavarContentHandler {
     });
   }
 
+  // Selected text in the focused read-only textarea (GitHub's code view)
+  readOnlyTextareaSelection() {
+    const el = document.activeElement;
+    if (!el || el.tagName !== 'TEXTAREA' || !el.readOnly) return null;
+    const { selectionStart: a, selectionEnd: b } = el;
+    if (a == null || b == null || a === b || b - a >= 20000) return null;
+    const text = el.value.slice(a, b).trim();
+    return text ? { text, el, a, b } : null;
+  }
+
+  // Cheap check for selectionchange (fires on every drag step)
+  hasTextareaSelection() {
+    const el = document.activeElement;
+    return !!(el && el.tagName === 'TEXTAREA' && el.selectionStart !== el.selectionEnd);
+  }
+
+  // 1-based line range of a textarea selection, computed only when needed
+  textareaLines({ el, a, b }) {
+    const v = el.value;
+    let start = 1;
+    for (let i = v.indexOf('\n'); i !== -1 && i < a; i = v.indexOf('\n', i + 1)) start++;
+    let end = start;
+    const last = v.slice(a, b).replace(/\n+$/, '');
+    for (let i = last.indexOf('\n'); i !== -1; i = last.indexOf('\n', i + 1)) end++;
+    return { startLine: start, endLine: end };
+  }
+
   showFloatingMenu(selection) {
+    try {
+      const rect = selection.getRangeAt(0).getBoundingClientRect();
+      // Degenerate rect (e.g. selection inside an input) → skip
+      if (rect.width === 0 && rect.height === 0) return;
+      this.showFloatingMenuAt(rect);
+    } catch (error) {
+      console.error('[Yavar] Error positioning menu:', error);
+    }
+  }
+
+  // Place the menu above (or below) a rect in viewport coordinates
+  showFloatingMenuAt(rect) {
     // Lazy-init: create menu on first use
     this.ensureFloatingMenu();
     if (!this.floatingMenu) return;
 
     try {
-      const range = selection.getRangeAt(0);
-      const rect = range.getBoundingClientRect();
-      // Degenerate rect (e.g. selection inside an input) → skip
-      if (rect.width === 0 && rect.height === 0) return;
 
       if (this.hideTimeout) { clearTimeout(this.hideTimeout); this.hideTimeout = null; }
 
@@ -262,7 +334,8 @@ class YavarContentHandler {
       let top = rect.top - menuHeight - 8;
       let left = rect.left + rect.width / 2 - menuWidth / 2;
 
-      if (top < pad) top = rect.bottom + 8;                       // flip below if no room above
+      this.menuAboveSelection = top >= pad;
+      if (!this.menuAboveSelection) top = rect.bottom + 8;       // flip below if no room above
       top = Math.min(top, window.innerHeight - menuHeight - pad); // clamp to viewport
       left = Math.max(pad, Math.min(left, window.innerWidth - menuWidth - pad));
 
@@ -295,7 +368,9 @@ class YavarContentHandler {
     if (this.hideTimeout) { clearTimeout(this.hideTimeout); this.hideTimeout = null; }
     this.isInteracting = false;
     if (this.floatingMenu) this.floatingMenu.style.display = 'none';
+    this.toggleMoreList(false);
     this.currentText = '';
+    this.textareaSel = null;
   }
 
   async runTemplate(templateId) {
@@ -316,7 +391,11 @@ class YavarContentHandler {
       if (vars.includes('url')) ctx.url = window.location.href;
       if (vars.includes('title')) ctx.title = document.title;
 
-      const prompt = await expandTemplate(tpl.body, ctx);
+      let prompt = await expandTemplate(tpl.body, ctx);
+      // On a GitHub file page, say where the code came from so the AI can
+      // reason about it (and you can find it again).
+      const source = vars.includes('selection') ? this.githubSourceNote() : '';
+      if (source) prompt += '\n\n' + source;
       chrome.runtime.sendMessage({ action: 'trigger_auto_submit', prompt });
       this.forceHide();
     } catch (err) {
@@ -324,6 +403,20 @@ class YavarContentHandler {
       this.showButtonFeedback(templateId,
         err.message?.includes('Extension context invalidated') ? 'Reload page' : 'Failed');
     }
+  }
+
+  // "(Lines 12-20 of `src/app.ts` in owner/repo)" on github.com/…/blob/… pages
+  githubSourceNote() {
+    const m = location.pathname.match(/^\/([^/]+)\/([^/]+)\/blob\/[^/]+\/(.+)$/);
+    if (location.hostname !== 'github.com' || !m) return '';
+    let path;
+    try { path = decodeURIComponent(m[3]); } catch { path = m[3]; }
+    let lines = 'From ';
+    if (this.textareaSel) {
+      const { startLine, endLine } = this.textareaLines(this.textareaSel);
+      lines = (startLine === endLine ? `Line ${startLine}` : `Lines ${startLine}-${endLine}`) + ' of ';
+    }
+    return `(${lines}\`${path}\` in ${m[1]}/${m[2]})`;
   }
 
   // Best-effort readable text of the live page (mirror of the sidepanel's htmlToText).
