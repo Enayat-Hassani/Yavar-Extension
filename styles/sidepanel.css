@@ -7,6 +7,14 @@
 }
 
 :root {
+  /* Code colors (Xcode-like), used by the editors' "yavar" theme */
+  --cm-keyword: #ad3da4;
+  --cm-string: #c41a16;
+  --cm-comment: #707f8c;
+  --cm-number: #1c00cf;
+  --cm-def: #0f68a0;
+  --cm-builtin: #804fb8;
+  --cm-property: #3e8087;
   /* Apple-inspired Light Grey Palette */
   --bg-primary: #f5f5f7;        /* Apple light grey background */
   --bg-secondary: #e8e8ed;      /* Lighter grey secondary */
@@ -43,6 +51,13 @@
     --surface: #2c2c2e;
     --surface-soft: rgba(255, 255, 255, 0.06);
     --surface-glass: rgba(44, 44, 46, 0.94);
+    --cm-keyword: #ff7ab2;
+    --cm-string: #ff8170;
+    --cm-comment: #7f8c98;
+    --cm-number: #d9c97c;
+    --cm-def: #6bdfff;
+    --cm-builtin: #dabaff;
+    --cm-property: #78c2b3;
     color-scheme: dark;
   }
 }
@@ -1005,12 +1020,10 @@ div.toggle-switch.active::after {
 /* ========== Notes Panel ========== */
 .notes-panel {
   position: absolute;
-  top: 0;
   left: 0;
   width: 100%;
-  height: 100%;
   z-index: 50;
-  background: #1e1e2e;
+  background: var(--bg-primary);
   display: flex;
   flex-direction: column;
 }
@@ -1019,52 +1032,18 @@ div.toggle-switch.active::after {
   display: none;
 }
 
-.notes-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 10px 16px;
-  background: #181825;
-  border-bottom: 1px solid #313244;
-}
-
-.notes-title {
-  color: #cdd6f4;
-  font-size: 14px;
-  font-weight: 600;
-  font-family: -apple-system;
-}
-
-.notes-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.notes-action-btn {
-  background: transparent;
-  border: 1px solid #45475a;
-  border-radius: 6px;
-  padding: 4px 8px;
-  color: #cdd6f4;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.notes-action-btn:hover {
-  background: #313244;
-}
-
 #notes-editor {
   flex: 1;
   overflow: hidden;
   position: relative;
+  padding: 4px 0 0;
+  background: var(--surface);
 }
 
 #notes-editor .CodeMirror {
   height: 100%;
-  background: #1e1e2e;
-  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
-  font-size: 13px;
+  padding: 8px 10px;
+  font: 14px/1.6 -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
 }
 
 .sidebar-btn-active {
@@ -2679,13 +2658,12 @@ div.toggle-switch.active::after {
   padding: 10px 12px 12px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-left: 3px solid var(--accent);
-  border-radius: 10px;
+  border-radius: 12px;
   font-size: 13px;
   line-height: 1.55;
 }
 
-.answer-card.is-failed { border-left-color: var(--danger); }
+.answer-card.is-failed { border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
 
 .answer-head {
   display: flex;
@@ -2698,13 +2676,13 @@ div.toggle-switch.active::after {
 
 .answer-title {
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--accent);
+  color: var(--text-secondary);
 }
 
 .answer-status { display: inline-flex; align-items: center; }
 .answer-status .files-spinner { width: 10px; height: 10px; margin-right: 6px; }
+
+.answer-link[hidden] { display: none; }
 
 .answer-link {
   margin-left: auto;
@@ -2863,3 +2841,172 @@ button.lens-item:focus-visible {
 
 /* The agent sheet stays compact so most of the live chat shows above it */
 .work-cover.sheet { height: min(var(--sheet-h, 72%), 48%) !important; }
+
+/* ========== Answer sheet ========== */
+.thread-panel { z-index: 67; }
+
+.thread-heading {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.thread-sub {
+  margin-top: 1px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.thread-private {
+  align-self: center;
+  padding: 3px 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  border-radius: 999px;
+}
+
+.thread-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.thread-q {
+  align-self: flex-end;
+  max-width: 85%;
+  margin-top: 10px;
+  padding: 7px 12px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+  border-radius: 16px 16px 4px 16px;
+  overflow-wrap: anywhere;
+}
+
+.thread-q:first-child { margin-top: 0; }
+
+/* Answers read like the chat itself: no box, just text */
+.thread-body .answer-card {
+  margin-top: 6px;
+  padding: 0;
+  background: none;
+  border: none;
+}
+
+.thread-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+
+.thread-form textarea {
+  flex: 1;
+  min-height: 36px;
+  max-height: 120px;
+  padding: 8px 14px;
+  resize: none;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text-primary);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.thread-form textarea:focus { border-color: var(--accent); }
+
+.thread-send {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: var(--accent);
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.15s;
+}
+
+.thread-send:active { transform: scale(0.94); }
+.thread-panel.is-busy .thread-send { opacity: 0.35; pointer-events: none; }
+
+/* ========== Transitions ==========
+   One motion language for every view: sheets rise from the bottom,
+   full-screen views fade, popovers fade and settle. Exits animate too
+   (display is transitioned discretely), so nothing pops in or out. */
+:root {
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.sheet {
+  animation: none !important;
+  transition: translate 0.3s var(--ease-out), opacity 0.22s ease, display 0.3s allow-discrete;
+}
+.sheet.hidden { display: none !important; translate: 0 40px; opacity: 0; pointer-events: none; }
+@starting-style {
+  .sheet:not(.hidden) { translate: 0 40px; opacity: 0; }
+}
+
+.settings-panel, .notes-panel, .modal, .screenshot-panel {
+  animation: none !important;
+  transition: opacity 0.2s ease, display 0.2s allow-discrete;
+}
+.settings-panel.hidden, .notes-panel.hidden, .modal.hidden, .screenshot-panel.hidden { opacity: 0; pointer-events: none; }
+@starting-style {
+  .settings-panel:not(.hidden), .notes-panel:not(.hidden), .modal:not(.hidden), .screenshot-panel:not(.hidden) { opacity: 0; }
+}
+
+.model-switcher, .lens-picker, .work-pill {
+  animation: none !important;
+  transition: opacity 0.16s ease, translate 0.2s var(--ease-out), scale 0.2s var(--ease-out), display 0.2s allow-discrete;
+}
+.model-switcher.hidden, .lens-picker.hidden, .work-pill.hidden { opacity: 0; translate: 0 6px; scale: 0.98; pointer-events: none; }
+@starting-style {
+  .model-switcher:not(.hidden), .lens-picker:not(.hidden), .work-pill:not(.hidden) { opacity: 0; translate: 0 6px; scale: 0.98; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sheet, .settings-panel, .notes-panel, .modal, .screenshot-panel,
+  .model-switcher, .lens-picker, .work-pill { transition: none !important; }
+}
+
+/* ========== Editor theme ("yavar") ==========
+   Follows the panel's light / dark palette instead of a fixed dark theme */
+.cm-s-yavar.CodeMirror { background: var(--surface); color: var(--text-primary); }
+.cm-s-yavar .CodeMirror-gutters { background: var(--surface); border-right: 1px solid var(--border); }
+.cm-s-yavar .CodeMirror-linenumber { color: var(--text-secondary); opacity: 0.6; }
+.cm-s-yavar .CodeMirror-cursor { border-left: 2px solid var(--accent); }
+.cm-s-yavar div.CodeMirror-selected,
+.cm-s-yavar.CodeMirror-focused div.CodeMirror-selected { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.cm-s-yavar .CodeMirror-line::selection, .cm-s-yavar .CodeMirror-line > span::selection,
+.cm-s-yavar .CodeMirror-line > span > span::selection { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.cm-s-yavar .CodeMirror-placeholder { color: var(--text-secondary); }
+.cm-s-yavar .cm-keyword, .cm-s-yavar .cm-atom { color: var(--cm-keyword); }
+.cm-s-yavar .cm-string, .cm-s-yavar .cm-string-2 { color: var(--cm-string); }
+.cm-s-yavar .cm-comment { color: var(--cm-comment); font-style: italic; }
+.cm-s-yavar .cm-number { color: var(--cm-number); }
+.cm-s-yavar .cm-def { color: var(--cm-def); }
+.cm-s-yavar .cm-builtin, .cm-s-yavar .cm-variable-2, .cm-s-yavar .cm-variable-3, .cm-s-yavar .cm-type { color: var(--cm-builtin); }
+.cm-s-yavar .cm-property, .cm-s-yavar .cm-attribute { color: var(--cm-property); }
+.cm-s-yavar .cm-variable, .cm-s-yavar .cm-operator, .cm-s-yavar .cm-punctuation { color: var(--text-primary); }
+.cm-s-yavar .cm-meta, .cm-s-yavar .cm-qualifier { color: var(--text-secondary); }
+.cm-s-yavar .cm-tag { color: var(--cm-def); }
+.cm-s-yavar .cm-error { color: var(--danger); }
+.cm-s-yavar .CodeMirror-matchingbracket { outline: 1px solid var(--border); color: inherit !important; }
