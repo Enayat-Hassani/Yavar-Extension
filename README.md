@@ -10,7 +10,7 @@ A Chrome extension that embeds ChatGPT, Claude, and Gemini in a sidebar — so y
 
 - **Header:** the model pill switches models (a divider marks the new chat), the pencil starts a new conversation, and **⋯** holds saved answers, notes, web and video research, the code playground, *Continue in a fresh chat* and settings.
 - **Start page:** actions for the tab you're on. On GitHub: *Tour this repository*, *Browse files*, *Recent changes*, *Build it yourself*, and *Explain* for an open pull request or file. On other pages: *Summarize*, *Ask about it*, *Fact-check it*.
-- **Composer:** type to the model, or press **+** to add the file open in your tab, **files from the repository** or **a folder**, **this page** (on YouTube, the video's transcript), or a **screenshot** of an area of the page. **Use a prompt** wraps what you typed in one of your templates. With files attached, one tap asks for *Explain*, *Line by line*, *How it fits*, *Review* or *Quiz me*.
+- **Composer:** type to the model, or press **+** to add the file open in your tab, **files from the repository** or **a folder**, **this page** (on YouTube, the video's transcript), or a **screenshot**: click an element on the page, or drag an area (↑ widens a click to the element around it, ✓ or Enter takes it). Along with the picture, Yavar sends what's in it as Markdown: text, a table as a table, links, image descriptions, the heading above it, and the HTML of a control or form. Each attachment chip shows its size in tokens. **Use a prompt** wraps what you typed in one of your templates. With files attached, one tap asks for *Explain*, *Line by line*, *How it fits*, *Review* or *Quiz me*.
 - **Selections, pages and screenshots from outside the panel** (the floating menu, the right-click menu, the shortcuts) arrive in the composer. A floating-menu prompt is sent at once if *Settings → Send floating-menu prompts right away* is on; otherwise it waits in the message box.
 - **Answers** stream in with Copy, Save and ▶ Run on code. ■ stops waiting.
 
@@ -18,7 +18,7 @@ A Chrome extension that embeds ChatGPT, Claude, and Gemini in a sidebar — so y
 
 **Floating menu** — select text (or code on GitHub, where it also tells the AI the file and line numbers) on any page and a compact icon menu appears, driven by **customizable prompt templates**. Built-ins include:
 
-- **Send** — send the selection to Yavar as it is.
+- **Send** — add the selection to Yavar's message as a chip that remembers which page it came from (so does right-click → *Send selection to Yavar*).
 - **Explain** — send it wrapped in a "Guided Learning" prompt.
 - **Summarize** — send it wrapped in a concise-summary prompt.
 
@@ -70,7 +70,7 @@ Chrome commands (rebind at `chrome://extensions/shortcuts`):
 | Shortcut (Mac / Win) | Action |
 |----------------------|--------|
 | `Cmd+Shift+Y` / `Alt+Shift+Y` | Open Yavar |
-| `Cmd+Shift+I` / `Alt+Shift+S` | Screenshot an area of the page (attached to your message) |
+| `Cmd+Shift+I` / `Alt+Shift+S` | Pick an element or area of the page (attached to your message) |
 | `Cmd+Shift+L` / `Ctrl+Shift+L` | Tour the GitHub repository in your tab |
 | `Cmd+Shift+O` / `Alt+Shift+N` | Open or close Notes |
 

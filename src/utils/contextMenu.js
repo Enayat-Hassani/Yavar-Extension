@@ -79,10 +79,9 @@ ${selectionText}
 
   async sendSelectionToYavar(text, tab) {
     try {
-      // The service worker has no clipboard access; the side panel pastes
-      // pendingText into the chat when it picks it up.
+      // The panel adds it to the message as a chip that remembers the page
       const opening = openPanel({ windowId: tab.windowId });
-      await chrome.storage.session.set({ pendingText: text });
+      await chrome.storage.session.set({ pendingSelection: { text, title: tab.title || '', url: tab.url || '' } });
       await opening;
     } catch (error) {
       console.error('[Yavar] Failed to send selection:', error);
