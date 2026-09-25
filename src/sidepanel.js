@@ -845,13 +845,12 @@ First Task: Based on the tree and tech stack, what is the single most important 
       return;
     }
 
-    let query = '';
-    try {
-      query = (window.prompt('What should the AI research?') || '').trim();
-    } catch (e) {
-      this.showNotification('⚠️ Could not open the input dialog');
-      return;
-    }
+    const query = await this.askInput({
+      title: 'Web research',
+      message: 'The AI will search the web, read sources, and write up an answer with citations.',
+      placeholder: 'e.g. How do passkeys work, and are they safer than passwords?',
+      okLabel: 'Research'
+    });
     if (!query) return;
 
     // Deep mode raises the limits and pushes the AI to cover more sources
@@ -1785,13 +1784,12 @@ Begin: state a one-line plan, then issue your first tool call.`;
   // pulls each video's transcript from the ytx server, and hands the bundle to
   // the AI to synthesize against the plan in Notes.
   async researchVideosOnTopic() {
-    let topic = '';
-    try {
-      topic = (window.prompt('Research a topic across YouTube videos:\n\nWhat do you want to look into?') || '').trim();
-    } catch (e) {
-      this.showNotification('⚠️ Could not open the input dialog');
-      return;
-    }
+    const topic = await this.askInput({
+      title: 'Search videos',
+      message: 'Pulls transcripts from the top YouTube results and has the AI synthesize them.',
+      placeholder: 'e.g. top things to try in Chiang Mai',
+      okLabel: 'Search'
+    });
     if (!topic) return;
 
     const { base, count } = await this.getYtxSettings();
@@ -1800,9 +1798,14 @@ Begin: state a one-line plan, then issue your first tool call.`;
     let plan = '';
     try { plan = ((await chrome.storage.local.get('yavarNotes')).yavarNotes || '').trim(); } catch (e) {}
     if (!plan) {
-      try {
-        plan = (window.prompt('Your Notes are empty. What should the AI optimize the summary for?\n(e.g. "a 4-day trip, love food + hikes, on a budget")') || '').trim();
-      } catch (e) {}
+      const goal = await this.askInput({
+        title: 'What should it optimize for?',
+        message: 'Your Notes are empty, so tell the AI what matters to you (optional).',
+        placeholder: 'e.g. a 4-day trip, love food + hikes, on a budget',
+        okLabel: 'Continue'
+      });
+      if (goal === null) return;
+      plan = goal;
     }
 
     // ytx must be running for bulk fetching.
@@ -1875,13 +1878,13 @@ Begin: state a one-line plan, then issue your first tool call.`;
       return;
     }
 
-    let question = '';
-    try {
-      question = (window.prompt(`Research this page:\n"${page.title}"\n\nWhat do you want to know? (blank = summarize & dig deeper)`) || '').trim();
-    } catch (e) {
-      this.showNotification('⚠️ Could not open the input dialog');
-      return;
-    }
+    // null = cancelled; '' = summarize and dig deeper
+    const question = await this.askInput({
+      title: 'Research this page',
+      message: `"${page.title}"\n\nLeave blank to summarize it and dig deeper.`,
+      placeholder: 'What do you want to know?',
+      okLabel: 'Research'
+    });
     if (question === null) return;
 
     let deep = false;
@@ -2699,6 +2702,38 @@ Begin: state a one-line plan, then issue your first tool call.`;
     } catch (error) {
       console.error('[Yavar] Failed to copy link:', error);
     }
+  }
+
+  // ========== Input Dialog ==========
+
+  // Ask for a line of text. Resolves to the trimmed text, or null if cancelled.
+  askInput({ title, message = '', placeholder = '', okLabel = 'Go', value = '' }) {
+    const dialog = document.getElementById('ask-dialog');
+    const input = document.getElementById('ask-input');
+    if (!dialog?.showModal) return Promise.resolve(null);
+
+    document.getElementById('ask-title').textContent = title;
+    document.getElementById('ask-message').textContent = message;
+    document.getElementById('ask-ok').textContent = okLabel;
+    input.placeholder = placeholder;
+    input.value = value;
+
+    return new Promise((resolve) => {
+      const onKey = (e) => {
+        if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+          e.preventDefault();
+          dialog.close('ok');
+        }
+      };
+      input.addEventListener('keydown', onKey);
+      dialog.addEventListener('close', () => {
+        input.removeEventListener('keydown', onKey);
+        resolve(dialog.returnValue === 'ok' ? input.value.trim() : null);
+      }, { once: true });
+      dialog.returnValue = '';
+      dialog.showModal();
+      input.focus();
+    });
   }
 
   // ========== Notification Functions ==========
