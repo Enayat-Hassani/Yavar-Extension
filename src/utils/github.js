@@ -313,3 +313,82 @@ export function buildPack({ owner, repo, ref, files, treePaths = [] }) {
   }).join('');
   return head + map + body;
 }
+
+// ---- Recent changes & READMEs ----
+
+function decodeXml(s) {
+  return String(s || '')
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'").replace(/&amp;/g, '&');
+}
+
+// Parse github.com/<o>/<r>/commits/<ref>.atom (no API quota) into
+// [{ sha, title, author, date, url }].
+export function parseCommitsAtom(xml) {
+  const out = [];
+  for (const m of String(xml).matchAll(/<entry>([\s\S]*?)<\/entry>/g)) {
+    const e = m[1];
+    const pick = re => (e.match(re) || [])[1] || '';
+    const url = decodeXml(pick(/<link[^>]*href="([^"]+)"/));
+    const sha = (pick(/Commit\/([0-9a-f]{7,40})/) || (url.match(/\/commit\/([0-9a-f]{7,40})/) || [])[1] || '');
+    const title = decodeXml(pick(/<title[^>]*>([\s\S]*?)<\/title>/)).trim().split('\n')[0].trim();
+    if (!sha || !title) continue;
+    out.push({
+      sha, title, url,
+      author: decodeXml(pick(/<author>[\s\S]*?<name>([\s\S]*?)<\/name>/)).trim(),
+      date: pick(/<updated>([^<]+)<\/updated>/).trim()
+    });
+  }
+  return out;
+}
+
+// Same shape from the REST API's /commits response.
+export function commitsFromApi(list) {
+  return (Array.isArray(list) ? list : []).map(c => ({
+    sha: c.sha,
+    title: String(c.commit?.message || '').split('\n')[0],
+    author: c.commit?.author?.name || c.author?.login || '',
+    date: c.commit?.author?.date || '',
+    url: c.html_url || ''
+  })).filter(c => c.sha && c.title);
+}
+
+export function timeAgo(iso, now = Date.now()) {
+  const t = Date.parse(iso);
+  if (!t) return '';
+  const s = Math.max(0, Math.round((now - t) / 1000));
+  if (s < 60) return 'just now';
+  const units = [['y', 31536000], ['mo', 2592000], ['d', 86400], ['h', 3600], ['m', 60]];
+  for (const [u, n] of units) if (s >= n) return `${Math.floor(s / n)}${u} ago`;
+  return 'just now';
+}
+
+// The README directly inside a folder ('' = repo root), if any.
+export function folderReadme(dir, fileSet) {
+  const prefix = dir ? dir + '/' : '';
+  for (const name of ['README.md', 'readme.md', 'Readme.md', 'README.rst', 'README.txt', 'README']) {
+    if (fileSet.has(prefix + name)) return prefix + name;
+  }
+  return null;
+}
+
+// First meaningful paragraph(s) of a README as plain text, for a preview.
+export function readmeSnippet(md, max = 280) {
+  const text = String(md || '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/<[^>]+>/g, ' ')
+    .split('\n')
+    .map(l => l.trim())
+    .filter(l => l && !/^(#|!\[|\[!\[|[-=]{3,}|\|)/.test(l))   // headings, badges, rules, tables
+    .join(' ')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/[*_`>]+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (text.length <= max) return text;
+  const cut = text.slice(0, max);
+  return cut.slice(0, Math.max(cut.lastIndexOf(' '), max * 0.6)) + '…';
+}

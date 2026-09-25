@@ -4,7 +4,8 @@
 import { isPublicWebUrl } from './utils/net.js';
 import {
   parseGitHubUrl, refCandidates, rawFileUrl, isReadablePath, estimateTokens, formatCount, formatBytes,
-  langFromPath, sliceLines, extractImports, resolveImports, suggestStartFiles, buildPack, readingPrompt, READ_MODES
+  langFromPath, sliceLines, extractImports, resolveImports, suggestStartFiles, buildPack, readingPrompt, READ_MODES,
+  parseCommitsAtom, commitsFromApi, timeAgo, folderReadme, readmeSnippet
 } from './utils/github.js';
 
 class YavarSidePanel {
@@ -102,6 +103,8 @@ class YavarSidePanel {
     this.filesSend = document.getElementById('files-send');
     this.filesClear = document.getElementById('files-clear');
     this.dockExplainDiff = document.getElementById('dock-explain-diff');
+    this.filesSearchWrap = document.getElementById('files-search-wrap');
+    this.filesView = 'files';
     this.selectedFiles = new Set();
     this.readMarks = new Set();
 
@@ -248,6 +251,17 @@ class YavarSidePanel {
       this.refreshSelectionUi();
     });
     this.dockExplainDiff?.addEventListener('click', () => this.explainActiveDiff());
+    this.filesPanel?.querySelector('.files-tabs')?.addEventListener('click', (e) => {
+      const view = e.target.closest('[data-view]')?.dataset.view;
+      if (view) this.setFilesView(view);
+    });
+    this.filesPanel?.querySelector('.files-links')?.addEventListener('click', (e) => {
+      const ext = e.target.closest('[data-ext]')?.dataset.ext;
+      if (!ext || !this.repoTree) return;
+      const { owner, repo } = this.repoTree;
+      const url = ext === 'deepwiki' ? `https://deepwiki.com/${owner}/${repo}` : `https://gitingest.com/${owner}/${repo}`;
+      chrome.tabs.create({ url });
+    });
     // Keyboard: Esc closes the reader, "/" jumps to search
     this.filesPanel?.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
@@ -2167,6 +2181,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
     }
     this.filesPanel.classList.remove('hidden');
     this.filesSearch.value = '';
+    this.setFilesView('files', false);
     this.filesTree.innerHTML = '<div class="files-empty"><span class="files-spinner"></span>Loading the repo…</div>';
     try {
       const ok = await this.ensureRepoTree();
@@ -2247,6 +2262,10 @@ Begin: state a one-line plan, then issue your first tool call.`;
       });
       this.filesTree.appendChild(card);
     }
+
+    // What the repo is, from its README
+    const rootReadme = folderReadme('', this.repoTree.fileSet);
+    if (rootReadme) this.filesTree.appendChild(this.readmeBox(rootReadme, 'About this repo'));
 
     // Suggested reading order for newcomers
     const starts = suggestStartFiles([...this.repoTree.fileSet]);
@@ -2360,6 +2379,8 @@ Begin: state a one-line plan, then issue your first tool call.`;
           caret.textContent = open ? '▸' : '▾';
         } else {
           childBox = this.renderTreeChildren(node); // lazy render
+          const readme = folderReadme(node.path, this.repoTree.fileSet);
+          if (readme) childBox.prepend(this.readmeBox(readme, 'About this folder'));
           wrap.appendChild(childBox);
           caret.textContent = '▾';
         }
@@ -2406,6 +2427,143 @@ Begin: state a one-line plan, then issue your first tool call.`;
       this.bindFileRow(row, p);
       this.filesTree.appendChild(row);
     }
+  }
+
+  // A small preview card for a README: first paragraph, plus one-click actions.
+  readmeBox(path, label) {
+    const box = document.createElement('div');
+    box.className = 'files-readme';
+    box.innerHTML =
+      `<div class="files-readme-label">${this.escapeHtml(label)}</div>` +
+      `<div class="files-readme-text"><span class="files-spinner"></span></div>` +
+      `<div class="files-readme-actions">` +
+        `<button type="button" class="files-link-btn" data-act="select">+ Select ${this.escapeHtml(path.split('/').pop())}</button>` +
+        `<button type="button" class="files-link-btn" data-act="read">Explain it</button>` +
+      `</div>`;
+    box.addEventListener('click', (e) => {
+      const act = e.target.closest('[data-act]')?.dataset.act;
+      if (act === 'select') this.toggleFileSelected(path);
+      else if (act === 'read') this.sendRepoFiles([path], 'explain');
+    });
+    this.readmeSnippetFor(path).then(text => {
+      const el = box.querySelector('.files-readme-text');
+      if (text) el.textContent = text;
+      else box.remove();
+    });
+    return box;
+  }
+
+  async readmeSnippetFor(path) {
+    const { owner, repo, ref } = this.repoTree;
+    const key = `${owner}/${repo}@${ref}:${path}`;
+    this._readmeCache = this._readmeCache || new Map();
+    if (!this._readmeCache.has(key)) {
+      this._readmeCache.set(key, this.fetchRepoFile(owner, repo, path, ref, 20000)
+        .then(md => readmeSnippet(md))
+        .catch(() => ''));
+    }
+    return this._readmeCache.get(key);
+  }
+
+  // ----- Views: Files | Recent changes -----
+
+  setFilesView(view, render = true) {
+    this.filesView = view;
+    this.filesPanel.querySelectorAll('.files-tab').forEach(t => {
+      const on = t.dataset.view === view;
+      t.classList.toggle('active', on);
+      t.setAttribute('aria-selected', String(on));
+    });
+    this.filesSearchWrap?.classList.toggle('hidden', view !== 'files');
+    if (!render || !this.repoTree) return;
+    if (view === 'files') {
+      this.filesSearch.value = '';
+      this.renderFilesTree();
+    } else {
+      this.filesActionBar?.classList.add('hidden');
+      this.renderRecentChanges();
+    }
+  }
+
+  // Latest commits on this branch. The public Atom feed costs no API quota;
+  // the REST API is the fallback (e.g. private repos with a token).
+  async fetchRecentCommits() {
+    const { owner, repo, ref } = this.repoTree;
+    const key = `${owner}/${repo}@${ref}`;
+    this._commitsCache = this._commitsCache || new Map();
+    const hit = this._commitsCache.get(key);
+    if (hit && Date.now() - hit.ts < 5 * 60 * 1000) return hit.list;
+
+    let list = [];
+    try {
+      const feed = `https://github.com/${owner}/${repo}/commits${ref === 'HEAD' ? '' : '/' + ref.split('/').map(encodeURIComponent).join('/')}.atom`;
+      const res = await fetch(feed, { credentials: 'omit' });
+      if (res.ok) list = parseCommitsAtom(await res.text());
+    } catch (e) { /* try the API */ }
+    if (!list.length) {
+      const token = await this.getGithubToken();
+      const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/commits?per_page=20${ref === 'HEAD' ? '' : '&sha=' + encodeURIComponent(ref)}`,
+        { headers: this.ghHeaders(token) });
+      if (!res.ok) throw new Error(res.status === 403 || res.status === 429 ? 'GitHub rate limit hit, try again later or add a token' : 'GitHub ' + res.status);
+      list = commitsFromApi(await res.json());
+    }
+    this._commitsCache.set(key, { ts: Date.now(), list });
+    return list;
+  }
+
+  async renderRecentChanges() {
+    this.filesTree.innerHTML = '<div class="files-empty"><span class="files-spinner"></span>Loading recent commits…</div>';
+    let commits;
+    try {
+      commits = await this.fetchRecentCommits();
+    } catch (e) {
+      if (this.filesView === 'changes') this.filesTree.innerHTML = `<div class="files-empty">Couldn't load commits: ${this.escapeHtml(e.message)}</div>`;
+      return;
+    }
+    if (this.filesView !== 'changes') return;
+    if (!commits.length) {
+      this.filesTree.innerHTML = '<div class="files-empty">No commits found.</div>';
+      return;
+    }
+    const { owner, repo, ref } = this.repoTree;
+    this.filesTree.innerHTML =
+      `<div class="files-changes-head">` +
+        `<div class="files-section-label">Latest on ${this.escapeHtml(this.refLabel(ref))}</div>` +
+        `<button type="button" class="files-chip-btn primary" data-act="summarize">What's been happening?</button>` +
+      `</div>` +
+      commits.map(c =>
+        `<div class="files-commit" data-sha="${this.escapeHtml(c.sha)}">` +
+          `<div class="files-commit-title" title="${this.escapeHtml(c.title)}">${this.escapeHtml(c.title)}</div>` +
+          `<div class="files-commit-meta">` +
+            `<code>${this.escapeHtml(c.sha.slice(0, 7))}</code>` +
+            `<span>${this.escapeHtml(c.author)}${c.date ? ' · ' + this.escapeHtml(timeAgo(c.date)) : ''}</span>` +
+            `<button type="button" class="files-quick" data-act="explain">Explain</button>` +
+          `</div>` +
+        `</div>`).join('');
+
+    this.filesTree.onclick = (e) => {
+      if (this.filesView !== 'changes') return;
+      const act = e.target.closest('[data-act]')?.dataset.act;
+      if (act === 'summarize') {
+        const lines = commits.map(c => `- ${c.sha.slice(0, 7)} ${c.date ? c.date.slice(0, 10) : ''} ${c.author}: ${c.title}`).join('\n');
+        this.forwardToIframe({
+          prompt: `Here are the latest ${commits.length} commits on ${this.refLabel(ref)} of ${owner}/${repo}:\n\n${lines}\n\n` +
+            'Explain what the project has been working on lately: group related commits into themes, say what each theme ' +
+            'means for the code or users, and point out any commit worth reading closely to learn from (and why).',
+          autoSubmit: false
+        });
+        this._readingContext = { label: `${owner}/${repo}`, ts: Date.now() };
+        this.filesPanel.classList.add('hidden');
+        this.showNotification(`🕘 Sent ${commits.length} recent commits`);
+        return;
+      }
+      const row = e.target.closest('.files-commit');
+      if (row && (act === 'explain' || !e.target.closest('button'))) {
+        this.explainDiff({ owner, repo, kind: 'commit', sha: row.dataset.sha,
+          title: commits.find(c => c.sha === row.dataset.sha)?.title || '' });
+        this.filesPanel.classList.add('hidden');
+      }
+    };
   }
 
   // ----- Selection -----
@@ -2589,6 +2747,10 @@ Begin: state a one-line plan, then issue your first tool call.`;
       this.showNotification('⚠️ Open a pull request or commit on GitHub first');
       return;
     }
+    await this.explainDiff(gh);
+  }
+
+  async explainDiff(gh) {
     const label = gh.kind === 'pull' ? `pull request #${gh.number}` : `commit ${gh.sha.slice(0, 7)}`;
     this.showNotification(`🔀 Fetching the ${label} diff…`);
     try {
@@ -2598,7 +2760,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
       const body = diff.length > MAX ? diff.slice(0, MAX) + '\n… [diff truncated]' : diff;
       const files = (diff.match(/^diff --git /gm) || []).length;
       const fname = gh.kind === 'pull' ? `${gh.repo}-pr-${gh.number}.diff` : `${gh.repo}-${gh.sha.slice(0, 7)}.diff`;
-      const pageTitle = (gh.title || '').split(' · ')[0];
+      const pageTitle = (gh.title || '').split(' · ')[0].trim();
 
       this.forwardAttachToIframe(fname, body, 'text/plain');
       this._readingContext = { label: `${gh.owner}/${gh.repo}`, ts: Date.now() };
