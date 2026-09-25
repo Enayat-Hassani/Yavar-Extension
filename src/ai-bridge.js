@@ -66,6 +66,9 @@
   // Convert a response DOM subtree into readable Markdown. Handles the common
   // cases (headings, lists, code blocks, inline emphasis/links) and falls back
   // to text content for anything unrecognised.
+  const SKIP_TAGS = /^(button|svg|img|mat-icon|script|style|yavar-answer-bar|source-footnote|sources-carousel.*|source-inline-chip.*|.*citation.*)$/;
+  const SKIP_CLASS = /\b(citation|source-chip|source-inline|sources-carousel|footnote|code-block-decoration)\b/i;
+
   function nodeToMarkdown(el) {
     let out = '';
     el.childNodes.forEach((node) => {
@@ -76,6 +79,8 @@
       if (node.nodeType !== Node.ELEMENT_NODE) return;
 
       const tag = node.tagName.toLowerCase();
+      // Buttons, icons and source/citation chips (Gemini's "MD +1") aren't answer text
+      if (SKIP_TAGS.test(tag) || SKIP_CLASS.test(typeof node.className === 'string' ? node.className : '')) return;
 
       if (tag === 'pre') {
         const codeEl = node.querySelector('code');
@@ -908,23 +913,37 @@
     else if (NEW_CHAT_PATH[detectPlatform()]?.test(location.pathname)) tempSession = false;
   }
 
-  async function waitVisible(selector, timeout) {
+  // Gemini's button has moved between the side menu and the start page, so
+  // look for it by test id, label or tooltip, not one fixed selector
+  function findTempButton() {
+    const visible = (el) => el && el.offsetParent !== null;
+    const byId = [...document.querySelectorAll('[data-test-id*="temp-chat" i], [data-test-id*="temporary" i]')]
+      .map(el => el.closest('button, a, [role="button"]') || el).find(visible);
+    if (byId) return byId;
+    const re = /temporary chat/i;
+    return [...document.querySelectorAll('button, a, [role="button"]')].find(el => visible(el) && (
+      re.test(el.getAttribute('aria-label') || '') || re.test(el.getAttribute('mattooltip') || '') ||
+      re.test(el.getAttribute('title') || '') || re.test((el.textContent || '').trim().slice(0, 40))));
+  }
+
+  async function waitFor(find, timeout) {
     const end = Date.now() + timeout;
     while (Date.now() < end) {
-      const el = document.querySelector(selector);
-      if (el && el.offsetParent !== null) return el;
+      const el = find();
+      if (el) return el;
       await new Promise(r => setTimeout(r, 150));
     }
     return null;
   }
 
   async function startGeminiTempChat() {
-    const SEL = 'button[data-test-id="temp-chat-button"]';
-    let btn = await waitVisible(SEL, 1500);
+    let btn = await waitFor(findTempButton, 2500);
     if (!btn) {
-      // In a narrow panel the button lives in the collapsed side menu
-      document.querySelector('button[data-test-id="side-nav-menu-button"]')?.click();
-      btn = await waitVisible(SEL, 4000);
+      // In a narrow panel the button can live in the collapsed side menu
+      const menu = document.querySelector('[data-test-id="side-nav-menu-button"], button[aria-label*="main menu" i]');
+      menu?.click();
+      btn = await waitFor(findTempButton, 4000);
+      if (!btn && menu) menu.click();   // put the menu back
     }
     if (!btn) return false;
     const on = btn.getAttribute('aria-pressed') === 'true' || /\b(active|selected)\b/.test(btn.className);
