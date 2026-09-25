@@ -392,8 +392,7 @@ class YavarSidePanel {
     const model = this.getCurrentModel();
     if (model) {
       this.loadingState.classList.remove('hidden');
-      this._frameReady = false;
-      this.cancelChatRequests();
+      this.chatNavigating();
       this.aiFrame.src = model.url;
     }
   }
@@ -409,7 +408,8 @@ class YavarSidePanel {
   handleFrameLoad() {
     this._frameReady = true;
     this._frameWaiters.splice(0).forEach(resolve => resolve());
-    this.sendTemplatesToFrame();
+    // In case the bridge announced itself before we were listening
+    try { this.aiFrame.contentWindow.postMessage({ action: 'BRIDGE_PING' }, '*'); } catch (e) { /* ignore */ }
 
     setTimeout(() => {
       this.loadingState.classList.add('hidden');
@@ -427,13 +427,44 @@ class YavarSidePanel {
       this.loadingState.classList.remove('hidden');
       const url = new URL(model.url);
       url.searchParams.set('_yavar', Date.now());
-      this._frameReady = false;
-      this.cancelChatRequests();
+      this.chatNavigating();
       this.aiFrame.src = url.href;
     }
   }
 
   // Send a prompt, wait for the reply to finish, and resolve with its text.
+  // ----- Talking to the chat frame -----
+  // The bridge inside the chat announces BRIDGE_READY once it is listening.
+  // Until then messages wait in a queue, so each is delivered exactly once
+  // (no timed resends, no duplicate filtering on the other side).
+  postToChat(payload) {
+    if (this._bridgeReady && this.aiFrame?.contentWindow) {
+      this.aiFrame.contentWindow.postMessage(payload, '*');
+      return;
+    }
+    this._chatQueue = this._chatQueue || [];
+    this._chatQueue.push(payload);
+    if (this._chatQueue.length > 30) this._chatQueue.shift();   // chats without a bridge
+  }
+
+  onBridgeReady() {
+    this._bridgeReady = true;
+    const queued = this._chatQueue || [];
+    this._chatQueue = [];
+    queued.forEach(p => this.aiFrame?.contentWindow?.postMessage(p, '*'));
+    this.sendTemplatesToFrame();
+  }
+
+  // The chat frame is (re)loading: queue until its new bridge is ready, and
+  // drop requests that only made sense for the old page.
+  chatNavigating() {
+    this._bridgeReady = false;
+    this._frameReady = false;
+    this.cancelChatRequests();
+    this._chatQueue = (this._chatQueue || [])
+      .filter(p => !/^(WATCH_FOR_ANSWER|CAPTURE_LAST_ANSWER|STOP_WATCH)$/.test(p.action));
+  }
+
   // Post { action, requestId } to the chat bridge and resolve with the
   // reply's text (ANSWER_SETTLED / ANSWER_CAPTURED) or reject on its failure
   // messages or a timeout. Replies are matched by requestId in the listener.
@@ -446,7 +477,7 @@ class YavarSidePanel {
         if (this._chatRequests.delete(id)) reject(new Error('the chat did not respond'));
       }, timeoutMs) : null;
       this._chatRequests.set(id, { resolve, reject, timer });
-      this.aiFrame.contentWindow.postMessage({ action, requestId: id }, '*');
+      this.postToChat({ action, requestId: id });
     });
   }
 
@@ -1164,29 +1195,8 @@ Begin: state a one-line plan, then issue your first tool call.`;
 
     this._lastAgentPrompt = prompt;
     this._lastAgentAttachments = attachments;
-    const send = () => {
-      // The agent may have been stopped during the delay
-      if (!this.agent?.active || !this.aiFrame?.contentWindow) return;
-      const requestId = 'agent_' + Date.now();
-      this._agentRequestId = requestId;
-      // Arm the answer-watch BEFORE sending so we catch the reply as it settles
-      this.aiFrame.contentWindow.postMessage({ action: 'WATCH_FOR_ANSWER', requestId }, '*');
-
-      // Attach any large files first, then submit the text after they've uploaded
-      let delay = 0;
-      for (const a of attachments) {
-        setTimeout(() => {
-          this.aiFrame?.contentWindow?.postMessage(
-            { action: 'AUTO_ATTACH_FILE', filename: a.filename, content: a.content, mime: 'text/plain' }, '*');
-        }, delay);
-        delay += 400;
-      }
-      // Give attachments time to upload before the message is sent
-      const submitDelay = attachments.length ? delay + 2500 : 0;
-      setTimeout(() => {
-        if (this.agent?.active) this.forwardToIframe({ prompt, autoSubmit: true });
-      }, submitDelay);
-    };
+    // The agent may have been stopped during the delay
+    const send = () => { if (this.agent?.active) this.sendAgentMessage(prompt, attachments); };
 
     // Brief pause before follow-up turns so the AI's input can re-enable and the
     // DOM can settle after the previous reply (more reliable, and easier to watch).
@@ -1460,29 +1470,27 @@ Begin: state a one-line plan, then issue your first tool call.`;
       this.finishAgent('Could not resend — stopped.');
       return;
     }
+    this.sendAgentMessage(this._lastAgentPrompt, this._lastAgentAttachments || []);
+  }
+
+  // Arm the answer watch, attach any large files, then submit the prompt once
+  // the attachments have had time to upload
+  sendAgentMessage(prompt, attachments = []) {
     const requestId = 'agent_' + Date.now();
     this._agentRequestId = requestId;
-    this.aiFrame.contentWindow.postMessage({ action: 'WATCH_FOR_ANSWER', requestId }, '*');
-
-    const attachments = this._lastAgentAttachments || [];
-    let delay = 0;
-    for (const a of attachments) {
-      setTimeout(() => {
-        this.aiFrame?.contentWindow?.postMessage(
-          { action: 'AUTO_ATTACH_FILE', filename: a.filename, content: a.content, mime: 'text/plain' }, '*');
-      }, delay);
-      delay += 400;
-    }
+    this.postToChat({ action: 'WATCH_FOR_ANSWER', requestId });
+    attachments.forEach((a, k) => setTimeout(() =>
+      this.forwardAttachToIframe(a.filename, a.content, 'text/plain'), k * 400));
     setTimeout(() => {
-      if (this.agent?.active) this.forwardToIframe({ prompt: this._lastAgentPrompt, autoSubmit: true });
-    }, attachments.length ? delay + 2500 : 0);
+      if (this.agent?.active) this.forwardToIframe({ prompt, autoSubmit: true });
+    }, attachments.length ? attachments.length * 400 + 2500 : 0);
   }
 
   stopRepoAgent() {
     if (!this.agent?.active) return;
     this.agent.active = false;
     this._agentRequestId = null;
-    this.aiFrame?.contentWindow?.postMessage({ action: 'STOP_WATCH' }, '*');
+    this.postToChat({ action: 'STOP_WATCH' });
     if (this.agentBar) this.agentBar.classList.add('hidden');
     if (this.workPill) this.workPill.classList.add('hidden');
     this.liftCurtain();
@@ -1492,7 +1500,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
   finishAgent(message) {
     if (this.agent) this.agent.active = false;
     this._agentRequestId = null;
-    this.aiFrame?.contentWindow?.postMessage({ action: 'STOP_WATCH' }, '*');
+    this.postToChat({ action: 'STOP_WATCH' });
     this.showNotification('✅ ' + (message || 'Done'));
     if (this.agentBar) this.agentBar.classList.add('hidden');
     if (this.workPill) this.workPill.classList.add('hidden');
@@ -3310,12 +3318,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
 
   // Attach text as a file (paste-a-File, like screenshots) so large files don't overflow the input
   forwardAttachToIframe(filename, content, mime = 'text/plain') {
-    const payload = { action: 'AUTO_ATTACH_FILE', filename, content, mime };
-    [0, 500].forEach(delay => {
-      setTimeout(() => {
-        try { this.aiFrame?.contentWindow?.postMessage(payload, '*'); } catch (e) {}
-      }, delay);
-    });
+    this.postToChat({ action: 'AUTO_ATTACH_FILE', filename, content, mime });
   }
 
   // ========== Screenshot Functions ==========
@@ -3387,29 +3390,10 @@ Begin: state a one-line plan, then issue your first tool call.`;
     }
   }
 
-  forwardScreenshotToIframe(screenshotDataUrl) {
-    const payload = { 
-      action: 'AUTO_PASTE_SCREENSHOT', 
-      imageData: screenshotDataUrl 
-    };
-
-    // Staggered sends — the iframe/bridge may not be fully interactive yet
-    const delays = [0, 400, 1200, 2500];
-    delays.forEach(delay => {
-      setTimeout(() => {
-        try {
-          if (this.aiFrame && this.aiFrame.contentWindow) {
-            console.log(`[Yavar Sidepanel] Sending screenshot to iframe (delay=${delay}ms)`);
-            this.aiFrame.contentWindow.postMessage(payload, '*');
-          } else {
-            console.warn(`[Yavar Sidepanel] Iframe not ready at delay=${delay}ms`);
-          }
-        } catch (e) {
-          console.warn('[Yavar Sidepanel] postMessage failed:', e);
-        }
-      }, delay);
-    });
+  forwardScreenshotToIframe(imageData) {
+    this.postToChat({ action: 'AUTO_PASTE_SCREENSHOT', imageData });
   }
+
 
   dismissScreenshot() {
     this.capturedScreenshot = null;
@@ -3459,7 +3443,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
       }
     }, 4000);
 
-    this.aiFrame.contentWindow.postMessage({ action: 'CAPTURE_LAST_ANSWER', requestId }, '*');
+    this.postToChat({ action: 'CAPTURE_LAST_ANSWER', requestId });
     this.showNotification('⏳ Capturing answer…');
   }
 
@@ -3470,6 +3454,11 @@ Begin: state a one-line plan, then issue your first tool call.`;
       if (!this.aiFrame || event.source !== this.aiFrame.contentWindow) return;
       const data = event.data;
       if (!data || typeof data !== 'object') return;
+
+      if (data.action === 'BRIDGE_READY') {
+        this.onBridgeReady();
+        return;
+      }
 
       // Replies to chatRequest() (plan capture, fresh-chat handoff…)
       if (this.settleChatRequest(data)) return;
@@ -4135,9 +4124,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
   async sendTemplatesToFrame() {
     try {
       const templates = (await loadTemplates()).map(t => ({ id: t.id, name: t.name, icon: t.icon }));
-      // The chat UI may still be booting; send again shortly after
-      [0, 2000, 6000].forEach(d => setTimeout(() =>
-        this.aiFrame?.contentWindow?.postMessage({ action: 'YAVAR_TEMPLATES', templates }, '*'), d));
+      this.postToChat({ action: 'YAVAR_TEMPLATES', templates });
     } catch (e) { /* ignore */ }
   }
 
@@ -4163,7 +4150,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
       return;
     }
     const prompt = await expandTemplate(tpl.body, ctx);
-    this.aiFrame?.contentWindow?.postMessage({ action: 'AUTO_REPLACE_PROMPT', prompt }, '*');
+    this.postToChat({ action: 'AUTO_REPLACE_PROMPT', prompt });
   }
 
   // Buttons inside the chat page (bridge → panel)
@@ -4335,32 +4322,10 @@ Begin: state a one-line plan, then issue your first tool call.`;
     }
   }
 
-  forwardToIframe(message) {
-    const { prompt, autoSubmit } = message;
-    const payload = { 
-      action: autoSubmit ? 'AUTO_SUBMIT_PROMPT' : 'AUTO_PASTE_PROMPT',
-      prompt: prompt
-    };
-
-    console.log('[Yavar Sidepanel] forwardToIframe:', payload.action);
-
-    // Staggered sends — the iframe/bridge may not be fully interactive yet
-    const delays = [0, 400, 1200, 2500];
-    delays.forEach(delay => {
-      setTimeout(() => {
-        try {
-          if (this.aiFrame && this.aiFrame.contentWindow) {
-            console.log(`[Yavar Sidepanel] postMessage to iframe (delay=${delay}ms)`);
-            this.aiFrame.contentWindow.postMessage(payload, '*');
-          } else {
-            console.warn(`[Yavar Sidepanel] Iframe not ready at delay=${delay}ms`);
-          }
-        } catch (e) {
-          console.warn('[Yavar Sidepanel] postMessage failed:', e);
-        }
-      }, delay);
-    });
+  forwardToIframe({ prompt, autoSubmit }) {
+    this.postToChat({ action: autoSubmit ? 'AUTO_SUBMIT_PROMPT' : 'AUTO_PASTE_PROMPT', prompt });
   }
+
 }
 
 
