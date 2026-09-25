@@ -384,6 +384,13 @@ class YavarContentHandler {
         return;
       }
 
+      // "Send" (just the selection): it joins Yavar's message as a chip
+      if (tpl.body.trim() === '{{selection}}') {
+        chrome.runtime.sendMessage({ action: 'send_selection', text: this.currentText });
+        this.forceHide();
+        return;
+      }
+
       // Only gather the context the template actually references
       const vars = varsInTemplate(tpl.body);
       const ctx = { selection: this.currentText };

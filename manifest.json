@@ -86,7 +86,7 @@
         "default": "Alt+Shift+S",
         "mac": "Command+Shift+I"
       },
-      "description": "Screenshot an area of the page"
+      "description": "Pick an element or area of the page"
     },
     "trigger-learn": {
       "suggested_key": {
