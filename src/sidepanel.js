@@ -393,6 +393,7 @@ class YavarSidePanel {
     if (model) {
       this.loadingState.classList.remove('hidden');
       this._frameReady = false;
+      this.cancelChatRequests();
       this.aiFrame.src = model.url;
     }
   }
@@ -427,6 +428,7 @@ class YavarSidePanel {
       const url = new URL(model.url);
       url.searchParams.set('_yavar', Date.now());
       this._frameReady = false;
+      this.cancelChatRequests();
       this.aiFrame.src = url.href;
     }
   }
@@ -446,6 +448,15 @@ class YavarSidePanel {
       this._chatRequests.set(id, { resolve, reject, timer });
       this.aiFrame.contentWindow.postMessage({ action, requestId: id }, '*');
     });
+  }
+
+  // The chat reloaded (model switch, new chat): nothing will answer pending requests
+  cancelChatRequests(reason = 'the chat was reloaded') {
+    for (const [id, req] of this._chatRequests || []) {
+      clearTimeout(req.timer);
+      req.reject(new Error(reason));
+      this._chatRequests.delete(id);
+    }
   }
 
   // Settle a pending chatRequest from a bridge reply; true if it was one
@@ -468,7 +479,9 @@ class YavarSidePanel {
 
   // Send a prompt, wait for the reply to finish, and resolve with its text.
   askAndCapture(prompt) {
-    const reply = this.chatRequest('WATCH_FOR_ANSWER');   // arm the watch before sending
+    // Arm the watch before sending. The bridge gives up after ~90 s; the
+    // timeout also covers chats where the bridge isn't running at all.
+    const reply = this.chatRequest('WATCH_FOR_ANSWER', { timeoutMs: 120000 });
     this.forwardToIframe({ prompt, autoSubmit: true });
     return reply;
   }
@@ -1309,6 +1322,8 @@ Begin: state a one-line plan, then issue your first tool call.`;
       headers: { 'Accept': 'text/html,application/json,*/*' },
       credentials: 'omit'
     });
+    // A public page can redirect to a private address: never read that
+    if (res.redirected && !isPublicWebUrl(res.url)) throw new Error('blocked: the page redirected to a private address');
     if (!res.ok) throw new Error('HTTP ' + res.status);
 
     const ct = res.headers.get('content-type') || '';
@@ -2688,6 +2703,10 @@ Begin: state a one-line plan, then issue your first tool call.`;
 
   async createRebuildPlan() {
     if (this._planPending) return;
+    if (this.agent?.active) {   // both use the chat's single answer watch
+      this.showNotification('⚠️ Stop the running agent first');
+      return;
+    }
     const paths = this.selectedFiles.size ? [...this.selectedFiles] : pickCoreFiles(this.repoTree.items);
     if (!paths.length) return;
     this._planPending = true;
