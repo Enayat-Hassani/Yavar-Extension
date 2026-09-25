@@ -1613,6 +1613,18 @@ Begin: state a one-line plan, then issue your first tool call.`;
     }
 
     this.markFirstDockTab();
+    if (isRepo) this.maybeShowReaderTip();
+  }
+
+  // First visit to a repo: slide the dock out briefly and explain the reader
+  async maybeShowReaderTip() {
+    try {
+      if ((await chrome.storage.local.get('readerTipShown')).readerTipShown) return;
+      await chrome.storage.local.set({ readerTipShown: true });
+    } catch (e) { return; }
+    this.filesRailGroup?.classList.add('peek');
+    this.showNotification('📚 Tip: "Read repo" on the left edge sends several files to the AI in one message');
+    setTimeout(() => this.filesRailGroup?.classList.remove('peek'), 5000);
   }
 
   // Drop the top hairline on whichever tab is first visible, so the divider

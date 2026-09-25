@@ -6,7 +6,7 @@ A Chrome extension that embeds ChatGPT, Claude, and Gemini in a sidebar — so y
 
 **AI sidebar** — opens `gemini.google.com`, `chatgpt.com`, or `claude.ai` in a full-viewport sidebar, with a model switcher (and support for adding your own custom models). Send selected text, screenshots, or whole-page content straight to the model.
 
-**Floating menu** — select text on any page and a compact icon menu appears, driven by **customizable prompt templates**. Built-ins include:
+**Floating menu** — select text (or code on GitHub, where it also tells the AI the file and line numbers) on any page and a compact icon menu appears, driven by **customizable prompt templates**. Built-ins include:
 
 - **Send** — send the selection straight to your default AI platform.
 - **Explain** — send it wrapped in a "Guided Learning" prompt.
@@ -42,7 +42,9 @@ Add, edit, or remove your own templates in Settings using `{{selection}}`, `{{pa
 
 **Architecture diagrams** — generate a Mermaid **architecture diagram** of the current repository, rendered interactively in the sidebar.
 
-**History & saved answers** — capture the AI's last answer and keep it in a searchable saved-answers panel. Click an answer to expand it, copy it, send it to Notes, or **export everything as Markdown**.
+**History & saved answers** — capture the AI's last answer and keep it in a searchable saved-answers panel. Answers saved while reading a repo are tagged with it (click the tag to see everything about that repo). Expand, copy, send to Notes, or **export everything as Markdown**.
+
+**Continue in a fresh chat** — long chats get slow and hit free-plan limits. One button asks the AI for a handoff summary, opens a new chat, and pastes it in so you pick up where you left off.
 
 **Notes panel** — a built-in CodeMirror-powered scratchpad inside the sidebar, toggled with the notes shortcut. Download it as a `.md` file anytime.
 
