@@ -9,10 +9,12 @@ A Chrome extension that embeds ChatGPT, Claude, and Gemini in a sidebar — so y
 **Yavar inside the chat** — when ChatGPT, Claude or Gemini is open in the sidebar, Yavar's controls sit right in the chat (inside isolated shadow DOM, so they never clash with the site's styles):
 
 - Under every finished answer: **Save** (stores that exact answer *with the question you asked*), **→ Notes**, **Copy MD**.
-- Above the message box: **📚 Repo**, **📄 Page**, **✨ Prompts** (wraps what you typed in any of your templates), **▶ Code**, **🧳 Fresh** (continue in a fresh chat).
+- Above the message box: buttons for the page open in your tab (**+ file.ts** on a GitHub file, **⇄ Explain PR** on a pull request, **📚 Repo** on a repo, **📄 Page** elsewhere), **✨ Prompts** (wraps what you typed in any of your templates), and **⋯** for the rest: research agents, video search, a local folder, the code playground, and *Continue in a fresh chat*.
 - **▶ Run** on Python and JavaScript code blocks.
 
 Turn them off under *Settings → Inside the chat*. They never appear in your normal chat tabs.
+
+**Right sidebar**: kept to eight buttons: model, new chat, **Agents** (deep-dive, web research, research this page, video search), **Code** (read this repo, read a local folder, playground), screenshot, saved answers, notes and settings. *Continue in a fresh chat* is in the model menu.
 
 **Floating menu** — select text (or code on GitHub, where it also tells the AI the file and line numbers) on any page and a compact icon menu appears, driven by **customizable prompt templates**. Built-ins include:
 
@@ -24,16 +26,16 @@ Add, edit, or remove your own templates in Settings using `{{selection}}`, `{{pa
 
 **GitHub analysis** — on any GitHub repository, generate a structured learning prompt with the file tree and README context. Unauthenticated by default; optionally add a GitHub token in Settings to lift the 60 req/hr rate limit.
 
-**GitHub deep-dive agent** — pick a repository to scan, then ask questions about it. The agent reads the codebase and answers with file references, with a live working-status bar.
+**GitHub deep-dive agent** — pick a repository to scan, then ask questions about it. The agent reads the codebase and answers with file references, with a status sheet at the bottom so you can watch the chat work above it.
 
 **Web research agent** — research any topic: the agent performs **SEARCH + READ** across the web and synthesizes an answer in the sidebar. Toggle **Deep research mode** in Settings for deeper coverage.
 
-**Context dock** — a subtle dock on the left edge of the sidebar, shown on any page:
+**Context dock** — a subtle dock on the left edge of the sidebar. It only appears when Yavar's bar isn't in the chat (a custom model, or in-chat buttons turned off), so the same buttons never show twice:
 
 - **Add page** — drop the current tab's readable text into the chat as context (inline, or attached as a file when long). On a **YouTube watch page** this becomes **Add video**, grabbing the transcript instead of the page chrome.
-- **Research this page** — seed the web research agent with the current page, then let it branch out via SEARCH/READ to confirm and deepen it.
-- **Search videos** (deep search) — search YouTube for a topic (e.g. *"top things to try in Chiang Mai"*), pull the top videos' transcripts, and hand them to the AI to synthesize against your Notes. Requires a running **ytx** server; see [Video search: setting up ytx](#video-search-setting-up-ytx).
 - On GitHub, one click **adds the file you're viewing**, or opens the repo **file browser**.
+
+**Research this page** and **Search videos** are in the Agents menu (and the chat's **⋯**). Research this page seeds the web research agent with the current page, then lets it branch out via SEARCH/READ. Search videos (deep search) searches YouTube for a topic (e.g. *"top things to try in Chiang Mai"*), pulls the top videos' transcripts, and hands them to the AI to synthesize against your Notes. Requires a running **ytx** server; see [Video search: setting up ytx](#video-search-setting-up-ytx).
 
 **Repo Reader** — learn from other people's code without an API key or burning your chat quota:
 
@@ -51,15 +53,21 @@ Add, edit, or remove your own templates in Settings using `{{selection}}`, `{{pa
 
 **Local folders** — the same reader works on a project folder on your computer (the folder button in the reader, or in the sidebar): packs, reading modes, imports, README cards, read marks. `node_modules`, `.git`, build output and secret files (`.env`, keys) are never listed, and nothing leaves your machine except the files you choose to send. Reopening remembers the last folder.
 
-**Rebuild it yourself** — the best way to understand a codebase is to build a small version of it. From the Repo Reader (GitHub or a local folder), one click sends the project's core files and the AI writes a plan of 5-10 small steps. For each step: the files to study (one click to read them), your task, how you know it works, a box for your code, **💡 Hint** (not the solution), **Check my code** (compared against the original files), and **▶ Try it** in the runner. Progress is saved per project.
+**Rebuild it yourself** — the best way to understand a codebase is to build a small version of it. From the Repo Reader (GitHub or a local folder), one click sends the project's core files and the AI writes a plan of 5-10 small steps. For each step: the files to study (one click to read them), your task, how you know it works, a box for your code, **💡 Hint** (not the solution), **Check my code** (compared against the original files), and **▶ Try it**, which runs your code right in the step card. Hints and reviews stream into the step as they're written, with Copy, Run and *Use in editor* on each code block, so you never have to leave the step. Progress and mentor notes are saved per project.
 
-**Run code** — every Python or JavaScript block in an answer gets a **▶ Run** button. It runs locally in a sandbox (Python via bundled [Pyodide](https://pyodide.org), standard library only), shows the output, and offers *Ask AI to fix it*, *Explain the output* and *What should I try next?*. The sidebar's code button opens the same runner as a playground.
+**Answers inside Yavar**: explanations from the Repo Reader, *Explain PR / commit*, *Recent changes*, video search and the agents' final reports open in an answer sheet. The answer streams in as the AI writes it, code blocks get Copy and ▶ Run, each answer has Copy and Save, and a box at the bottom asks follow-ups in the same conversation. *Open chat* shows the real chat whenever you want it.
+
+**Private chats for Yavar's work** (on by default): these requests, the rebuild hints and reviews, and the agents run in a temporary chat, so they don't fill your chat history: `chatgpt.com/?temporary-chat=true`, Claude's incognito chat, or Gemini's *Temporary chat* button. Follow-ups continue in the same temporary chat. Save the answers you want to keep. Turn it off under *Settings → Inside the chat* to keep everything in your normal history.
+
+**Panels that don't hide the chat**: the reader, runner, rebuild and history panels open as sheets from the bottom. Drag the handle to resize (double-click for full height); the chat stays visible above, and *Open in chat* on any answer drops the sheet.
+
+**Run code** — every Python or JavaScript block in an answer gets a **▶ Run** button. It runs locally in a sandbox (Python via bundled [Pyodide](https://pyodide.org), standard library only), shows the output, and offers *Ask AI to fix it*, *Explain the output* and *What should I try next?*. The answers appear under your code, not in the chat. The sidebar's code button opens the same runner as a playground.
 
 **Explain PR / commit** — on a pull request or commit page, one click attaches the diff and asks the AI to explain the goal, each file's change, what to learn from it, and what's risky.
 
-**History & saved answers** — capture the AI's last answer and keep it in a searchable saved-answers panel. Answers saved while reading a repo are tagged with it (click the tag to see everything about that repo). Expand, copy, send to Notes, or **export everything as Markdown**.
+**History & saved answers** — capture the AI's last answer and keep it in a searchable saved-answers panel. Answers saved while reading a repo are tagged with it (click the tag to see everything about that repo). The **+** in the panel's header saves the chat's latest answer. Expand, copy, send to Notes, or **export everything as Markdown**.
 
-**Continue in a fresh chat** — long chats get slow and hit free-plan limits. One button asks the AI for a handoff summary, opens a new chat, and pastes it in so you pick up where you left off.
+**Continue in a fresh chat** — long chats get slow and hit free-plan limits. One click (in the model menu or the chat's **⋯**) asks the AI for a handoff summary, opens a new chat, and pastes it in so you pick up where you left off.
 
 **Notes panel** — a built-in CodeMirror-powered scratchpad inside the sidebar, toggled with the notes shortcut. Download it as a `.md` file anytime.
 

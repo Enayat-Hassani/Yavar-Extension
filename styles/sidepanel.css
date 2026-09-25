@@ -7,6 +7,14 @@
 }
 
 :root {
+  /* Code colors (Xcode-like), used by the editors' "yavar" theme */
+  --cm-keyword: #ad3da4;
+  --cm-string: #c41a16;
+  --cm-comment: #707f8c;
+  --cm-number: #1c00cf;
+  --cm-def: #0f68a0;
+  --cm-builtin: #804fb8;
+  --cm-property: #3e8087;
   /* Apple-inspired Light Grey Palette */
   --bg-primary: #f5f5f7;        /* Apple light grey background */
   --bg-secondary: #e8e8ed;      /* Lighter grey secondary */
@@ -43,6 +51,13 @@
     --surface: #2c2c2e;
     --surface-soft: rgba(255, 255, 255, 0.06);
     --surface-glass: rgba(44, 44, 46, 0.94);
+    --cm-keyword: #ff7ab2;
+    --cm-string: #ff8170;
+    --cm-comment: #7f8c98;
+    --cm-number: #d9c97c;
+    --cm-def: #6bdfff;
+    --cm-builtin: #dabaff;
+    --cm-property: #78c2b3;
     color-scheme: dark;
   }
 }
@@ -1005,12 +1020,10 @@ div.toggle-switch.active::after {
 /* ========== Notes Panel ========== */
 .notes-panel {
   position: absolute;
-  top: 0;
   left: 0;
   width: 100%;
-  height: 100%;
   z-index: 50;
-  background: #1e1e2e;
+  background: var(--bg-primary);
   display: flex;
   flex-direction: column;
 }
@@ -1019,52 +1032,18 @@ div.toggle-switch.active::after {
   display: none;
 }
 
-.notes-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 10px 16px;
-  background: #181825;
-  border-bottom: 1px solid #313244;
-}
-
-.notes-title {
-  color: #cdd6f4;
-  font-size: 14px;
-  font-weight: 600;
-  font-family: -apple-system;
-}
-
-.notes-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.notes-action-btn {
-  background: transparent;
-  border: 1px solid #45475a;
-  border-radius: 6px;
-  padding: 4px 8px;
-  color: #cdd6f4;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.notes-action-btn:hover {
-  background: #313244;
-}
-
 #notes-editor {
   flex: 1;
   overflow: hidden;
   position: relative;
+  padding: 4px 0 0;
+  background: var(--surface);
 }
 
 #notes-editor .CodeMirror {
   height: 100%;
-  background: #1e1e2e;
-  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
-  font-size: 13px;
+  padding: 8px 10px;
+  font: 14px/1.6 -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
 }
 
 .sidebar-btn-active {
@@ -1126,22 +1105,19 @@ div.toggle-switch.active::after {
   color: white;
 }
 
-/* ========== "Working" Cover ========== */
+/* ========== Agent status sheet ==========
+   Same surface, header and buttons as the other sheets, so agents look like
+   the rest of Yavar. The chat above shows the agent working live. */
 .work-cover {
   position: absolute;
-  top: 0;
   left: 0;
   width: 100%;
-  height: 100%;
   z-index: 45;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  background: radial-gradient(circle at 50% 30%, #1b2238 0%, #0f1420 70%);
-  color: #e6ebff;
-  animation: fadeIn 0.25s ease;
-  transition: transform 0.7s cubic-bezier(0.55, 0, 0.35, 1);
+  flex-direction: column;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  transition: transform 0.45s cubic-bezier(0.55, 0, 0.35, 1);
   will-change: transform;
 }
 
@@ -1149,62 +1125,49 @@ div.toggle-switch.active::after {
   display: none;
 }
 
-/* Curtain lift — slide the whole cover up and out of view */
+/* Slide the sheet down and away when the agent finishes */
 .work-cover.lifting {
-  transform: translateY(-100%);
+  transform: translateY(100%);
 }
 
-.work-cover-inner {
-  width: 100%;
-  max-width: 420px;
+.work-heading {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  text-align: center;
+  gap: 10px;
+  min-width: 0;
 }
 
-.work-orb {
-  width: 64px;
-  height: 64px;
-  border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, #6ea8ff, #0071e3 60%, #0a3d91);
-  box-shadow: 0 0 0 rgba(0, 113, 227, 0.6);
-  animation: work-pulse 1.8s ease-in-out infinite;
-  margin-bottom: 20px;
-}
-
-@keyframes work-pulse {
-  0%   { transform: scale(0.9); box-shadow: 0 0 0 0 rgba(0, 113, 227, 0.45); }
-  50%  { transform: scale(1.05); box-shadow: 0 0 28px 10px rgba(0, 113, 227, 0.12); }
-  100% { transform: scale(0.9); box-shadow: 0 0 0 0 rgba(0, 113, 227, 0.0); }
-}
-
-.work-cover-title {
-  font-size: 18px;
-  font-weight: 600;
-  margin-bottom: 6px;
-}
+.work-heading-text { min-width: 0; }
 
 .work-cover-status {
-  font-size: 13px;
-  color: #9fb0d9;
-  margin-bottom: 16px;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
+.work-head .agent-stop-btn { padding: 4px 12px; }
+
 .work-cover-log {
-  width: 100%;
-  max-height: 190px;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  text-align: left;
-  background: rgba(0, 0, 0, 0.28);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  margin: 12px 16px 0;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 10px;
-  padding: 12px 14px;
   font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
   font-size: 12px;
   line-height: 1.7;
-  color: #b9c6ea;
-  margin-bottom: 18px;
+  color: var(--text-secondary);
+}
+
+.work-cover-log:empty::before {
+  content: 'Waiting for the first step…';
+  font-family: inherit;
 }
 
 .work-log-line {
@@ -1214,30 +1177,16 @@ div.toggle-switch.active::after {
   animation: fadeIn 0.2s ease;
 }
 
-.work-cover-actions {
-  display: flex;
-  gap: 10px;
-  margin-bottom: 12px;
-}
-
-.work-cover-actions .btn-secondary {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.18);
-  color: #e6ebff;
-}
-
-.work-cover-actions .btn-secondary:hover {
-  background: rgba(255, 255, 255, 0.18);
-}
+.work-log-line:last-child { color: var(--text-primary); }
 
 .work-cover-hint {
+  padding: 10px 16px 14px;
   font-size: 11px;
-  color: #7f8db3;
-  max-width: 300px;
   line-height: 1.5;
+  color: var(--text-secondary);
 }
 
-/* Minimized working pill */
+/* Minimized agent pill */
 .work-pill {
   position: fixed;
   bottom: 16px;
@@ -1246,12 +1195,14 @@ div.toggle-switch.active::after {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 12px;
-  background: #1b2238;
-  color: #e6ebff;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 6px 8px 6px 12px;
+  background: var(--surface-glass);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
   border-radius: 999px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.16);
   z-index: 620;
   font-size: 12px;
   animation: slideUp 0.2s cubic-bezier(0.4, 0, 0.2, 1);
@@ -1262,12 +1213,17 @@ div.toggle-switch.active::after {
 }
 
 .work-dot {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-  background: #0071e3;
+  background: var(--accent);
   animation: work-pulse 1.4s ease-in-out infinite;
   flex-shrink: 0;
+}
+
+@keyframes work-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.8); }
 }
 
 .work-pill-status {
@@ -1281,25 +1237,25 @@ div.toggle-switch.active::after {
   padding: 4px 10px;
   font-size: 11px;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  background: rgba(255, 255, 255, 0.1);
-  color: #e6ebff;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
   cursor: pointer;
-  transition: all 0.15s;
+  transition: background 0.15s, color 0.15s;
   flex-shrink: 0;
 }
 
 .work-pill-btn:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--bg-tertiary);
 }
 
 .work-pill-stop {
-  border-color: rgba(255, 107, 107, 0.5);
-  color: #ff8a8a;
+  color: var(--danger);
 }
 
 .work-pill-stop:hover {
-  background: rgba(255, 59, 48, 0.25);
+  background: var(--danger);
+  color: #fff;
 }
 
 /* ========== Repo File Browser ========== */
@@ -1392,15 +1348,15 @@ div.toggle-switch.active::after {
   flex-shrink: 0;
 }
 
-.files-stack .sheet {
+.files-stack .stack-page {
   height: 2px;
   border-radius: 1px;
   background: currentColor;
 }
 
-.files-stack .sheet-1 { width: 13px; opacity: 0.8; }
-.files-stack .sheet-2 { width: 9px;  opacity: 0.5; }
-.files-stack .sheet-3 { width: 11px; opacity: 0.35; }
+.files-stack .stack-page-1 { width: 13px; opacity: 0.8; }
+.files-stack .stack-page-2 { width: 9px;  opacity: 0.5; }
+.files-stack .stack-page-3 { width: 11px; opacity: 0.35; }
 
 .files-quick-plus {
   display: flex;
@@ -1422,7 +1378,6 @@ div.toggle-switch.active::after {
   transition: max-width 0.24s ease, opacity 0.2s ease;
 }
 
-.files-rail .files-tab-label { text-transform: uppercase; }
 
 .files-rail-group:hover .files-tab-label,
 .files-rail-group.peek .files-tab-label {
@@ -2649,3 +2604,409 @@ div.toggle-switch.active::after {
 
 /* The runner opens on top of the rebuild panel ("▶ Try it") */
 .rebuild-panel { z-index: 67; }
+
+/* ========== Bottom sheets ==========
+   Reader, Run, Rebuild and History slide up from the bottom so the chat
+   stays visible (and usable) above them. Drag the handle to resize. */
+.sheet {
+  top: auto !important;
+  bottom: 0;
+  height: var(--sheet-h, 72%) !important;
+  min-height: 160px;
+  border-radius: 16px 16px 0 0;
+  box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.16);
+  border-top: 1px solid var(--border);
+  overflow: hidden;
+  animation: sheetUp 0.22s cubic-bezier(0.22, 1, 0.36, 1) !important;
+}
+
+@keyframes sheetUp {
+  from { transform: translateY(24px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.sheet-handle {
+  flex-shrink: 0;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: ns-resize;
+  touch-action: none;
+  background: var(--bg-secondary);
+}
+
+.sheet-handle::before {
+  content: '';
+  width: 36px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--text-secondary);
+  opacity: 0.35;
+}
+
+.sheet-handle:hover::before { opacity: 0.6; }
+.sheet.dragging { transition: none; user-select: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .sheet { animation: none !important; }
+}
+
+/* ========== Answers shown inside Yavar ========== */
+.answer-card {
+  margin-top: 12px;
+  padding: 10px 12px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.answer-card.is-failed { border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
+
+.answer-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.answer-title {
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.answer-status { display: inline-flex; align-items: center; }
+.answer-status .files-spinner { width: 10px; height: 10px; margin-right: 6px; }
+
+.answer-link[hidden] { display: none; }
+
+.answer-link {
+  margin-left: auto;
+  padding: 0;
+  font: inherit;
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.answer-link + .answer-link { margin-left: 8px; }
+.answer-link:hover { color: var(--accent); text-decoration: underline; }
+.answer-card.collapsed .answer-body { max-height: 4.6em; overflow: hidden; mask-image: linear-gradient(#000 50%, transparent); }
+
+.md { color: var(--text-primary); overflow-wrap: anywhere; }
+.md > :first-child { margin-top: 0; }
+.md p, .md ul, .md ol, .md blockquote { margin: 0 0 8px; }
+.md ul, .md ol { padding-left: 20px; }
+.md li { margin: 2px 0; }
+.md h3, .md h4, .md h5, .md h6 { margin: 12px 0 6px; font-size: 13.5px; }
+.md hr { border: none; border-top: 1px solid var(--border); margin: 10px 0; }
+.md blockquote { padding-left: 10px; border-left: 3px solid var(--border); color: var(--text-secondary); }
+.md a { color: var(--accent); }
+.md code {
+  padding: 1px 5px;
+  font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+
+.md-code {
+  margin: 8px 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.md-code-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+}
+
+.md-code-bar span { margin-right: auto; }
+
+.md-code-bar button {
+  padding: 2px 8px;
+  font: inherit;
+  font-size: 11px;
+  color: var(--text-primary);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.md-code-bar button[data-md-act="run"] { color: #fff; background: var(--success); border-color: var(--success); }
+.md-code-bar button:hover { border-color: var(--accent); }
+
+.md-code pre {
+  margin: 0;
+  padding: 8px 10px;
+  overflow-x: auto;
+  background: var(--bg-primary);
+}
+
+.md-code pre code {
+  padding: 0;
+  font-size: 12px;
+  background: none;
+  border: none;
+  white-space: pre;
+}
+
+/* Run panel: output, follow-ups and answers scroll together under the editor */
+.run-panel .run-editor { flex: 0 0 auto; height: 38%; min-height: 120px; }
+.run-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding-bottom: 14px;
+}
+.run-scroll .run-output { flex: none; max-height: 260px; }
+.run-answers { padding: 0 14px; }
+
+/* Rebuild step: inline run output + mentor answers */
+.rebuild-run-status {
+  margin-left: auto;
+  align-self: center;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.rebuild-out {
+  margin: 10px 0 0;
+  max-height: 200px;
+}
+
+.rebuild-out.hidden { display: none; }
+
+.rebuild-live {
+  margin-top: 10px;
+  text-align: left;
+  font-size: 12.5px;
+  color: var(--text-primary);
+}
+
+.rebuild-live ol { padding-left: 20px; margin: 0; }
+.rebuild-live li { margin: 3px 0; animation: fadeIn 0.25s ease; }
+.rebuild-live-hint { color: var(--text-secondary); }
+
+/* ========== Tool menu (sidebar Agents / Code) ==========
+   Reuses the lens picker look; placed next to the button that opened it. */
+.tool-menu {
+  transform: none;
+  top: auto;
+}
+
+.lens-item.is-disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.lens-item.is-disabled:hover { background: transparent; }
+
+.model-switcher-footer {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+button.lens-item {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+button.lens-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.tool-menu .lens-name,
+.tool-menu .lens-desc { display: block; }
+
+/* The agent sheet stays compact so most of the live chat shows above it */
+.work-cover.sheet { height: min(var(--sheet-h, 72%), 48%) !important; }
+
+/* ========== Answer sheet ========== */
+.thread-panel { z-index: 67; }
+
+.thread-heading {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.thread-sub {
+  margin-top: 1px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.thread-private {
+  align-self: center;
+  padding: 3px 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  border-radius: 999px;
+}
+
+.thread-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.thread-q {
+  align-self: flex-end;
+  max-width: 85%;
+  margin-top: 10px;
+  padding: 7px 12px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+  border-radius: 16px 16px 4px 16px;
+  overflow-wrap: anywhere;
+}
+
+.thread-q:first-child { margin-top: 0; }
+
+/* Answers read like the chat itself: no box, just text */
+.thread-body .answer-card {
+  margin-top: 6px;
+  padding: 0;
+  background: none;
+  border: none;
+}
+
+.thread-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+
+.thread-form textarea {
+  flex: 1;
+  min-height: 36px;
+  max-height: 120px;
+  padding: 8px 14px;
+  resize: none;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text-primary);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.thread-form textarea:focus { border-color: var(--accent); }
+
+.thread-send {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: var(--accent);
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.15s;
+}
+
+.thread-send:active { transform: scale(0.94); }
+.thread-panel.is-busy .thread-send { opacity: 0.35; pointer-events: none; }
+
+/* ========== Transitions ==========
+   One motion language for every view: sheets rise from the bottom,
+   full-screen views fade, popovers fade and settle. Exits animate too
+   (display is transitioned discretely), so nothing pops in or out. */
+:root {
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.sheet {
+  animation: none !important;
+  transition: translate 0.3s var(--ease-out), opacity 0.22s ease, display 0.3s allow-discrete;
+}
+.sheet.hidden { display: none !important; translate: 0 40px; opacity: 0; pointer-events: none; }
+@starting-style {
+  .sheet:not(.hidden) { translate: 0 40px; opacity: 0; }
+}
+
+.settings-panel, .notes-panel, .modal, .screenshot-panel {
+  animation: none !important;
+  transition: opacity 0.2s ease, display 0.2s allow-discrete;
+}
+.settings-panel.hidden, .notes-panel.hidden, .modal.hidden, .screenshot-panel.hidden { opacity: 0; pointer-events: none; }
+@starting-style {
+  .settings-panel:not(.hidden), .notes-panel:not(.hidden), .modal:not(.hidden), .screenshot-panel:not(.hidden) { opacity: 0; }
+}
+
+.model-switcher, .lens-picker, .work-pill {
+  animation: none !important;
+  transition: opacity 0.16s ease, translate 0.2s var(--ease-out), scale 0.2s var(--ease-out), display 0.2s allow-discrete;
+}
+.model-switcher.hidden, .lens-picker.hidden, .work-pill.hidden { opacity: 0; translate: 0 6px; scale: 0.98; pointer-events: none; }
+@starting-style {
+  .model-switcher:not(.hidden), .lens-picker:not(.hidden), .work-pill:not(.hidden) { opacity: 0; translate: 0 6px; scale: 0.98; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sheet, .settings-panel, .notes-panel, .modal, .screenshot-panel,
+  .model-switcher, .lens-picker, .work-pill { transition: none !important; }
+}
+
+/* ========== Editor theme ("yavar") ==========
+   Follows the panel's light / dark palette instead of a fixed dark theme */
+.cm-s-yavar.CodeMirror { background: var(--surface); color: var(--text-primary); }
+.cm-s-yavar .CodeMirror-gutters { background: var(--surface); border-right: 1px solid var(--border); }
+.cm-s-yavar .CodeMirror-linenumber { color: var(--text-secondary); opacity: 0.6; }
+.cm-s-yavar .CodeMirror-cursor { border-left: 2px solid var(--accent); }
+.cm-s-yavar div.CodeMirror-selected,
+.cm-s-yavar.CodeMirror-focused div.CodeMirror-selected { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.cm-s-yavar .CodeMirror-line::selection, .cm-s-yavar .CodeMirror-line > span::selection,
+.cm-s-yavar .CodeMirror-line > span > span::selection { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.cm-s-yavar .CodeMirror-placeholder { color: var(--text-secondary); }
+.cm-s-yavar .cm-keyword, .cm-s-yavar .cm-atom { color: var(--cm-keyword); }
+.cm-s-yavar .cm-string, .cm-s-yavar .cm-string-2 { color: var(--cm-string); }
+.cm-s-yavar .cm-comment { color: var(--cm-comment); font-style: italic; }
+.cm-s-yavar .cm-number { color: var(--cm-number); }
+.cm-s-yavar .cm-def { color: var(--cm-def); }
+.cm-s-yavar .cm-builtin, .cm-s-yavar .cm-variable-2, .cm-s-yavar .cm-variable-3, .cm-s-yavar .cm-type { color: var(--cm-builtin); }
+.cm-s-yavar .cm-property, .cm-s-yavar .cm-attribute { color: var(--cm-property); }
+.cm-s-yavar .cm-variable, .cm-s-yavar .cm-operator, .cm-s-yavar .cm-punctuation { color: var(--text-primary); }
+.cm-s-yavar .cm-meta, .cm-s-yavar .cm-qualifier { color: var(--text-secondary); }
+.cm-s-yavar .cm-tag { color: var(--cm-def); }
+.cm-s-yavar .cm-error { color: var(--danger); }
+.cm-s-yavar .CodeMirror-matchingbracket { outline: 1px solid var(--border); color: inherit !important; }

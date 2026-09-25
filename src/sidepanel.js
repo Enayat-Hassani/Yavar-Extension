@@ -3,6 +3,7 @@
 
 import { isPublicWebUrl } from './utils/net.js';
 import { loadTemplates, expandTemplate, varsInTemplate } from './utils/templates.js';
+import { renderMarkdown, runnableLang } from './utils/markdown.js';
 import { pickCoreFiles, planPrompt, hintPrompt, checkPrompt, parseRebuildPlan } from './utils/rebuild.js';
 import {
   parseGitHubUrl, refCandidates, rawFileUrl, encodePath, isReadablePath, estimateTokens, formatCount, formatBytes,
@@ -47,10 +48,54 @@ class YavarSidePanel {
     return tabs;
   }
 
+  // Bottom sheets: a drag handle on top of each; one remembered height
+  setupSheets() {
+    let saved = null;
+    try { saved = Number(localStorage.getItem('yavarSheetH')) || null; } catch (e) { /* no storage */ }
+    const apply = (pct) => document.querySelectorAll('.sheet').forEach(el => el.style.setProperty('--sheet-h', pct + '%'));
+    if (saved) apply(saved);
+    document.querySelectorAll('.sheet').forEach(sheet => {
+      const handle = document.createElement('div');
+      handle.className = 'sheet-handle';
+      handle.title = 'Drag to resize · double-click for full height';
+      sheet.prepend(handle);
+      handle.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        handle.setPointerCapture(e.pointerId);
+        sheet.classList.add('dragging');
+        const move = (ev) => {
+          const pct = Math.round(Math.min(100, Math.max(30, ((innerHeight - ev.clientY) / innerHeight) * 100)));
+          apply(pct);
+          saved = pct;
+        };
+        const up = () => {
+          sheet.classList.remove('dragging');
+          handle.removeEventListener('pointermove', move);
+          try { localStorage.setItem('yavarSheetH', String(saved)); } catch (err) { /* ignore */ }
+        };
+        handle.addEventListener('pointermove', move);
+        handle.addEventListener('pointerup', up, { once: true });
+      });
+      handle.addEventListener('dblclick', () => {
+        saved = saved >= 99 ? 72 : 100;
+        apply(saved);
+        try { localStorage.setItem('yavarSheetH', String(saved)); } catch (err) { /* ignore */ }
+      });
+    });
+  }
+
+  // Hide every sheet to show the chat
+  closeSheets() {
+    // Not the agent sheet: that one minimizes to its pill instead
+    document.querySelectorAll('.sheet:not(.work-cover)').forEach(el => el.classList.add('hidden'));
+  }
+
   async init() {
     // Let the background know a panel is open (used where there's no side panel API)
     try { chrome.runtime.connect({ name: 'yavar-panel' }); } catch (e) { /* ignore */ }
     this.cacheElements();
+    this.setupSheets();
+    this.setupThread();
     await this.loadModels();
     this.bindEvents();
     this.loadCurrentAI();
@@ -105,8 +150,6 @@ class YavarSidePanel {
     this.filesQuickAdd = document.getElementById('files-quick-add');
     this.dockAddPage = document.getElementById('dock-add-page');
     this.dockAddPageLabel = this.dockAddPage?.querySelector('.files-tab-label');
-    this.dockResearchPage = document.getElementById('dock-research-page');
-    this.dockVideoResearch = document.getElementById('dock-video-research');
     this.filesQuickName = this.filesQuickAdd?.querySelector('.files-quick-name');
     this.filesPanel = document.getElementById('files-panel');
     this.filesTree = document.getElementById('files-tree');
@@ -140,14 +183,13 @@ class YavarSidePanel {
 
     // Right sidebar buttons
     this.sidebarBtnNotes = document.getElementById('sidebar-btn-notes');
-    this.sidebarBtnSaveAnswer = document.getElementById('sidebar-btn-save-answer');
     this.sidebarBtnHistory = document.getElementById('sidebar-btn-history');
-    this.sidebarBtnRepoAgent = document.getElementById('sidebar-btn-repo-agent');
-    this.sidebarBtnResearch = document.getElementById('sidebar-btn-research');
+    this.sidebarBtnAgents = document.getElementById('sidebar-btn-agents');
+    this.sidebarBtnCode = document.getElementById('sidebar-btn-code');
+    this.toolMenu = document.getElementById('tool-menu');
     this.sidebarBtnModelSwitcher = document.getElementById('sidebar-btn-model-switcher');
     this.sidebarBtnScreenshot = document.getElementById('sidebar-btn-screenshot');
     this.sidebarBtnNewChat = document.getElementById('sidebar-btn-new-chat');
-    this.sidebarBtnCarryOver = document.getElementById('sidebar-btn-carry-over');
     this.runPanel = document.getElementById('run-panel');
     this.runOutput = document.getElementById('run-output');
     this.runStatus = document.getElementById('run-status');
@@ -229,11 +271,25 @@ class YavarSidePanel {
     });
 
     this.sidebarBtnNotes.addEventListener('click', () => this.toggleNotes());
-    this.sidebarBtnSaveAnswer.addEventListener('click', () => this.captureLastAnswer());
     this.sidebarBtnHistory.addEventListener('click', () => this.toggleHistory());
-    this.sidebarBtnRepoAgent.addEventListener('click', (e) => {
+    document.getElementById('btn-save-current')?.addEventListener('click', () => this.captureLastAnswer());
+    this.sidebarBtnAgents?.addEventListener('click', (e) => {
       e.stopPropagation();
-      this.toggleLensPicker();
+      this.toggleToolMenu('agents', this.sidebarBtnAgents, e.detail === 0);
+    });
+    this.sidebarBtnCode?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.toggleToolMenu('code', this.sidebarBtnCode, e.detail === 0);
+    });
+    this.toolMenu?.addEventListener('click', (e) => {
+      const item = e.target.closest('[data-tool]');
+      if (!item) return;
+      e.stopPropagation();   // the document handler would close a lens picker this opens
+      this.toolMenu.classList.add('hidden');
+      if (!item.disabled) this.runTool(item.dataset.tool);
+    });
+    this.toolMenu?.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') this.toolMenu.classList.add('hidden');
     });
     this.lensPicker.addEventListener('click', (e) => {
       const item = e.target.closest('[data-lens]');
@@ -241,7 +297,6 @@ class YavarSidePanel {
       this.lensPicker.classList.add('hidden');
       this.startRepoAgent(item.dataset.lens);
     });
-    this.sidebarBtnResearch.addEventListener('click', () => this.startResearchAgent());
     this.btnStopAgent.addEventListener('click', () => this.stopRepoAgent());
 
     // Repo file browser
@@ -253,8 +308,6 @@ class YavarSidePanel {
       if (this._addPageIsVideo) this.addVideoToChat();
       else this.addPageToChat();
     });
-    this.dockResearchPage?.addEventListener('click', () => this.researchThisPage());
-    this.dockVideoResearch?.addEventListener('click', () => this.researchVideosOnTopic());
     this.btnCloseFiles.addEventListener('click', () => this.filesPanel.classList.add('hidden'));
     this.btnRefreshFiles.addEventListener('click', () => this.refreshFiles());
     this.filesSearch.addEventListener('input', () => {
@@ -302,8 +355,10 @@ class YavarSidePanel {
     this.btnWorkStopPill.addEventListener('click', () => this.stopRepoAgent());
     this.sidebarBtnScreenshot.addEventListener('click', () => this.captureScreenshot());
     this.sidebarBtnNewChat.addEventListener('click', () => this.openNewChat());
-    this.sidebarBtnCarryOver?.addEventListener('click', () => this.carryOverToNewChat());
-    document.getElementById('sidebar-btn-run')?.addEventListener('click', () => this.openRunPanel());
+    document.getElementById('btn-carry-over')?.addEventListener('click', () => {
+      this.hideModelSwitcher();
+      this.carryOverToNewChat();
+    });
     this.rebuildPanel = document.getElementById('rebuild-panel');
     this.rebuildBody = document.getElementById('rebuild-body');
     document.getElementById('rebuild-close')?.addEventListener('click', () => this.rebuildPanel.classList.add('hidden'));
@@ -312,7 +367,6 @@ class YavarSidePanel {
       if (e.key === 'Escape') this.rebuildPanel.classList.add('hidden');
     });
     this.rebuildBody?.addEventListener('click', (e) => this.onRebuildClick(e));
-    document.getElementById('sidebar-btn-local')?.addEventListener('click', () => this.openLocalFolder({ reuse: true }));
     document.getElementById('btn-open-folder')?.addEventListener('click', () => this.openLocalFolder());
     this.filesTree?.addEventListener('click', (e) => {
       if (e.target.closest('[data-open-folder]')) this.openLocalFolder({ reuse: true });
@@ -338,9 +392,8 @@ class YavarSidePanel {
       if (!this.modelSwitcher.contains(e.target) && !this.sidebarBtnModelSwitcher.contains(e.target)) {
         this.hideModelSwitcher();
       }
-      if (!this.lensPicker.contains(e.target) && !this.sidebarBtnRepoAgent.contains(e.target)) {
-        this.lensPicker.classList.add('hidden');
-      }
+      if (!this.lensPicker.contains(e.target)) this.lensPicker.classList.add('hidden');
+      if (!this.toolMenu?.contains(e.target)) this.toolMenu?.classList.add('hidden');
     });
 
     // Close settings
@@ -449,16 +502,60 @@ class YavarSidePanel {
 
   onBridgeReady() {
     this._bridgeReady = true;
+    (this._bridgeWaiters || []).splice(0).forEach(resolve => resolve(true));
     const queued = this._chatQueue || [];
     this._chatQueue = [];
     queued.forEach(p => this.aiFrame?.contentWindow?.postMessage(p, '*'));
     this.sendTemplatesToFrame();
+    this.sendContextToFrame();
+  }
+
+  whenBridgeReady(timeoutMs = 15000) {
+    if (this._bridgeReady) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      (this._bridgeWaiters = this._bridgeWaiters || []).push(resolve);
+      setTimeout(() => resolve(false), timeoutMs);
+    });
+  }
+
+  // Yavar's own work (in-panel answers, agents, reader explanations) goes to
+  // a private chat by default, so it doesn't fill the user's chat history.
+  // Already in one? Keep going there, so follow-ups keep their context.
+  async ensureTaskChat() {
+    this._chatIsTemp = false;
+    try {
+      const { settings } = await chrome.storage.sync.get('settings');
+      if (settings?.tempChats === false) return;
+    } catch (e) { /* default on */ }
+    let host = '';
+    try { host = new URL(this.getCurrentModel()?.url || '').hostname; } catch (e) { return; }
+    const platform = /chatgpt\.com|chat\.openai\.com/.test(host) ? 'chatgpt'
+      : /claude\.ai/.test(host) ? 'claude' : /gemini\.google\.com/.test(host) ? 'gemini' : null;
+    if (!platform) return;
+    let state;
+    try { state = await this.chatRequest('CHAT_STATE', { timeoutMs: 8000 }); } catch (e) { return; }
+    if (state?.temporary) { this._chatIsTemp = true; return; }
+
+    if (platform === 'gemini') {
+      let ok = false;
+      try { ok = (await this.chatRequest('START_TEMP_CHAT', { timeoutMs: 12000 }))?.ok; } catch (e) { /* below */ }
+      if (!ok) this.showNotification("⚠️ Couldn't open a temporary Gemini chat, using this one");
+      this._chatIsTemp = !!ok;
+      return;
+    }
+    this._chatIsTemp = true;
+    this.loadingState.classList.remove('hidden');
+    this.chatNavigating();
+    this.aiFrame.src = platform === 'chatgpt' ? 'https://chatgpt.com/?temporary-chat=true' : 'https://claude.ai/new?incognito';
+    await this.whenBridgeReady(20000);
+    await new Promise(r => setTimeout(r, 800));   // the message box renders just after
   }
 
   // The chat frame is (re)loading: queue until its new bridge is ready, and
   // drop requests that only made sense for the old page.
   chatNavigating() {
     this._bridgeReady = false;
+    if (this._inChatBarShown) { this._inChatBarShown = false; this.applyDockVisibility(); }
     this._frameReady = false;
     this.cancelChatRequests();
     this._chatQueue = (this._chatQueue || [])
@@ -468,15 +565,22 @@ class YavarSidePanel {
   // Post { action, requestId } to the chat bridge and resolve with the
   // reply's text (ANSWER_SETTLED / ANSWER_CAPTURED) or reject on its failure
   // messages or a timeout. Replies are matched by requestId in the listener.
-  chatRequest(action, { timeoutMs = 0 } = {}) {
+  // With timeoutMs, the request fails after that long *without progress*
+  // (each ANSWER_PROGRESS restarts the clock, so long answers aren't cut off).
+  chatRequest(action, { timeoutMs = 0, onProgress = null } = {}) {
     if (!this.aiFrame?.contentWindow) return Promise.reject(new Error('no AI chat loaded'));
     this._chatRequests = this._chatRequests || new Map();
     const id = `req_${action}_${Date.now()}`;
     return new Promise((resolve, reject) => {
-      const timer = timeoutMs ? setTimeout(() => {
-        if (this._chatRequests.delete(id)) reject(new Error('the chat did not respond'));
-      }, timeoutMs) : null;
-      this._chatRequests.set(id, { resolve, reject, timer });
+      const req = { resolve, reject, timer: null, onProgress };
+      req.arm = () => {
+        clearTimeout(req.timer);
+        if (timeoutMs) req.timer = setTimeout(() => {
+          if (this._chatRequests.delete(id)) reject(new Error('the chat did not respond'));
+        }, timeoutMs);
+      };
+      req.arm();
+      this._chatRequests.set(id, req);
       this.postToChat({ action, requestId: id });
     });
   }
@@ -494,17 +598,23 @@ class YavarSidePanel {
   settleChatRequest(data) {
     const req = data.requestId && this._chatRequests?.get(data.requestId);
     if (!req) return false;
+    if (data.action === 'ANSWER_PROGRESS') {
+      req.arm();
+      try { req.onProgress?.(data.text || ''); } catch (e) { /* UI errors shouldn't kill the request */ }
+      return true;
+    }
     const fail = {
       ANSWER_CAPTURE_FAILED: data.reason === 'no-messages' ? 'no answer in the chat yet' : 'could not read the answer',
       ANSWER_WATCH_FAILED: 'answer reading is not supported on this model',
       ANSWER_WATCH_STALLED: 'no reply from the AI',
       ANSWER_WATCH_TIMEOUT: 'no reply from the AI'
     }[data.action];
-    if (data.action !== 'ANSWER_SETTLED' && data.action !== 'ANSWER_CAPTURED' && !fail) return false;
+    const plain = data.action === 'CHAT_STATE' || data.action === 'TEMP_CHAT_STARTED';
+    if (data.action !== 'ANSWER_SETTLED' && data.action !== 'ANSWER_CAPTURED' && !fail && !plain) return false;
     this._chatRequests.delete(data.requestId);
     clearTimeout(req.timer);
     if (fail) req.reject(new Error(fail));
-    else req.resolve(data.text || '');
+    else req.resolve(plain ? data : (data.text || ''));
     return true;
   }
 
@@ -515,6 +625,108 @@ class YavarSidePanel {
     const reply = this.chatRequest('WATCH_FOR_ANSWER', { timeoutMs: 120000 });
     this.forwardToIframe({ prompt, autoSubmit: true });
     return reply;
+  }
+
+  // Ask the chat something and get the answer back *inside Yavar*, streamed
+  // as it's written, while the conversation carries on in the chat itself.
+  // attachments: [{ filename, content, mime }] are uploaded first.
+  async askInPanel(prompt, { attachments = [], onProgress = null } = {}) {
+    if (this.agent?.active) throw new Error('an agent is using the chat, stop it first');
+    if (this._panelAsk) throw new Error('still waiting for the previous answer');
+    this._panelAsk = true;
+    try {
+      await this.ensureTaskChat();
+      const reply = this.chatRequest('WATCH_FOR_ANSWER', { timeoutMs: 120000, onProgress });
+      attachments.forEach(a => this.forwardAttachToIframe(a.filename, a.content, a.mime || 'text/markdown'));
+      if (attachments.length) await new Promise(r => setTimeout(r, 1500 + attachments.length * 400));
+      this.forwardToIframe({ prompt, autoSubmit: true });
+      return await reply;
+    } finally {
+      this._panelAsk = false;
+    }
+  }
+
+  // An answer shown inside Yavar: streams, renders Markdown, and wires the
+  // code-block buttons. onUseCode(code, lang) enables "Use in editor".
+  answerCard(container, { title, onUseCode = null, collapsible = false, saveAs = null } = {}) {
+    const card = document.createElement('div');
+    card.className = 'answer-card is-writing';
+    card.innerHTML =
+      `<div class="answer-head"><span class="answer-title">${this.escapeHtml(title)}</span>` +
+      `<span class="answer-status"><span class="files-spinner"></span>Writing…</span>` +
+      (saveAs ? `<button type="button" class="answer-link" data-ans="copy" title="Copy as Markdown" hidden>Copy</button>` +
+        `<button type="button" class="answer-link" data-ans="save" title="Keep this answer in Saved answers" hidden>Save</button>` : '') +
+      `<button type="button" class="answer-link" data-ans="chat" title="Show the chat (the answer is there too)">Open in chat</button></div>` +
+      `<div class="answer-body md"></div>`;
+    container.appendChild(card);
+    const body = card.querySelector('.answer-body');
+    let code = [];
+    let pending = null;
+    let finalText = '';
+    const paint = (text) => {
+      const r = renderMarkdown(text);
+      body.innerHTML = r.html;
+      code = r.code;
+      if (!onUseCode) body.querySelectorAll('[data-md-act="use"]').forEach(b => b.remove());
+    };
+    card.addEventListener('click', async (e) => {
+      const btn = e.target.closest('[data-md-act], [data-ans]');
+      if (!btn) return;
+      if (btn.dataset.ans === 'chat') { this.closeSheets(); return; }
+      if (btn.dataset.ans === 'toggle') { card.classList.toggle('collapsed'); return; }
+      if (btn.dataset.ans === 'copy') {
+        try { await navigator.clipboard.writeText(finalText); btn.textContent = 'Copied ✓'; } catch (err) { /* ignore */ }
+        setTimeout(() => { btn.textContent = 'Copy'; }, 1400);
+        return;
+      }
+      if (btn.dataset.ans === 'save') {
+        if (btn.disabled) return;
+        await this.addHistoryEntry({
+          id: 'h_' + Date.now(), ts: Date.now(), platform: this.getCurrentModel()?.name || 'AI', url: '',
+          prompt: saveAs.prompt || title || '', answer: finalText,
+          topic: (this._readingContext && Date.now() - this._readingContext.ts < 3600000) ? this._readingContext.label : ''
+        });
+        btn.textContent = 'Saved ✓';
+        btn.disabled = true;
+        return;
+      }
+      const block = code[Number(btn.closest('[data-code-index]')?.dataset.codeIndex)];
+      if (!block) return;
+      const act = btn.dataset.mdAct;
+      if (act === 'copy') {
+        try { await navigator.clipboard.writeText(block.code); btn.textContent = 'Copied ✓'; } catch (err) { /* ignore */ }
+        setTimeout(() => { btn.textContent = 'Copy'; }, 1400);
+      } else if (act === 'run') {
+        this.openRunPanel({ lang: runnableLang(block.lang), code: block.code, autoRun: true });
+      } else if (act === 'use' && onUseCode) {
+        onUseCode(block.code, runnableLang(block.lang));
+      }
+    });
+    if (collapsible) {
+      card.querySelector('.answer-title').insertAdjacentHTML('afterend',
+        '<button type="button" class="answer-link" data-ans="toggle" title="Collapse / expand">▾</button>');
+    }
+    return {
+      el: card,
+      // Streaming updates are painted at most once per frame
+      update: (text) => {
+        if (pending == null) requestAnimationFrame(() => { paint(pending); pending = null; });
+        pending = text;
+      },
+      done: (text) => {
+        pending = null;
+        finalText = text;
+        paint(text);
+        card.classList.remove('is-writing');
+        card.querySelector('.answer-status').textContent = '';
+        card.querySelectorAll('[data-ans="save"], [data-ans="copy"]').forEach(b => { b.hidden = false; });
+      },
+      fail: (msg) => {
+        card.classList.remove('is-writing');
+        card.classList.add('is-failed');
+        card.querySelector('.answer-status').textContent = '⚠️ ' + msg;
+      }
+    };
   }
 
   // Long chats get slow and hit free-plan limits. Ask the AI for a compact
@@ -645,6 +857,8 @@ class YavarSidePanel {
       const deepResearchToggle = document.getElementById('setting-deep-research-toggle');
       const inChatToggle = document.getElementById('setting-inchat-toggle');
       if (inChatToggle) inChatToggle.checked = settings?.inChatButtons ?? true;
+      const tempChatsToggle = document.getElementById('setting-temp-chats-toggle');
+      if (tempChatsToggle) tempChatsToggle.checked = settings?.tempChats ?? true;
 
       if (autoPasteToggle) autoPasteToggle.checked = autoPaste;
       if (autoSubmitToggle) autoSubmitToggle.checked = autoSubmit;
@@ -658,6 +872,7 @@ class YavarSidePanel {
         screenshotPreviewToggle?.addEventListener('change', (e) => this.saveSetting('showScreenshotPreview', e.target.checked));
         deepResearchToggle?.addEventListener('change', (e) => this.saveSetting('deepResearch', e.target.checked));
         inChatToggle?.addEventListener('change', (e) => this.saveSetting('inChatButtons', e.target.checked));
+        tempChatsToggle?.addEventListener('change', (e) => this.saveSetting('tempChats', e.target.checked));
         this.settingsListenersAdded = true;
       }
     } catch (error) {
@@ -1113,6 +1328,7 @@ First Task: Based on the tree and tech stack, what is the single most important 
       staleTurns: 0
     };
     this.showAgentBar();
+    this.agent.task = query;
     this.logWorkActivity(`🔎 Researching: ${query}`);
 
     const prompt = `RESEARCH TASK: ${query}\n\n` + this.researchInstructions(deep);
@@ -1203,7 +1419,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
     if (this.agent.turn > 1) {
       setTimeout(send, 1500);
     } else {
-      send();
+      this.ensureTaskChat().finally(send);
     }
   }
 
@@ -1236,7 +1452,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
     const doneLabel = this.agent.mode === 'repo' ? 'Analysis complete.' : 'Research complete.';
 
     if (!calls.length) {
-      this.finishAgent(doneLabel);
+      this.finishAgent(doneLabel, answer);
       return;
     }
 
@@ -1497,7 +1713,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
     this.showNotification('⏹️ Agent stopped');
   }
 
-  finishAgent(message) {
+  finishAgent(message, answer = '') {
     if (this.agent) this.agent.active = false;
     this._agentRequestId = null;
     this.postToChat({ action: 'STOP_WATCH' });
@@ -1505,6 +1721,16 @@ Begin: state a one-line plan, then issue your first tool call.`;
     if (this.agentBar) this.agentBar.classList.add('hidden');
     if (this.workPill) this.workPill.classList.add('hidden');
     this.liftCurtain();
+    // The report opens in the answer sheet; follow-ups continue the same chat
+    if (answer.trim()) {
+      const a = this.agent || {};
+      this.showInThread({
+        title: a.mode === 'repo' ? 'Deep-dive' : 'Research',
+        sub: a.mode === 'repo' ? `${a.owner}/${a.repo}` : '',
+        label: a.task || (a.mode === 'repo' ? `Deep-dive of ${a.owner}/${a.repo}` : 'Research'),
+        text: answer
+      });
+    }
   }
 
   // Elegantly slide the cover up like a curtain, revealing the chat beneath
@@ -1628,14 +1854,14 @@ Begin: state a one-line plan, then issue your first tool call.`;
     const gh = parseGitHubUrl(url);
     const isRepo = !!gh;
 
-    // The whole dock shows on any usable page; individual tabs are contextual.
-    if (this.filesRailGroup) this.filesRailGroup.classList.toggle('hidden', !usable);
+    this._tabCtx = { usable, gh, url };
+    // The whole dock shows on any usable page (unless the same buttons are
+    // already in the chat's own bar); individual tabs are contextual.
+    this.applyDockVisibility();
     if (!usable && this.filesPanel) this.filesPanel.classList.add('hidden');
 
     // Page-level tabs (any usable page)
     this.dockAddPage?.classList.toggle('hidden', !usable);
-    this.dockResearchPage?.classList.toggle('hidden', !usable);
-    this.dockVideoResearch?.classList.toggle('hidden', !usable);
 
     // On a YouTube watch page, "Add page" becomes "Add video" (grab transcript)
     const isYouTubeWatch = /:\/\/(www\.)?youtube\.com\/watch\?/i.test(url) || /:\/\/youtu\.be\//i.test(url);
@@ -1673,7 +1899,107 @@ Begin: state a one-line plan, then issue your first tool call.`;
     }
 
     this.markFirstDockTab();
+    this.sendContextToFrame();
     if (isRepo) this.maybeShowReaderTip();
+  }
+
+  // The left dock is the fallback for chats without Yavar's in-chat bar
+  // (custom models, in-chat buttons turned off, a site layout we can't read).
+  applyDockVisibility() {
+    const usable = !!this._tabCtx?.usable;
+    this.filesRailGroup?.classList.toggle('hidden', !usable || !!this._inChatBarShown);
+  }
+
+  // Buttons for the chat's own bar, matching the page open in the tab
+  chatContext() {
+    const { usable, gh } = this._tabCtx || {};
+    const video = !!this._addPageIsVideo;
+    const chips = [];
+    if (gh?.kind === 'blob' && gh.rest.length > 1) {
+      chips.push({ id: 'add_file', label: '+ ' + gh.rest[gh.rest.length - 1], title: 'Add the file open in your GitHub tab' });
+    }
+    if (gh?.kind === 'pull' || gh?.kind === 'commit') {
+      chips.push({ id: 'explain_diff', label: gh.kind === 'pull' ? '⇄ Explain PR' : '⇄ Explain commit', title: 'Explain the change open in your tab' });
+    }
+    if (gh) chips.push({ id: 'reader', label: '📚 Repo', title: 'Repo Reader: pick files to read with the AI' });
+    else if (usable) chips.push({ id: 'add_page', label: video ? '🎬 Video' : '📄 Page', title: video ? "Add this video's transcript" : "Add this page's text" });
+
+    const more = [];
+    if (gh && usable) more.push({ id: 'add_page', label: '📄 Add this page' });
+    if (gh) more.push({ id: 'deep_dive', label: '🧭 Deep-dive this repo' });
+    if (usable) more.push({ id: 'research_page', label: '🔎 Research this page' });
+    more.push(
+      { id: 'research_web', label: '🌐 Research the web' },
+      { id: 'videos', label: '🎬 Search videos' },
+      { id: 'local', label: '📁 Read a local folder' },
+      { id: 'run', label: '▶ Code playground' },
+      { id: 'carry_over', label: '🧳 Continue in a fresh chat' }
+    );
+    return { chips, more };
+  }
+
+  sendContextToFrame() {
+    this.postToChat({ action: 'YAVAR_CONTEXT', ...this.chatContext() });
+  }
+
+  // Sidebar menus: grouped tools instead of one button each
+  toolMenuItems(kind) {
+    const { usable, gh } = this._tabCtx || {};
+    const repo = gh ? `${gh.owner}/${gh.repo}` : '';
+    if (kind === 'agents') {
+      return [
+        { id: 'deep_dive', icon: '🧭', name: 'Deep-dive this repo', desc: repo || 'Open a GitHub repo in your tab', disabled: !gh },
+        { id: 'research_web', icon: '🌐', name: 'Research the web', desc: 'Searches, reads sources, cites them' },
+        { id: 'research_page', icon: '🔎', name: 'Research this page', desc: usable ? 'Dig deeper into the open page' : 'Open a web page in your tab', disabled: !usable },
+        { id: 'videos', icon: '🎬', name: 'Search videos', desc: 'Top YouTube videos on a topic, summarized' }
+      ];
+    }
+    return [
+      { id: 'reader', icon: '📚', name: 'Read this repo', desc: repo || 'Open a GitHub repo in your tab', disabled: !gh },
+      { id: 'local', icon: '📁', name: 'Read a local folder', desc: 'A project on this computer' },
+      { id: 'run', icon: '▶️', name: 'Code playground', desc: 'Run Python or JavaScript' }
+    ];
+  }
+
+  toggleToolMenu(kind, anchor, fromKeyboard = false) {
+    const menu = this.toolMenu;
+    if (!menu) return;
+    if (!menu.classList.contains('hidden') && menu.dataset.kind === kind) {
+      menu.classList.add('hidden');
+      return;
+    }
+    this.hideModelSwitcher();
+    this.lensPicker.classList.add('hidden');
+    menu.dataset.kind = kind;
+    document.getElementById('tool-menu-title').textContent = kind === 'agents' ? 'Agents' : 'Code';
+    document.getElementById('tool-menu-list').innerHTML = this.toolMenuItems(kind).map(t =>
+      `<button type="button" role="menuitem" class="lens-item${t.disabled ? ' is-disabled' : ''}" data-tool="${t.id}"${t.disabled ? ' disabled' : ''}>` +
+      `<span class="lens-emoji">${t.icon}</span><span class="lens-text"><span class="lens-name">${t.name}</span>` +
+      `<span class="lens-desc">${this.escapeHtml(t.desc)}</span></span></button>`).join('');
+    menu.classList.remove('hidden');
+    // Beside the button, kept on screen
+    const r = anchor.getBoundingClientRect();
+    menu.style.right = (window.innerWidth - r.left + 8) + 'px';
+    menu.style.top = Math.max(8, Math.min(r.top - 8, window.innerHeight - menu.offsetHeight - 8)) + 'px';
+    if (fromKeyboard) menu.querySelector('button:not([disabled])')?.focus();
+  }
+
+  // One place for every tool, whether opened from the sidebar or the chat
+  runTool(id) {
+    const tools = {
+      reader: () => this.toggleFilesPanel(true),
+      add_page: () => (this._addPageIsVideo ? this.addVideoToChat() : this.addPageToChat()),
+      add_file: () => this.quickAddActiveFile(),
+      explain_diff: () => this.explainActiveDiff(),
+      deep_dive: () => this.lensPicker.classList.remove('hidden'),
+      research_web: () => this.startResearchAgent(),
+      research_page: () => this.researchThisPage(),
+      videos: () => this.researchVideosOnTopic(),
+      local: () => this.openLocalFolder({ reuse: true }),
+      run: () => this.openRunPanel(),
+      carry_over: () => this.carryOverToNewChat()
+    };
+    tools[id]?.();
   }
 
   // First visit to a repo: slide the dock out briefly and explain the reader
@@ -1684,8 +2010,9 @@ Begin: state a one-line plan, then issue your first tool call.`;
       if ((await chrome.storage.local.get('readerTipShown')).readerTipShown) return;
       await chrome.storage.local.set({ readerTipShown: true });
     } catch (e) { return; }
-    this.filesRailGroup?.classList.add('peek');
-    this.showNotification('📚 Tip: "Read repo" on the left edge sends several files to the AI in one message');
+    const where = this._inChatBarShown ? '"📚 Repo" above the message box' : '"Read repo" on the left edge';
+    if (!this._inChatBarShown) this.filesRailGroup?.classList.add('peek');
+    this.showNotification(`📚 Tip: ${where} sends several files to the AI in one message`);
     setTimeout(() => this.filesRailGroup?.classList.remove('peek'), 5000);
   }
 
@@ -2004,7 +2331,6 @@ Begin: state a one-line plan, then issue your first tool call.`;
     ).join('\n\n---\n\n');
 
     const fname = 'videos-' + (topic.replace(/[^\w.-]+/g, '-').slice(0, 40) || 'topic') + '.md';
-    this.forwardAttachToIframe(fname, bundle);
 
     const planBlock = plan ? `\n\nMY PLAN / WHAT I CARE ABOUT:\n"""\n${plan}\n"""` : '';
     const prompt =
@@ -2015,8 +2341,10 @@ Begin: state a one-line plan, then issue your first tool call.`;
       planBlock +
       `\n\nGive me a concrete, de-duplicated shortlist tailored to my plan, with a one-line ` +
       `reason for each item and which video(s) it came from.`;
-    this.forwardToIframe({ prompt, autoSubmit: false });
-    this.showNotification(`✅ Added ${got.length} transcripts — review the prompt and send`);
+    this.askInThread({
+      title: 'Videos', sub: topic, label: `What ${got.length} videos say about “${topic}”`,
+      prompt, attachments: [{ filename: fname, content: bundle }]
+    });
   }
 
   // Feature: research this page — seed the web-research agent with the page.
@@ -2061,6 +2389,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
       staleTurns: 0
     };
     this.showAgentBar();
+    this.agent.task = question || `Research: ${page.title}`;
     this.logWorkActivity(`🔎 Researching page: ${page.title}`);
 
     const goal = question
@@ -2601,7 +2930,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
           `<span>(~${formatCount(estimateTokens(bytes))} tokens${this.selectedFiles.size ? ', your selection' : ', picked automatically'})</span>` +
           `<div class="rebuild-file-list">${core.map(p => `<code>${esc(p)}</code>`).join(' ')}</div></div>` +
           (this._planPending
-            ? `<div class="rebuild-wait"><span class="files-spinner"></span>The AI is writing your plan in the chat…</div>`
+            ? `<div class="rebuild-wait"><span class="files-spinner"></span>The AI is writing your plan…<div class="rebuild-live"></div></div>`
             : `<button type="button" class="files-send" data-rb="create"${core.length ? '' : ' disabled'}>Create my plan</button>`) +
           `<button type="button" class="files-link-btn rebuild-load" data-rb="load">Already have a plan in the chat? Load it</button>` +
         `</div>`;
@@ -2640,7 +2969,10 @@ Begin: state a one-line plan, then issue your first tool call.`;
           `<button type="button" class="files-chip-btn" data-rb="hint">💡 Hint</button>` +
           `<button type="button" class="files-chip-btn" data-rb="check">Check my code</button>` +
           (lang ? `<button type="button" class="files-chip-btn" data-rb="try">▶ Try it</button>` : '') +
+          `<span class="rebuild-run-status"></span>` +
         `</div>` +
+        `<pre class="run-output rebuild-out hidden" aria-label="Output of your code"></pre>` +
+        `<div class="rebuild-mentor"></div>` +
         `<div class="rebuild-nav">` +
           `<button type="button" class="files-link-btn" data-rb="prev"${i === 0 ? ' disabled' : ''}>← Previous</button>` +
           `<button type="button" class="files-send" data-rb="next">${done.includes(i) ? (i === n - 1 ? 'All done' : 'Next step →') : (i === n - 1 ? 'Mark done 🎉' : 'Mark done & next →')}</button>` +
@@ -2658,7 +2990,33 @@ Begin: state a one-line plan, then issue your first tool call.`;
     });
     ta?.addEventListener('keydown', (e) => {
       if (e.key === 'Tab') { e.preventDefault(); ta.setRangeText('    ', ta.selectionStart, ta.selectionEnd, 'end'); }
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && lang) { e.preventDefault(); this.rebuildBody.querySelector('[data-rb="try"]')?.click(); }
     });
+
+    // Earlier hints and reviews for this step
+    const mentor = this.rebuildBody.querySelector('.rebuild-mentor');
+    for (const note of (st.mentor?.[i] || [])) {
+      const card = this.answerCard(mentor, { title: note.title, onUseCode: (c) => this.setStepCode(c), collapsible: true });
+      card.done(note.text);
+      card.el.classList.add('collapsed');
+    }
+  }
+
+  // Put code into the current step's editor (e.g. "Use in editor" on an answer)
+  setStepCode(code) {
+    const ta = this.rebuildBody.querySelector('.rebuild-code');
+    if (!ta) return;
+    ta.value = code;
+    ta.dispatchEvent(new Event('input'));
+    ta.focus();
+  }
+
+  async addMentorNote(i, title, text) {
+    const st = this.rebuild;
+    if (!st?.plan) return;
+    const mentor = { ...(st.mentor || {}) };
+    mentor[i] = [...(mentor[i] || []), { title, text, ts: Date.now() }].slice(-6);
+    await this.saveRebuild({ ...st, mentor });
   }
 
   async onRebuildClick(e) {
@@ -2689,23 +3047,37 @@ Begin: state a one-line plan, then issue your first tool call.`;
     } else if (act === 'study') {
       this.rebuildPanel.classList.add('hidden');
       this.sendRepoFiles([el.dataset.path], 'explain');
-    } else if (act === 'hint') {
-      this.forwardToIframe({ prompt: hintPrompt(st.plan, i), autoSubmit: false });
-      this.rebuildPanel.classList.add('hidden');
-      this.showNotification('💡 Hint request added to the chat input');
-    } else if (act === 'check') {
-      if (!code.trim()) { this.showNotification('Write your code for this step first'); return; }
-      const study = (st.plan.steps[i].study || []).filter(p => this.repoTree.fileSet.has(p));
-      const files = study.length ? (await this.fetchRepoFilesMany(study)).filter(f => !f.error) : [];
-      if (files.length) {
-        this.attachThenPrompt(`step-${i + 1}-original.md`, this.packFor(files), checkPrompt(st.plan, i, code, true));
-      } else {
-        this.forwardToIframe({ prompt: checkPrompt(st.plan, i, code, false), autoSubmit: false });
+    } else if (act === 'hint' || act === 'check') {
+      // Answered right here in the step; the chat keeps the conversation
+      if (act === 'check' && !code.trim()) { this.showNotification('Write your code for this step first'); return; }
+      const mentor = this.rebuildBody.querySelector('.rebuild-mentor');
+      let prompt = hintPrompt(st.plan, i);
+      let attachments = [];
+      if (act === 'check') {
+        const study = (st.plan.steps[i].study || []).filter(p => this.repoTree.fileSet.has(p));
+        const files = study.length ? (await this.fetchRepoFilesMany(study)).filter(f => !f.error) : [];
+        if (files.length) attachments = [{ filename: `step-${i + 1}-original.md`, content: this.packFor(files) }];
+        prompt = checkPrompt(st.plan, i, code, attachments.length > 0);
       }
-      this.rebuildPanel.classList.add('hidden');
-      this.showNotification('🧑‍🏫 Your code is in the chat input, press send for a review');
+      const title = act === 'hint' ? '💡 Hint' : '🧑‍🏫 Review';
+      el.disabled = true;
+      await this.showAnswerIn(mentor, title, prompt, {
+        attachments,
+        onUseCode: (c) => this.setStepCode(c),
+        onDone: (text) => this.addMentorNote(i, title, text)
+      });
+      el.disabled = false;
     } else if (act === 'try') {
-      this.openRunPanel({ lang: this.rebuildLang(st.plan), code, autoRun: !!code.trim() });
+      // Run inline under the code, so hints and output stay in view together
+      if (!code.trim()) { this.showNotification('Write some code first'); return; }
+      const out = this.rebuildBody.querySelector('.rebuild-out');
+      out.classList.remove('hidden');
+      el.disabled = true;
+      await this.runSnippet({
+        lang: this.rebuildLang(st.plan), code, outEl: out,
+        statusEl: this.rebuildBody.querySelector('.rebuild-run-status')
+      });
+      el.disabled = false;
     }
   }
 
@@ -2722,11 +3094,17 @@ Begin: state a one-line plan, then issue your first tool call.`;
     try {
       const files = (await this.fetchRepoFilesMany(paths)).filter(f => !f.error);
       if (!files.length) throw new Error('could not read the project files');
-      this.forwardAttachToIframe(`${this.repoTree.repo}-core-files.md`.replace(/[^\w.-]+/g, '-'), this.packFor(files), 'text/markdown');
-      this.rebuildPanel.classList.add('hidden');
-      this.showNotification('🛠 Sent the core files, the AI is writing your plan…');
-      await new Promise(r => setTimeout(r, 2500)); // let the attachment upload
-      const reply = await this.askAndCapture(planPrompt(this.repoDisplayName()));
+      const attachments = [{ filename: `${this.repoTree.repo}-core-files.md`.replace(/[^\w.-]+/g, '-'), content: this.packFor(files) }];
+      // Show the step titles as the AI writes them
+      const onProgress = (text) => {
+        const box = this.rebuildBody.querySelector('.rebuild-live');
+        if (!box) return;
+        const titles = [...text.matchAll(/"(?:title|name)"\s*:\s*"((?:[^"\\]|\\.)+)"/g)].map(m => m[1]);
+        box.innerHTML = titles.length
+          ? `<ol>${titles.map(t => `<li>${this.escapeHtml(t)}</li>`).join('')}</ol>`
+          : '<span class="rebuild-live-hint">Reading the code…</span>';
+      };
+      const reply = await this.askInPanel(planPrompt(this.repoDisplayName()), { attachments, onProgress });
       await this.adoptPlan(reply);
     } catch (e) {
       this.showNotification('⚠️ ' + e.message + '. When the plan is in the chat, use "Load it".');
@@ -3046,22 +3424,19 @@ Begin: state a one-line plan, then issue your first tool call.`;
       const act = e.target.closest('[data-act]')?.dataset.act;
       if (act === 'summarize') {
         const lines = commits.map(c => `- ${c.sha.slice(0, 7)} ${c.date ? c.date.slice(0, 10) : ''} ${c.author}: ${c.title}`).join('\n');
-        this.forwardToIframe({
+        this._readingContext = { label: `${owner}/${repo}`, ts: Date.now() };
+        this.askInThread({
+          title: 'Recent changes', sub: `${owner}/${repo}`, label: `What changed lately (${commits.length} commits)`,
           prompt: `Here are the latest ${commits.length} commits on ${this.refLabel(ref)} of ${owner}/${repo}:\n\n${lines}\n\n` +
             'Explain what the project has been working on lately: group related commits into themes, say what each theme ' +
-            'means for the code or users, and point out any commit worth reading closely to learn from (and why).',
-          autoSubmit: false
+            'means for the code or users, and point out any commit worth reading closely to learn from (and why).'
         });
-        this._readingContext = { label: `${owner}/${repo}`, ts: Date.now() };
-        this.filesPanel.classList.add('hidden');
-        this.showNotification(`🕘 Sent ${commits.length} recent commits`);
         return;
       }
       const row = e.target.closest('.files-commit');
       if (row && (act === 'explain' || !e.target.closest('button'))) {
         this.explainDiff({ owner, repo, kind: 'commit', sha: row.dataset.sha,
           title: commits.find(c => c.sha === row.dataset.sha)?.title || '' });
-        this.filesPanel.classList.add('hidden');
       }
     };
   }
@@ -3218,11 +3593,20 @@ Begin: state a one-line plan, then issue your first tool call.`;
       let question = readingPrompt(mode, { what, repo: repoName });
       const totalChars = files.reduce((n, f) => n + f.content.length, 0);
 
+      const modeLabel = READ_MODES.find(m => m.id === mode)?.label || 'Explain';
+      const names = files.map(f => f.path.split('/').pop());
+      const label = `${modeLabel}: ${names.length > 3 ? names.slice(0, 3).join(', ') + ` +${names.length - 3}` : names.join(', ')}`;
+      let answered = false;
       if (single && single.content.length <= 4000) {
         // Small single file: inline, so the code is visible in the chat
         const block = `\`${single.path}\`${single.lines ? ` (lines ${single.lines.start}-${single.lines.end})` : ''} from ${repoName}:\n\n` +
           fencedFile(single);
-        this.forwardToIframe({ prompt: question ? `${block}\n\n${question}` : block, autoSubmit: false });
+        if (question) {
+          this.askInThread({ title: modeLabel, sub: repoName, label, prompt: `${block}\n\n${question}` });
+          answered = true;
+        } else {
+          this.forwardToIframe({ prompt: block, autoSubmit: false });
+        }
       } else {
         // Several (or big) files: ONE attachment with a repo map, then the question
         const fname = single
@@ -3232,13 +3616,21 @@ Begin: state a one-line plan, then issue your first tool call.`;
           question = `The attached "${fname}" contains ${single ? what : `${files.length} files from ${repoName}`}` +
             `${single ? '' : ` (${files.map(f => f.path).join(', ')})`}, starting with a map of the repository.\n\n${question}`;
         }
-        this.attachThenPrompt(fname, this.packFor(files), question);
+        if (question) {
+          this.askInThread({ title: modeLabel, sub: repoName, label, prompt: question,
+            attachments: [{ filename: fname, content: this.packFor(files) }] });
+          answered = true;
+        } else {
+          this.attachThenPrompt(fname, this.packFor(files), question);
+        }
       }
 
       await this.markRead(files.map(f => f.path));
       this._readingContext = { label: repoName, ts: Date.now() };
       this.selectedFiles.clear();
-      this.filesPanel.classList.add('hidden'); // show the chat so you can read / ask
+      // "Just add" leaves the files in the chat for your own question;
+      // everything else is answered in Yavar's answer sheet
+      if (!answered) this.filesPanel.classList.add('hidden');
       const size = `~${formatCount(estimateTokens(totalChars))} tokens`;
       this.showNotification(failed.length
         ? `⚠️ Sent ${files.length}, skipped ${failed.length} (${failed[0].error})`
@@ -3296,7 +3688,13 @@ Begin: state a one-line plan, then issue your first tool call.`;
         `2. File by file: what changed and why it was needed.\n` +
         `3. Techniques or patterns worth learning from it.\n` +
         `4. Anything risky, missing (tests, edge cases), or that you would do differently.`;
-      this.attachThenPrompt(fname, body, prompt, { mime: 'text/plain' });
+      this.askInThread({
+        title: gh.kind === 'pull' ? `PR #${gh.number}` : `Commit ${gh.sha.slice(0, 7)}`,
+        sub: `${gh.owner}/${gh.repo}${pageTitle ? ' · ' + pageTitle : ''}`,
+        label: `Explain this ${gh.kind === 'pull' ? 'pull request' : 'commit'}`,
+        prompt,
+        attachments: [{ filename: fname, content: body, mime: 'text/plain' }]
+      });
       this.showNotification(`🔀 Sent the ${label} diff (${files} file${files === 1 ? '' : 's'}, ~${formatCount(estimateTokens(body.length))} tokens)`);
     } catch (e) {
       this.showNotification('⚠️ Could not get the diff: ' + e.message);
@@ -3480,7 +3878,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
         this.showNotification('⚠️ ' + msg);
       }
 
-      if (/^YAVAR_(TO_NOTES|COPY|TEMPLATE|OPEN)$/.test(data.action || '')) {
+      if (/^(YAVAR_(TO_NOTES|COPY|TEMPLATE|OPEN)|INCHAT_BAR)$/.test(data.action || '')) {
         this.handleInChatAction(data);
         return;
       }
@@ -3739,9 +4137,9 @@ Begin: state a one-line plan, then issue your first tool call.`;
 
   initCodeMirror() {
     this.cmEditor = CodeMirror(this.notesEditorContainer, {
-      mode: 'javascript',
-      theme: 'material-darker',
-      lineNumbers: true,
+      mode: null,
+      theme: 'yavar',
+      lineNumbers: false,
       lineWrapping: true,
       tabSize: 2,
       indentWithTabs: false,
@@ -3851,7 +4249,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
     if (this.runEditor) return;
     this.runEditor = CodeMirror(document.getElementById('run-editor'), {
       mode: 'python',
-      theme: 'material-darker',
+      theme: 'yavar',
       lineNumbers: true,
       lineWrapping: false,
       tabSize: 4,
@@ -3902,6 +4300,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
     this.runOutput.classList.remove('has-error');
     this.runFollowups.classList.add('hidden');
     this.runStatus.textContent = autoRun ? '' : 'Ctrl+Enter to run';
+    document.getElementById('run-answers').innerHTML = '';
     if (autoRun) this.runCode();
   }
 
@@ -3929,65 +4328,79 @@ Begin: state a one-line plan, then issue your first tool call.`;
     return this._runnerReady;
   }
 
+  // Run a snippet in the sandbox, streaming output into outEl (batched per
+  // animation frame). Used by the Run panel and inline by Rebuild steps.
+  // Resolves with { ok, output, error, ms }.
+  async runSnippet({ lang, code, outEl, statusEl = null }) {
+    await this.ensureRunner();
+    const id = 'run_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+    outEl.textContent = '';
+    outEl.classList.remove('has-error');
+    if (statusEl) statusEl.textContent = 'Running…';
+    this._runSinks = this._runSinks || new Map();
+    return new Promise((resolve) => {
+      let output = '';
+      let frag = null;
+      const flush = () => {
+        if (!frag) return;
+        outEl.appendChild(frag);
+        frag = null;
+        outEl.scrollTop = outEl.scrollHeight;
+      };
+      this._runSinks.set(id, (m) => {
+        if (m.type === 'status') {
+          if (statusEl) statusEl.textContent = m.text || 'Running…';
+        } else if (m.type === 'output') {
+          const span = document.createElement('span');
+          if (m.stream === 'stderr') span.className = 'run-err';
+          span.textContent = m.text;
+          if (!frag) { frag = document.createDocumentFragment(); requestAnimationFrame(flush); }
+          frag.appendChild(span);
+          output += m.text;
+        } else if (m.type === 'done') {
+          flush();
+          this._runSinks.delete(id);
+          outEl.classList.toggle('has-error', !m.ok);
+          if (!outEl.textContent) outEl.textContent = m.ok ? '(no output)' : (m.error || 'Error');
+          if (statusEl) {
+            statusEl.textContent = m.ok
+              ? `Done in ${m.ms < 1000 ? m.ms + ' ms' : (m.ms / 1000).toFixed(1) + ' s'}`
+              : '⚠️ ' + (m.error === 'timeout' ? 'Stopped' : 'Error');
+          }
+          resolve({ ok: m.ok, output, error: m.error, ms: m.ms });
+        }
+      });
+      this._lastRunId = id;
+      this.runnerFrame.contentWindow.postMessage({ type: 'run', id, lang, code, timeoutMs: 10000 }, '*');
+    });
+  }
+
   async runCode() {
-    if (!this.runEditor || this._runId) return;
+    if (!this.runEditor || this._runBusy) return;
     const code = this.runEditor.getValue();
     if (!code.trim()) return;
-    const id = 'run_' + Date.now();
-    this._runId = id;
-    this._runResult = { code, lang: this.runLang, output: '' };
-    this._runPending = null;
-    this.runOutput.textContent = '';
-    this.runOutput.classList.remove('has-error');
+    this._runBusy = true;
     this.runFollowups.classList.add('hidden');
-    this.runStatus.textContent = 'Running…';
     this.runGo.disabled = true;
     this.runStop.classList.remove('hidden');
-    await this.ensureRunner();
-    this.runnerFrame.contentWindow.postMessage({ type: 'run', id, lang: this.runLang, code, timeoutMs: 10000 }, '*');
+    const lang = this.runLang;
+    const r = await this.runSnippet({ lang, code, outEl: this.runOutput, statusEl: this.runStatus });
+    this._runBusy = false;
+    this._runResult = { code, lang, output: r.output, ok: r.ok };
+    this.runGo.disabled = false;
+    this.runStop.classList.add('hidden');
+    this.runFollowups.classList.remove('hidden');
+    const fix = this.runFollowups.querySelector('[data-ask="fix"]');
+    fix.classList.toggle('hidden', r.ok);
+    fix.classList.toggle('primary', !r.ok);
   }
 
   stopCode() {
-    if (this._runId) this.runnerFrame?.contentWindow?.postMessage({ type: 'stop', id: this._runId }, '*');
+    if (this._lastRunId) this.runnerFrame?.contentWindow?.postMessage({ type: 'stop', id: this._lastRunId }, '*');
   }
 
   onRunnerMessage(m) {
-    if (!m.id || m.id !== this._runId) return;
-    if (m.type === 'status') {
-      this.runStatus.textContent = m.text || 'Running…';
-    } else if (m.type === 'output') {
-      const span = document.createElement('span');
-      if (m.stream === 'stderr') span.className = 'run-err';
-      span.textContent = m.text;
-      // Batch DOM appends: a print loop can send thousands of lines
-      this._runPending = this._runPending || document.createDocumentFragment();
-      this._runPending.appendChild(span);
-      if (!this._runFlushQueued) {
-        this._runFlushQueued = true;
-        requestAnimationFrame(() => this.flushRunOutput());
-      }
-      this._runResult.output += m.text;
-    } else if (m.type === 'done') {
-      this.flushRunOutput();
-      this._runId = null;
-      this.runGo.disabled = false;
-      this.runStop.classList.add('hidden');
-      this.runOutput.classList.toggle('has-error', !m.ok);
-      if (!this.runOutput.textContent) this.runOutput.textContent = m.ok ? '(no output)' : (m.error || 'Error');
-      this.runStatus.textContent = m.ok ? `Done in ${m.ms < 1000 ? m.ms + ' ms' : (m.ms / 1000).toFixed(1) + ' s'}` : '⚠️ ' + (m.error === 'timeout' ? 'Stopped' : 'Error');
-      this.runFollowups.classList.remove('hidden');
-      const fix = this.runFollowups.querySelector('[data-ask="fix"]');
-      fix.classList.toggle('hidden', m.ok);
-      fix.classList.toggle('primary', !m.ok);
-    }
-  }
-
-  flushRunOutput() {
-    this._runFlushQueued = false;
-    if (!this._runPending) return;
-    this.runOutput.appendChild(this._runPending);
-    this._runPending = null;
-    this.runOutput.scrollTop = this.runOutput.scrollHeight;
+    this._runSinks?.get(m.id)?.(m);
   }
 
   askAboutRun(kind) {
@@ -4002,9 +4415,118 @@ Begin: state a one-line plan, then issue your first tool call.`;
       explain: `I ran this ${name} code:\n\n${block}\n\nWalk me through why it produces exactly this output, step by step.`,
       next: `I ran this ${name} code:\n\n${block}\n\nSuggest 3 small changes I could try next to learn more from it (from easy to harder), and what I should expect to see for each.`
     };
-    this.forwardToIframe({ prompt: asks[kind], autoSubmit: false });
-    this.closeRunPanel();
-    this.showNotification('💬 Added to the chat input');
+    const titles = { fix: 'Fix', explain: 'Why this output', next: 'Try next' };
+    this.showAnswerIn(document.getElementById('run-answers'), titles[kind], asks[kind], {
+      onUseCode: (code) => { this.runEditor.setValue(code); this.runEditor.focus(); }
+    });
+  }
+
+  // Ask in the background and stream the answer into a card in `container`
+  async showAnswerIn(container, title, prompt, { attachments = [], onUseCode = null, onDone = null, saveAs = null, collapsible = true } = {}) {
+    const card = this.answerCard(container, { title, onUseCode, collapsible, saveAs });
+    card.el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    try {
+      // Bring the answer's top into view once it starts arriving
+      let shown = false;
+      const text = await this.askInPanel(prompt, {
+        attachments,
+        onProgress: (t) => {
+          card.update(t);
+          if (!shown) { shown = true; card.el.scrollIntoView({ block: 'start', behavior: 'smooth' }); }
+        }
+      });
+      card.done(text);
+      onDone?.(text);
+      return text;
+    } catch (e) {
+      card.fail(e.message);
+      return null;
+    }
+  }
+
+  // ========== Answer sheet ==========
+  // Yavar's own requests (reader, PRs, commits, agents, videos) are answered
+  // here. The conversation still happens in the chat (private by default),
+  // so follow-ups keep their context and "Open chat" shows the real thing.
+
+  setupThread() {
+    this.threadPanel = document.getElementById('thread-panel');
+    this.threadBody = document.getElementById('thread-body');
+    this.threadInput = document.getElementById('thread-input');
+    if (!this.threadPanel) return;
+    const close = () => this.threadPanel.classList.add('hidden');
+    document.getElementById('thread-close')?.addEventListener('click', close);
+    document.getElementById('thread-open-chat')?.addEventListener('click', () => this.closeSheets());
+    this.threadPanel.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+    document.getElementById('thread-form')?.addEventListener('submit', (e) => {
+      e.preventDefault();
+      this.threadFollowUp();
+    });
+    this.threadInput?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+        e.preventDefault();
+        this.threadFollowUp();
+      }
+    });
+    this.threadInput?.addEventListener('input', () => {
+      this.threadInput.style.height = 'auto';
+      this.threadInput.style.height = Math.min(this.threadInput.scrollHeight, 120) + 'px';
+    });
+  }
+
+  openThread({ title, sub = '', fresh = true }) {
+    if (fresh) {
+      this.threadBody.innerHTML = '';
+      document.getElementById('thread-title').textContent = title;
+      document.getElementById('thread-sub').textContent = sub;
+    }
+    document.getElementById('thread-private')?.classList.toggle('hidden', !this._chatIsTemp);
+    this.threadPanel.classList.remove('hidden');
+  }
+
+  addThreadQuestion(label) {
+    const q = document.createElement('div');
+    q.className = 'thread-q';
+    q.textContent = label;
+    this.threadBody.appendChild(q);
+  }
+
+  // Ask the chat and stream the answer into the sheet
+  async askInThread({ title, sub = '', label, prompt, attachments = [], fresh = true }) {
+    if (!this.threadPanel) return null;
+    // A new topic replaces a question that is still waiting for its answer
+    if (fresh && this._panelAsk && !this.agent?.active) {
+      this.postToChat({ action: 'STOP_WATCH' });
+      this.cancelChatRequests('replaced by a new question');
+      await new Promise(r => setTimeout(r, 0));   // let the old request unwind
+    }
+    this.openThread({ title, sub, fresh });
+    this.addThreadQuestion(label);
+    this.threadPanel.classList.add('is-busy');
+    try {
+      return await this.showAnswerIn(this.threadBody, 'Answer', prompt, {
+        attachments, collapsible: false, saveAs: { prompt: label }
+      });
+    } finally {
+      this.threadPanel.classList.remove('is-busy');
+      document.getElementById('thread-private')?.classList.toggle('hidden', !this._chatIsTemp);
+    }
+  }
+
+  // An answer we already have (an agent's final report)
+  showInThread({ title, sub = '', label, text }) {
+    if (!this.threadPanel || !text) return;
+    this.openThread({ title, sub });
+    this.addThreadQuestion(label);
+    this.answerCard(this.threadBody, { title: 'Answer', saveAs: { prompt: label } }).done(text);
+  }
+
+  threadFollowUp() {
+    const text = this.threadInput.value.trim();
+    if (!text || this.threadPanel.classList.contains('is-busy')) return;
+    this.threadInput.value = '';
+    this.threadInput.style.height = '';
+    this.askInThread({ label: text, prompt: text, fresh: false });
   }
 
   // ========== Input Dialog ==========
@@ -4110,10 +4632,10 @@ Begin: state a one-line plan, then issue your first tool call.`;
     } else if (data.action === 'YAVAR_TEMPLATE') {
       this.applyTemplateFromChat(data.id, data.inputText);
     } else if (data.action === 'YAVAR_OPEN') {
-      if (data.what === 'reader') this.toggleFilesPanel(true);
-      else if (data.what === 'add_page') this._addPageIsVideo ? this.addVideoToChat() : this.addPageToChat();
-      else if (data.what === 'run') this.openRunPanel();
-      else if (data.what === 'carry_over') this.carryOverToNewChat();
+      this.runTool(String(data.what || ''));
+    } else if (data.action === 'INCHAT_BAR') {
+      this._inChatBarShown = !!data.visible;
+      this.applyDockVisibility();
     }
   }
 

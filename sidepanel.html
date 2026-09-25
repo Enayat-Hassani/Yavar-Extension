@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Yavar</title>
   <link rel="stylesheet" href="lib/codemirror/codemirror.min.css">
-  <link rel="stylesheet" href="lib/codemirror/material-darker.min.css">
   <link rel="stylesheet" href="styles/sidepanel.css">
 </head>
 <body>
@@ -40,27 +39,32 @@
       <button id="btn-stop-agent" class="agent-stop-btn">Stop</button>
     </div>
 
-    <!-- "Working" cover over the chat (agents running) -->
-    <div id="work-cover" class="work-cover hidden">
-      <div class="work-cover-inner">
-        <div class="work-orb"></div>
-        <div id="work-cover-title" class="work-cover-title">Yavar is working…</div>
-        <div id="work-cover-status" class="work-cover-status">Starting…</div>
-        <div id="work-cover-log" class="work-cover-log"></div>
-        <div class="work-cover-actions">
-          <button id="btn-work-peek" class="btn-secondary">Show live chat ↓</button>
+    <!-- Agent status sheet: the chat above shows the agent working live -->
+    <div id="work-cover" class="work-cover sheet hidden" role="status" aria-live="polite">
+      <div class="history-header work-head">
+        <div class="work-heading">
+          <span class="agent-spinner" aria-hidden="true"></span>
+          <div class="work-heading-text">
+            <div id="work-cover-title" class="history-title">Yavar is working…</div>
+            <div id="work-cover-status" class="work-cover-status">Starting…</div>
+          </div>
+        </div>
+        <div class="history-header-actions">
+          <button id="btn-work-peek" class="history-action-btn" title="Minimize (the agent keeps running)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 9l6 6 6-6"></path></svg>
+          </button>
           <button id="btn-work-stop" class="agent-stop-btn">Stop</button>
         </div>
-        <p class="work-cover-hint">Yavar is working with the AI in the background. Peek anytime — it keeps running.</p>
-
       </div>
+      <div id="work-cover-log" class="work-cover-log"></div>
+      <p class="work-cover-hint">The AI is working in the chat above. Minimize this to watch it; the agent keeps running.</p>
     </div>
 
     <!-- Minimized "working" pill (shown when the cover is peeked away) -->
     <div id="work-pill" class="work-pill hidden">
       <span class="work-dot"></span>
       <span id="work-pill-status" class="work-pill-status">Working…</span>
-      <button id="btn-work-expand" class="work-pill-btn">Status ↑</button>
+      <button id="btn-work-expand" class="work-pill-btn">Show</button>
       <button id="btn-work-stop-pill" class="work-pill-btn work-pill-stop">Stop</button>
     </div>
 
@@ -80,17 +84,17 @@
     </main>
 
     <!-- Notes Panel -->
-    <div id="notes-panel" class="notes-panel hidden">
-      <div class="notes-header">
-        <span class="notes-title">Notes</span>
-        <div class="notes-actions">
-          <button id="btn-clear-notes" class="notes-action-btn" title="Clear notes">
+    <div id="notes-panel" class="notes-panel sheet hidden">
+      <div class="history-header">
+        <span class="history-title">Notes</span>
+        <div class="history-header-actions">
+          <button id="btn-clear-notes" class="history-action-btn" title="Clear notes">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
           </button>
-          <button id="btn-download-notes" class="notes-action-btn" title="Download notes (.md)">
+          <button id="btn-download-notes" class="history-action-btn" title="Download notes (.md)">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
           </button>
-          <button id="btn-copy-notes" class="notes-action-btn" title="Copy notes">
+          <button id="btn-copy-notes" class="history-action-btn" title="Copy notes">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
           </button>
         </div>
@@ -99,10 +103,13 @@
     </div>
 
     <!-- History Panel (captured AI answers) -->
-    <div id="history-panel" class="history-panel hidden">
+    <div id="history-panel" class="history-panel sheet hidden">
       <div class="history-header">
         <span class="history-title">Saved Answers</span>
         <div class="history-header-actions">
+          <button id="btn-save-current" class="history-action-btn" title="Save the chat's latest answer (Ctrl+Shift+S)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>
+          </button>
           <button id="btn-export-history" class="history-action-btn" title="Export saved answers (.md)">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
           </button>
@@ -133,35 +140,12 @@
         <span class="files-tab-label">Add page</span>
       </button>
 
-      <!-- Research this page: seed the web-research agent with the current page (any page) -->
-      <button id="dock-research-page" class="dock-tab hidden" title="Research this page — dig deeper with the AI">
-        <span class="dock-ico" aria-hidden="true">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="11" cy="11" r="7"></circle>
-            <path d="M21 21l-4.3-4.3"></path>
-          </svg>
-        </span>
-        <span class="files-tab-label">Research</span>
-      </button>
-
-      <!-- Deep search: research a topic across the top YouTube videos (via ytx) -->
-      <button id="dock-video-research" class="dock-tab hidden" title="Deep search: pull the top YouTube videos on a topic and synthesize their transcripts">
-        <span class="dock-ico" aria-hidden="true">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="10" cy="10" r="6"></circle>
-            <path d="M21 21l-4.3-4.3"></path>
-            <path d="M8.5 10l1.3 1.3 2.2-2.6" stroke-width="1.4"></path>
-          </svg>
-        </span>
-        <span class="files-tab-label">Search videos</span>
-      </button>
-
       <!-- One-click "add the file open in the GitHub tab" (only when viewing a file) -->
       <button id="files-quick-add" class="files-quick-add dock-tab hidden" title="Add the file open in your GitHub tab">
         <span class="files-stack" aria-hidden="true">
-          <span class="sheet sheet-1"></span>
-          <span class="sheet sheet-2"></span>
-          <span class="sheet sheet-3"></span>
+          <span class="stack-page stack-page-1"></span>
+          <span class="stack-page stack-page-2"></span>
+          <span class="stack-page stack-page-3"></span>
         </span>
         <span class="files-quick-plus" aria-hidden="true">
           <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round">
@@ -185,16 +169,16 @@
       <!-- Browse the repo file tree -->
       <button id="files-rail" class="files-rail dock-tab hidden" title="Repo Reader: pick files to read with the AI">
         <span class="files-stack" aria-hidden="true">
-          <span class="sheet sheet-1"></span>
-          <span class="sheet sheet-2"></span>
-          <span class="sheet sheet-3"></span>
+          <span class="stack-page stack-page-1"></span>
+          <span class="stack-page stack-page-2"></span>
+          <span class="stack-page stack-page-3"></span>
         </span>
         <span class="files-tab-label">Read repo</span>
       </button>
     </div>
 
     <!-- Repo Reader: browse, pick several files, send them as one pack -->
-    <div id="files-panel" class="files-panel hidden" aria-label="Repo Reader">
+    <div id="files-panel" class="files-panel sheet hidden" aria-label="Repo Reader">
       <div class="files-header">
         <div class="files-heading">
           <span class="files-title">Repo Reader</span>
@@ -259,6 +243,12 @@
       </div>
     </div>
 
+    <!-- Sidebar / in-chat tool menu (Agents, Code) -->
+    <div id="tool-menu" class="lens-picker tool-menu hidden" role="menu">
+      <div class="lens-picker-header" id="tool-menu-title"></div>
+      <div class="lens-list" id="tool-menu-list"></div>
+    </div>
+
     <!-- Model Switcher Popover -->
     <div id="model-switcher" class="model-switcher hidden">
       <div class="model-switcher-header">
@@ -268,6 +258,7 @@
         <!-- Models populated dynamically -->
       </div>
       <div class="model-switcher-footer">
+        <button id="btn-carry-over" class="btn-text" title="The AI summarizes this chat, then Yavar opens a new one with the summary">🧳 Continue in a fresh chat</button>
         <button id="btn-manage-models" class="btn-text">Manage Models →</button>
       </div>
     </div>
@@ -360,6 +351,19 @@
               <span class="toggle-slider"></span>
             </label>
           </div>
+
+          <div class="toggle-setting">
+            <label class="toggle-label" for="setting-temp-chats-toggle">
+              <span class="toggle-text">
+                <strong>Private chats for Yavar's work</strong>
+                <span>Explanations, hints, reviews and agents run in a temporary chat (ChatGPT, Claude, Gemini), so they don't fill your chat history. Save any answer you want to keep.</span>
+              </span>
+            </label>
+            <label class="toggle-switch">
+              <input type="checkbox" id="setting-temp-chats-toggle" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
         </div>
 
         <div class="settings-section">
@@ -423,7 +427,7 @@
     </div>
 
     <!-- Code runner: run JS/Python from answers (or your own) in a sandbox -->
-    <div id="run-panel" class="run-panel hidden" role="dialog" aria-label="Code runner">
+    <div id="run-panel" class="run-panel sheet hidden" role="dialog" aria-label="Code runner">
       <div class="run-header">
         <div class="run-title">
           <span>Run code</span>
@@ -440,16 +444,20 @@
         <button id="run-stop" type="button" class="run-stop hidden">■ Stop</button>
         <span id="run-status" class="run-status" aria-live="polite"></span>
       </div>
-      <pre id="run-output" class="run-output" aria-label="Output"></pre>
-      <div id="run-followups" class="run-followups hidden">
-        <button type="button" class="files-chip-btn" data-ask="fix">Ask AI to fix it</button>
-        <button type="button" class="files-chip-btn" data-ask="explain">Explain the output</button>
-        <button type="button" class="files-chip-btn" data-ask="next">What should I try next?</button>
+      <div class="run-scroll">
+        <pre id="run-output" class="run-output" aria-label="Output"></pre>
+        <div id="run-followups" class="run-followups hidden">
+          <button type="button" class="files-chip-btn" data-ask="fix">Ask AI to fix it</button>
+          <button type="button" class="files-chip-btn" data-ask="explain">Explain the output</button>
+          <button type="button" class="files-chip-btn" data-ask="next">What should I try next?</button>
+        </div>
+        <!-- Answers to the buttons above appear here, streamed from the chat -->
+        <div id="run-answers" class="run-answers"></div>
       </div>
     </div>
 
     <!-- Rebuild it yourself: a step-by-step plan to rebuild the project -->
-    <div id="rebuild-panel" class="run-panel rebuild-panel hidden" role="dialog" aria-label="Rebuild it yourself">
+    <div id="rebuild-panel" class="run-panel rebuild-panel sheet hidden" role="dialog" aria-label="Rebuild it yourself">
       <div class="run-header">
         <div class="files-heading">
           <span class="files-title">Rebuild it yourself</span>
@@ -477,6 +485,31 @@
       </form>
     </dialog>
 
+    <!-- Answers for Yavar's own requests (reader, PRs, agents, videos):
+         the conversation runs in the chat, the reading happens here -->
+    <div id="thread-panel" class="history-panel thread-panel sheet hidden" role="dialog" aria-label="Answer">
+      <div class="history-header">
+        <div class="thread-heading">
+          <span id="thread-title" class="history-title">Answer</span>
+          <span id="thread-sub" class="thread-sub"></span>
+        </div>
+        <div class="history-header-actions">
+          <span id="thread-private" class="thread-private hidden" title="A temporary chat: it won't appear in your chat history">Private</span>
+          <button id="thread-open-chat" class="history-action-btn" title="Show the chat">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"></path></svg>
+          </button>
+          <button id="thread-close" class="history-action-btn" title="Close (Esc)">✕</button>
+        </div>
+      </div>
+      <div id="thread-body" class="thread-body" aria-live="polite"></div>
+      <form id="thread-form" class="thread-form">
+        <textarea id="thread-input" rows="1" placeholder="Ask a follow-up…" aria-label="Ask a follow-up"></textarea>
+        <button type="submit" id="thread-send" class="thread-send" title="Send (Enter)" aria-label="Send">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"></path></svg>
+        </button>
+      </form>
+    </div>
+
     <!-- Right Sidebar - Auto-hiding vertical icon bar -->
     <aside id="right-sidebar" class="right-sidebar">
       <div class="sidebar-panel">
@@ -498,37 +531,24 @@
             </svg>
           </button>
 
-          <!-- Continue in a fresh chat with a handoff summary -->
-          <button class="sidebar-icon-btn" id="sidebar-btn-carry-over" title="Continue in a fresh chat (AI summarizes this one first)">
+          <div class="sidebar-divider"></div>
+
+          <!-- Agents: repo deep-dive, web / page / video research -->
+          <button class="sidebar-icon-btn" id="sidebar-btn-agents" title="Agents: deep-dive a repo, research the web" aria-haspopup="menu">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M4 12a8 8 0 0 1 14-5.3L20 9"></path>
-              <path d="M20 4v5h-5"></path>
-              <path d="M9 13h6M9 17h4"></path>
-            </svg>
-          </button>
-
-          <div class="sidebar-divider"></div>
-
-          <!-- GitHub Deep-Dive Agent -->
-          <button class="sidebar-icon-btn" id="sidebar-btn-repo-agent" title="GitHub Deep-Dive Agent">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-              <rect x="3" y="8" width="18" height="12" rx="2"></rect>
-              <circle cx="9" cy="14" r="1.3"></circle>
-              <circle cx="15" cy="14" r="1.3"></circle>
-              <path d="M12 4v4"></path>
-              <circle cx="12" cy="3" r="1.2"></circle>
-            </svg>
-          </button>
-
-          <!-- Web Research Agent -->
-          <button class="sidebar-icon-btn" id="sidebar-btn-research" title="Web Research Agent (SEARCH + READ)">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
               <circle cx="11" cy="11" r="7"></circle>
-              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+              <path d="M21 21l-4.3-4.3"></path>
+              <path d="M11 8v6M8 11h6"></path>
             </svg>
           </button>
 
-          <div class="sidebar-divider"></div>
+          <!-- Code: repo reader, local folder, playground -->
+          <button class="sidebar-icon-btn" id="sidebar-btn-code" title="Code: read a repo or folder, run code" aria-haspopup="menu">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="8 7 3 12 8 17"></polyline><polyline points="16 7 21 12 16 17"></polyline><path d="M11 16l2-8"></path>
+            </svg>
+          </button>
+
 
           <!-- Screenshot -->
           <button class="sidebar-icon-btn" id="sidebar-btn-screenshot" title="Capture Screenshot">
@@ -538,14 +558,7 @@
             </svg>
           </button>
 
-          <!-- Save AI Answer -->
-          <button class="sidebar-icon-btn" id="sidebar-btn-save-answer" title="Save AI answer (Ctrl+Shift+S)">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-              <polyline points="7 10 12 15 17 10"></polyline>
-              <line x1="12" y1="15" x2="12" y2="3"></line>
-            </svg>
-          </button>
+          <div class="sidebar-divider"></div>
 
           <!-- Saved Answers / History -->
           <button class="sidebar-icon-btn" id="sidebar-btn-history" title="Saved answers">
@@ -556,16 +569,6 @@
           </button>
 
           <!-- Notes -->
-          <button class="sidebar-icon-btn" id="sidebar-btn-local" title="Read a project folder on this computer">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg>
-          </button>
-
-          <button class="sidebar-icon-btn" id="sidebar-btn-run" title="Code playground: run Python or JavaScript">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="8 7 3 12 8 17"></polyline><polyline points="16 7 21 12 16 17"></polyline><path d="M11 16l2-8"></path>
-            </svg>
-          </button>
-
           <button class="sidebar-icon-btn" id="sidebar-btn-notes" title="Notes (Ctrl+Shift+N)">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
               <path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path>
