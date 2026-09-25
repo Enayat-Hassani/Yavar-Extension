@@ -129,6 +129,7 @@ class YavarSidePanel {
     this.sidebarBtnModelSwitcher = document.getElementById('sidebar-btn-model-switcher');
     this.sidebarBtnScreenshot = document.getElementById('sidebar-btn-screenshot');
     this.sidebarBtnNewChat = document.getElementById('sidebar-btn-new-chat');
+    this.sidebarBtnCarryOver = document.getElementById('sidebar-btn-carry-over');
     this.sidebarBtnSettings = document.getElementById('sidebar-btn-settings');
     this.rightSidebar = document.getElementById('right-sidebar');
 
@@ -266,6 +267,7 @@ class YavarSidePanel {
     this.btnWorkStopPill.addEventListener('click', () => this.stopRepoAgent());
     this.sidebarBtnScreenshot.addEventListener('click', () => this.captureScreenshot());
     this.sidebarBtnNewChat.addEventListener('click', () => this.openNewChat());
+    this.sidebarBtnCarryOver?.addEventListener('click', () => this.carryOverToNewChat());
     this.sidebarBtnSettings.addEventListener('click', () => this.showSettings());
 
     // Close popovers when clicking outside
@@ -366,6 +368,57 @@ class YavarSidePanel {
       url.searchParams.set('_yavar', Date.now());
       this._frameReady = false;
       this.aiFrame.src = url.href;
+    }
+  }
+
+  // Send a prompt, wait for the reply to finish, and resolve with its text.
+  askAndCapture(prompt) {
+    if (!this.aiFrame?.contentWindow) return Promise.reject(new Error('no AI chat loaded'));
+    if (this._oneShot) return Promise.reject(new Error('already waiting for a reply'));
+    const id = 'one_' + Date.now();
+    return new Promise((resolve, reject) => {
+      this._oneShot = { id, resolve, reject };
+      this.aiFrame.contentWindow.postMessage({ action: 'WATCH_FOR_ANSWER', requestId: id }, '*');
+      this.forwardToIframe({ prompt, autoSubmit: true });
+    });
+  }
+
+  // Long chats get slow and hit free-plan limits. Ask the AI for a compact
+  // handoff note, open a new chat, and paste the note so work continues there.
+  async carryOverToNewChat() {
+    if (this.agent?.active) {
+      this.showNotification('⚠️ Stop the running agent first');
+      return;
+    }
+    if (this._carrying) return;
+    this._carrying = true;
+    this.showNotification('🧳 Asking the AI to summarize this chat…');
+    try {
+      const summary = (await this.askAndCapture(
+        'Write a handoff note so I can continue this conversation in a fresh chat. ' +
+        'Include: my goal; what we covered and concluded; key facts, decisions, file names and code snippets that matter; ' +
+        'open questions; and the next step. Use short headings and bullets, under 350 words. Output only the note.'
+      )).trim();
+      if (!summary) throw new Error('the summary came back empty');
+
+      const model = this.getCurrentModel();
+      await this.addHistoryEntry({
+        id: 'h_' + Date.now(), ts: Date.now(), platform: model?.name || 'AI',
+        url: '', prompt: 'Handoff summary (fresh chat)', answer: summary
+      });
+
+      this.openNewChat();
+      await this.whenFrameReady();
+      this.forwardToIframe({
+        prompt: `I'm continuing from an earlier conversation. Here is where we left off:\n\n${summary}\n\n` +
+          'Reply with one line confirming you have the context, then wait for my next question.',
+        autoSubmit: false
+      });
+      this.showNotification('🧳 Fresh chat ready with the summary (also saved to history)');
+    } catch (e) {
+      this.showNotification('⚠️ Could not carry over: ' + e.message);
+    } finally {
+      this._carrying = false;
     }
   }
 
@@ -2745,6 +2798,17 @@ Begin: state a one-line plan, then issue your first tool call.`;
           ? 'No answer found yet — ask something first'
           : 'Could not read the answer';
         this.showNotification('⚠️ ' + msg);
+      }
+
+      // ----- One-shot question (e.g. the fresh-chat handoff) -----
+      if (this._oneShot && data.requestId === this._oneShot.id) {
+        const { resolve, reject } = this._oneShot;
+        if (data.action === 'ANSWER_SETTLED') { this._oneShot = null; resolve(data.text || ''); return; }
+        if (/^ANSWER_WATCH_(STALLED|TIMEOUT|FAILED)$/.test(data.action)) {
+          this._oneShot = null;
+          reject(new Error(data.action === 'ANSWER_WATCH_FAILED' ? 'answer reading is not supported on this model' : 'no reply from the AI'));
+          return;
+        }
       }
 
       // ----- Deep-dive agent watch replies -----
