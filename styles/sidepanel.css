@@ -16,7 +16,7 @@
   --cm-builtin: #804fb8;
   --cm-property: #3e8087;
   /* Apple-inspired Light Grey Palette */
-  --bg-primary: #f5f5f7;        /* Apple light grey background */
+  --bg-primary: #f8f8fa;        /* Light grey background, one step lighter than Apple's #f5f5f7 */
   --bg-secondary: #e8e8ed;      /* Lighter grey secondary */
   --bg-tertiary: #d2d2d7;       /* Tertiary grey accent */
   --text-primary: #1d1d1f;      /* Apple black text */
