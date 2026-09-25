@@ -123,8 +123,21 @@
   const workerFrom = (fn) =>
     new Worker(URL.createObjectURL(new Blob([`(${fn.toString()})()`], { type: 'text/javascript' })));
 
-  // Python stays loaded between runs (loading is the slow part)
+  // Python stays loaded between runs (loading is the slow part), but is
+  // released after a few idle minutes so it doesn't hold ~50-100 MB.
+  const PY_IDLE_MS = 5 * 60 * 1000;
   let pyWorker = null;
+  let pyIdleTimer = null;
+
+  function armPyIdle() {
+    clearTimeout(pyIdleTimer);
+    pyIdleTimer = setTimeout(() => {
+      if (pyWorker && !(running && running.lang === 'python')) {
+        pyWorker.terminate();
+        pyWorker = null;
+      }
+    }, PY_IDLE_MS);
+  }
   let running = null;
 
   const reply = (msg) => window.parent.postMessage(msg, '*');
@@ -136,6 +149,8 @@
     if (running.lang === 'javascript') {
       const w = running.worker;
       setTimeout(() => w.terminate(), 1500); // let pending timers flush a little
+    } else {
+      armPyIdle();
     }
     running = null;
     reply({ type: 'done', id, ok, ms, ...extra });
