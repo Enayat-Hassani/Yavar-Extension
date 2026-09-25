@@ -43,12 +43,15 @@ test('varsInTemplate lists each placeholder once', () => {
   assert.deepEqual(varsInTemplate('{{a}} {{ b }} {{a}}'), ['a', 'b']);
 });
 
-// content.js can't import modules (a failed import would kill the whole
-// content script), so it carries a copy of the defaults. Keep them in sync.
-test('content.js DEFAULT_TEMPLATES matches utils/templates.js', () => {
-  const src = readFileSync(new URL('../src/content.js', import.meta.url), 'utf8');
-  const m = src.match(/const DEFAULT_TEMPLATES = (\[[\s\S]*?\n\]);/);
-  assert.ok(m, 'DEFAULT_TEMPLATES not found in content.js');
-  const copy = new Function(`return ${m[1]}`)();
-  assert.deepEqual(copy, DEFAULT_TEMPLATES);
+// content.js can't import modules, so the manifest loads the shared core
+// (a classic script) just before it. Guard that wiring and the single copy.
+test('content script gets templates from the shared core', () => {
+  const manifest = JSON.parse(readFileSync(new URL('../manifest.json', import.meta.url), 'utf8'));
+  const js = manifest.content_scripts.find(cs => cs.js.includes('src/content.js')).js;
+  assert.ok(js.indexOf('src/utils/template-core.js') > -1, 'core not loaded');
+  assert.ok(js.indexOf('src/utils/template-core.js') < js.indexOf('src/content.js'), 'core must load first');
+  const content = readFileSync(new URL('../src/content.js', import.meta.url), 'utf8');
+  assert.match(content, /globalThis\.YavarTemplateCore/);
+  assert.doesNotMatch(content, /const DEFAULT_TEMPLATES = \[/, 'content.js must not carry its own copy');
+  assert.equal(DEFAULT_TEMPLATES.length, 6);
 });
