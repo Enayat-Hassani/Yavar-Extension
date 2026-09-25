@@ -19,7 +19,7 @@ export const CommandHandler = {
         await this.triggerLearn(tab);
         break;
       case 'toggle-notes':
-        await this.toggleNotes(tab);
+        this.toggleNotes(tab);
         break;
     }
   },
@@ -47,16 +47,13 @@ export const CommandHandler = {
     }
   },
 
-  async toggleNotes(tab) {
+  // Queue the request for the panel, which runs it on open (or at once if
+  // it's already open). A message sent after opening would reach a panel
+  // that isn't listening yet.
+  toggleNotes(tab) {
     if (!tab) return;
-    try {
-      await openPanel({ windowId: tab.windowId });
-      setTimeout(() => {
-        chrome.runtime.sendMessage({ action: 'toggle_notes' });
-      }, 300);
-    } catch (error) {
-      console.error('[Yavar] Toggle notes failed:', error);
-    }
+    openPanel({ windowId: tab.windowId });
+    chrome.storage.session.set({ pendingAction: 'notes' });
   },
 
   async triggerLearn(tab) {
@@ -91,16 +88,7 @@ export const CommandHandler = {
       return;
     }
     
-    try {
-      // Open sidebar - the sidepanel.js will handle the analysis
-      await openPanel({ windowId: tab.windowId });
-      
-      // Send message to sidepanel to trigger analysis
-      setTimeout(async () => {
-        await chrome.runtime.sendMessage({ action: 'trigger_learn' });
-      }, 300);
-    } catch (error) {
-      console.error('[Yavar] Trigger learn failed:', error);
-    }
+    openPanel({ windowId: tab.windowId });
+    chrome.storage.session.set({ pendingAction: 'explain_repo' });
   }
 };

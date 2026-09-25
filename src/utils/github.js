@@ -95,13 +95,6 @@ export function formatCount(n) {
   return (n / 1000).toFixed(n < 10000 ? 1 : 0).replace(/\.0$/, '') + 'k';
 }
 
-export function formatBytes(n) {
-  if (n == null) return '';
-  if (n < 1024) return n + ' B';
-  if (n < 1024 * 1024) return (n / 1024).toFixed(n < 10240 ? 1 : 0).replace(/\.0$/, '') + ' KB';
-  return (n / 1024 / 1024).toFixed(1) + ' MB';
-}
-
 export function langFromPath(path) {
   const ext = (path.split('.').pop() || '').toLowerCase();
   const map = {
@@ -371,35 +364,6 @@ export function timeAgo(iso, now = Date.now()) {
   const units = [['y', 31536000], ['mo', 2592000], ['d', 86400], ['h', 3600], ['m', 60]];
   for (const [u, n] of units) if (s >= n) return `${Math.floor(s / n)}${u} ago`;
   return 'just now';
-}
-
-// The README directly inside a folder ('' = repo root), if any.
-export function folderReadme(dir, fileSet) {
-  const prefix = dir ? dir + '/' : '';
-  for (const name of ['README.md', 'readme.md', 'Readme.md', 'README.rst', 'README.txt', 'README']) {
-    if (fileSet.has(prefix + name)) return prefix + name;
-  }
-  return null;
-}
-
-// First meaningful paragraph(s) of a README as plain text, for a preview.
-export function readmeSnippet(md, max = 280) {
-  const text = String(md || '')
-    .replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/```[\s\S]*?```/g, '')
-    .replace(/<[^>]+>/g, ' ')
-    .split('\n')
-    .map(l => l.trim())
-    .filter(l => l && !/^(#|!\[|\[!\[|[-=]{3,}|\|)/.test(l))   // headings, badges, rules, tables
-    .join(' ')
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
-    .replace(/[*_`>]+/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-  if (text.length <= max) return text;
-  const cut = text.slice(0, max);
-  return cut.slice(0, Math.max(cut.lastIndexOf(' '), max * 0.6)) + '…';
 }
 
 // Directories not worth walking in a local folder (huge, generated, or private)
