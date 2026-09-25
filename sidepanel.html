@@ -384,6 +384,20 @@
       </div>
     </div>
 
+    <!-- Text input dialog for the agents (window.prompt is unreliable in side panels) -->
+    <dialog id="ask-dialog" class="ask-dialog" aria-labelledby="ask-title">
+      <form method="dialog" class="ask-form">
+        <h3 id="ask-title" class="ask-title"></h3>
+        <p id="ask-message" class="ask-message"></p>
+        <textarea id="ask-input" class="ask-input" rows="3"></textarea>
+        <p class="ask-hint">Enter to submit · Shift+Enter for a new line · Esc to cancel</p>
+        <div class="modal-actions">
+          <button type="submit" value="cancel" class="btn-secondary" formnovalidate>Cancel</button>
+          <button type="submit" value="ok" id="ask-ok" class="btn-primary">Go</button>
+        </div>
+      </form>
+    </dialog>
+
     <!-- Right Sidebar - Auto-hiding vertical icon bar -->
     <aside id="right-sidebar" class="right-sidebar">
       <div class="sidebar-panel">

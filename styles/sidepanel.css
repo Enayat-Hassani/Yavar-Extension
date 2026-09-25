@@ -800,6 +800,68 @@ div.toggle-switch.active::after {
   vertical-align: middle;
 }
 
+/* Agent input dialog */
+.ask-dialog {
+  width: min(92%, 420px);
+  margin: auto;
+  padding: 0;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.25);
+}
+
+.ask-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.ask-form {
+  padding: 20px;
+}
+
+.ask-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.ask-message {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+  margin-bottom: 12px;
+  white-space: pre-line;
+}
+
+.ask-message:empty {
+  display: none;
+}
+
+.ask-input {
+  width: 100%;
+  min-height: 72px;
+  padding: 10px 12px;
+  background: var(--surface);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font: inherit;
+  font-size: 14px;
+  resize: vertical;
+}
+
+.ask-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.ask-hint {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
 .modal-actions {
   display: flex;
   gap: 10px;
