@@ -128,11 +128,7 @@
     const nodes = document.querySelectorAll(sel.message);
     if (!nodes.length) return { ok: false, reason: 'no-messages' };
 
-    const last = nodes[nodes.length - 1];
-    const contentEl = sel.content ? (last.querySelector(sel.content) || last) : last;
-
-    let md = cleanMarkdown(nodeToMarkdown(contentEl));
-    if (!md) md = (contentEl.innerText || '').trim();
+    const md = answerMarkdown(nodes[nodes.length - 1]);
     if (!md) return { ok: false, reason: 'empty' };
 
     return { ok: true, text: md, platform, generating: !!document.querySelector(STOP_SELECTORS) };
@@ -515,12 +511,14 @@
     python: 'python', py: 'python', python3: 'python', py3: 'python'
   };
 
-  // Language from the code element's class, a nearby header label, or a guess
+  // Language from the code element's class, a nearby header label, or a
+  // guess. Returns false when the block is known not to be runnable (so it's
+  // never re-checked), null when it can't tell yet (e.g. still streaming).
   function codeLanguage(pre, text) {
     const code = pre.querySelector('code') || pre;
     const cls = (code.className || '') + ' ' + (pre.className || '');
     const m = cls.match(/(?:language|lang)-([\w+#-]+)/i);
-    if (m) return RUNNABLE[m[1].toLowerCase()] || null;
+    if (m) return RUNNABLE[m[1].toLowerCase()] || false;
 
     // ChatGPT / Gemini show the language as a small label above the block
     const box = pre.closest('div');
@@ -549,19 +547,26 @@
     return (el.innerText || '').replace(/\n?▶ Run\s*$/, '').replace(/\n$/, '');
   }
 
-  function decorateCodeBlocks() {
-    document.querySelectorAll('pre:not([data-yavar-run])').forEach((pre) => {
+  function decorateCodeBlocks(generating) {
+    const pres = document.querySelectorAll('pre:not([data-yavar-run])');
+    const lastPre = pres[pres.length - 1];
+    pres.forEach((pre) => {
       if (!isInsideAnswer(pre)) { pre.setAttribute('data-yavar-run', 'skip'); return; }
       const text = codeText(pre);
       if (text.length > 100000) { pre.setAttribute('data-yavar-run', 'skip'); return; }
-      // Not recognisable yet (maybe still streaming): look again next time
       const lang = text.trim().length >= 3 ? codeLanguage(pre, text) : null;
-      if (!lang) return;
+      if (!lang) {
+        // Unknown language: only a block that may still be streaming (the last
+        // one while the AI is answering) is worth looking at again later
+        if (lang === false || !(generating && pre === lastPre)) pre.setAttribute('data-yavar-run', 'skip');
+        return;
+      }
       pre.setAttribute('data-yavar-run', lang);
 
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.textContent = '▶ Run';
+      btn.setAttribute('data-yavar-run-btn', '');
       btn.title = `Run this ${lang === 'python' ? 'Python' : 'JavaScript'} in Yavar's sandbox`;
       btn.setAttribute('aria-label', btn.title);
       btn.style.cssText = [
@@ -577,7 +582,7 @@
         e.stopPropagation();
         // Re-read at click time: the block may have finished streaming since
         const code = codeText(pre);
-        postToYavar({ action: 'RUN_CODE', lang: codeLanguage(pre, code) || lang, code });
+        postToYavar({ action: 'RUN_CODE', lang, code });
       });
       const cs = getComputedStyle(pre);
       if (cs.position === 'static') pre.style.position = 'relative';
@@ -585,20 +590,6 @@
       pre.style.paddingBottom = `calc(${cs.paddingBottom} + 30px)`;
       pre.appendChild(btn);
     });
-  }
-
-  if (EXTENSION_ORIGIN && window.parent !== window && detectPlatform()) {
-    let pending = null;
-    const schedule = () => {
-      if (pending) return;
-      pending = setTimeout(() => { pending = null; decorateCodeBlocks(); }, 800);
-    };
-    const start = () => {
-      decorateCodeBlocks();
-      new MutationObserver(schedule).observe(document.body, { childList: true, subtree: true });
-    };
-    if (document.body) start();
-    else document.addEventListener('DOMContentLoaded', start);
   }
 
   // ---- Yavar controls inside the chat ----
@@ -652,6 +643,10 @@
     return document.documentElement.classList.contains('dark') || matchMedia('(prefers-color-scheme: dark)').matches;
   }
 
+  // Computed once per refresh pass (getComputedStyle is too costly for every
+  // answer bar or scroll frame)
+  let isDark = false;
+
   function makeHost(tag) {
     const host = document.createElement(tag);
     host.setAttribute('data-yavar-ui', '');
@@ -659,7 +654,7 @@
     const style = document.createElement('style');
     style.textContent = UI_CSS;
     root.appendChild(style);
-    host.toggleAttribute('dark', looksDark());
+    host.toggleAttribute('dark', isDark);
     return { host, root };
   }
 
@@ -719,16 +714,15 @@
     msgEl.appendChild(host);
   }
 
-  function decorateAnswers() {
+  function decorateAnswers(generating) {
     const sel = RESPONSE_SELECTORS[detectPlatform()];
     if (!sel) return;
-    const msgs = [...document.querySelectorAll(sel.message)];
-    const generating = !!document.querySelector(STOP_SELECTORS);
+    const msgs = document.querySelectorAll(sel.message);
     msgs.forEach((m, i) => {
       if (generating && i === msgs.length - 1) return;           // still streaming
+      if (m.querySelector(':scope > yavar-answer-bar')) return;   // cheapest check first
       if (m.parentElement?.closest(sel.message)) return;           // nested match
-      if (m.querySelector(':scope > yavar-answer-bar')) return;
-      if (!(m.innerText || '').trim()) return;
+      if (!m.textContent.trim()) return;                           // textContent: no layout
       addAnswerBar(m);
     });
   }
@@ -786,7 +780,6 @@
       menu.hidden = true;
       postToYavar({ action: 'YAVAR_TEMPLATE', id: t.dataset.t, inputText: currentComposerText() });
     });
-    document.addEventListener('click', () => { menu.hidden = true; });
     document.documentElement.appendChild(host);
     return { host, bar, menu };
   }
@@ -803,7 +796,6 @@
     composer.host.hidden = r.width === 0 || top < 4;
     composer.bar.style.left = Math.max(8, r.left) + 'px';
     composer.bar.style.top = top + 'px';
-    composer.host.toggleAttribute('dark', looksDark());
   }
 
   // Re-place the bar when the message box moves or resizes (it grows as you
@@ -834,33 +826,48 @@
     observedAnchor = null;
   }
 
+  function applyInChat(enabled) {
+    inChatEnabled = enabled;
+    if (enabled) refreshInChatUi();
+    else removeInChatUi();
+  }
+
   function refreshInChatUi() {
     if (!inChatEnabled) return;
-    decorateAnswers();
+    isDark = looksDark();
+    const generating = !!document.querySelector(STOP_SELECTORS);
+    decorateCodeBlocks(generating);
+    decorateAnswers(generating);
     placeComposer();
+    composer?.host.toggleAttribute('dark', isDark);
   }
+
+  // Mutations caused only by our own buttons/bars don't need another pass
+  const isOwnNode = (n) => n.nodeType === 1 && (n.hasAttribute('data-yavar-ui') || n.hasAttribute('data-yavar-run-btn'));
+  const onlyOwnChanges = (records) => records.every(r =>
+    [...r.addedNodes, ...r.removedNodes].every(isOwnNode) || (r.type === 'attributes'));
 
   if (EXTENSION_ORIGIN && window.parent !== window && window.parent === window.top && detectPlatform()) {
     try {
-      chrome.storage.sync.get('settings').then(({ settings }) => {
-        inChatEnabled = settings?.inChatButtons ?? true;
-        if (!inChatEnabled) removeInChatUi(); else refreshInChatUi();
-      }).catch(() => {});
+      chrome.storage.sync.get('settings')
+        .then(({ settings }) => applyInChat(settings?.inChatButtons ?? true))
+        .catch(() => {});
       chrome.storage.onChanged.addListener((changes, area) => {
-        if (area !== 'sync' || !changes.settings) return;
-        inChatEnabled = changes.settings.newValue?.inChatButtons ?? true;
-        if (!inChatEnabled) removeInChatUi(); else refreshInChatUi();
+        if (area === 'sync' && changes.settings) applyInChat(changes.settings.newValue?.inChatButtons ?? true);
       });
     } catch (e) { /* storage unavailable: keep defaults */ }
 
+    // One observer drives everything (code-block buttons, answer bars, chip bar)
     let queued = null;
-    const schedule = () => {
-      if (queued) return;
+    const schedule = (records) => {
+      if (queued || (records && onlyOwnChanges(records))) return;
       queued = setTimeout(() => { queued = null; refreshInChatUi(); }, 700);
     };
     const start = () => {
       refreshInChatUi();
       new MutationObserver(schedule).observe(document.body, { childList: true, subtree: true });
+      // One listener closes the Prompts menu on outside clicks
+      document.addEventListener('click', () => { if (composer) composer.menu.hidden = true; });
       addEventListener('resize', schedulePlace);
       addEventListener('scroll', schedulePlace, { capture: true, passive: true });
     };

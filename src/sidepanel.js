@@ -5,9 +5,9 @@ import { isPublicWebUrl } from './utils/net.js';
 import { loadTemplates, expandTemplate, varsInTemplate } from './utils/templates.js';
 import { pickCoreFiles, planPrompt, hintPrompt, checkPrompt, parseRebuildPlan } from './utils/rebuild.js';
 import {
-  parseGitHubUrl, refCandidates, rawFileUrl, isReadablePath, estimateTokens, formatCount, formatBytes,
-  langFromPath, sliceLines, extractImports, resolveImports, suggestStartFiles, buildPack, readingPrompt, READ_MODES,
-  parseCommitsAtom, commitsFromApi, timeAgo, folderReadme, readmeSnippet, LOCAL_SKIP_DIRS, isSecretPath
+  parseGitHubUrl, refCandidates, rawFileUrl, encodePath, isReadablePath, estimateTokens, formatCount, formatBytes,
+  sliceLines, extractImports, resolveImports, suggestStartFiles, buildPack, readingPrompt, READ_MODES,
+  fencedFile, parseCommitsAtom, commitsFromApi, timeAgo, folderReadme, readmeSnippet, LOCAL_SKIP_DIRS, isSecretPath
 } from './utils/github.js';
 
 class YavarSidePanel {
@@ -151,7 +151,6 @@ class YavarSidePanel {
     this.runStop = document.getElementById('run-stop');
     this.runFollowups = document.getElementById('run-followups');
     this.sidebarBtnSettings = document.getElementById('sidebar-btn-settings');
-    this.rightSidebar = document.getElementById('right-sidebar');
 
     // Model switcher
     this.modelSwitcher = document.getElementById('model-switcher');
@@ -254,7 +253,10 @@ class YavarSidePanel {
     this.dockVideoResearch?.addEventListener('click', () => this.researchVideosOnTopic());
     this.btnCloseFiles.addEventListener('click', () => this.filesPanel.classList.add('hidden'));
     this.btnRefreshFiles.addEventListener('click', () => this.refreshFiles());
-    this.filesSearch.addEventListener('input', () => this.filterFilesTree());
+    this.filesSearch.addEventListener('input', () => {
+      clearTimeout(this._searchTimer);
+      this._searchTimer = setTimeout(() => this.filterFilesTree(), 90);
+    });
     this.filesModes?.addEventListener('click', (e) => {
       const mode = e.target.closest('[data-mode]')?.dataset.mode;
       if (mode) this.setReadMode(mode);
@@ -430,15 +432,45 @@ class YavarSidePanel {
   }
 
   // Send a prompt, wait for the reply to finish, and resolve with its text.
-  askAndCapture(prompt) {
+  // Post { action, requestId } to the chat bridge and resolve with the
+  // reply's text (ANSWER_SETTLED / ANSWER_CAPTURED) or reject on its failure
+  // messages or a timeout. Replies are matched by requestId in the listener.
+  chatRequest(action, { timeoutMs = 0 } = {}) {
     if (!this.aiFrame?.contentWindow) return Promise.reject(new Error('no AI chat loaded'));
-    if (this._oneShot) return Promise.reject(new Error('already waiting for a reply'));
-    const id = 'one_' + Date.now();
+    this._chatRequests = this._chatRequests || new Map();
+    const id = `req_${action}_${Date.now()}`;
     return new Promise((resolve, reject) => {
-      this._oneShot = { id, resolve, reject };
-      this.aiFrame.contentWindow.postMessage({ action: 'WATCH_FOR_ANSWER', requestId: id }, '*');
-      this.forwardToIframe({ prompt, autoSubmit: true });
+      const timer = timeoutMs ? setTimeout(() => {
+        if (this._chatRequests.delete(id)) reject(new Error('the chat did not respond'));
+      }, timeoutMs) : null;
+      this._chatRequests.set(id, { resolve, reject, timer });
+      this.aiFrame.contentWindow.postMessage({ action, requestId: id }, '*');
     });
+  }
+
+  // Settle a pending chatRequest from a bridge reply; true if it was one
+  settleChatRequest(data) {
+    const req = data.requestId && this._chatRequests?.get(data.requestId);
+    if (!req) return false;
+    const fail = {
+      ANSWER_CAPTURE_FAILED: data.reason === 'no-messages' ? 'no answer in the chat yet' : 'could not read the answer',
+      ANSWER_WATCH_FAILED: 'answer reading is not supported on this model',
+      ANSWER_WATCH_STALLED: 'no reply from the AI',
+      ANSWER_WATCH_TIMEOUT: 'no reply from the AI'
+    }[data.action];
+    if (data.action !== 'ANSWER_SETTLED' && data.action !== 'ANSWER_CAPTURED' && !fail) return false;
+    this._chatRequests.delete(data.requestId);
+    clearTimeout(req.timer);
+    if (fail) req.reject(new Error(fail));
+    else req.resolve(data.text || '');
+    return true;
+  }
+
+  // Send a prompt, wait for the reply to finish, and resolve with its text.
+  askAndCapture(prompt) {
+    const reply = this.chatRequest('WATCH_FOR_ANSWER');   // arm the watch before sending
+    this.forwardToIframe({ prompt, autoSubmit: true });
+    return reply;
   }
 
   // Long chats get slow and hit free-plan limits. Ask the AI for a compact
@@ -808,6 +840,24 @@ First Task: Based on the tree and tech stack, what is the single most important 
     if (token) h['Authorization'] = 'Bearer ' + token;
     return h;
   }
+  // One GET to the GitHub REST API with consistent, friendly errors
+  // (err.status is kept for callers that retry on 404/422).
+  async ghApi(path, { accept, notFound = 'not found' } = {}) {
+    const token = await this.getGithubToken();
+    const headers = this.ghHeaders(token);
+    if (accept) headers.Accept = accept;
+    const res = await fetch('https://api.github.com/' + path, { headers });
+    if (res.ok) return res;
+    const err = new Error(
+      res.status === 403 || res.status === 429
+        ? (token ? 'GitHub rate limit or access denied' : 'GitHub rate limit hit (60/hr without a token), add a free token in Settings')
+        : res.status === 404
+          ? (token ? notFound : 'not found (private repo? add a GitHub token in Settings)')
+          : 'GitHub ' + res.status);
+    err.status = res.status;
+    throw err;
+  }
+
 
   // Decode base64 as proper UTF-8 (atob alone mangles multi-byte chars → "Â·")
   decodeB64(b64) {
@@ -823,17 +873,21 @@ First Task: Based on the tree and tech stack, what is the single most important 
     // One (cached) API call for the tree; everything else comes from raw files
     const tree = await this.loadRepoTree(owner, repo, 'HEAD');
     const branch = tree.ref;
-    const treeData = { tree: tree.items };
 
     // --- DEP-SNIFFER: Extract dependency/tech stack info ---
     let depContext = 'DEPENDENCIES / TECH STACK\n========================\n';
-    const manifestFiles = treeData.tree.filter(f =>
+    const manifestFiles = tree.items.filter(f =>
       f.type === 'blob' &&
       ['package.json', 'pyproject.toml', 'requirements.txt', 'go.mod', 'Cargo.toml'].includes(f.path.split('/').pop())
     ).sort((a, b) => a.path.split('/').length - b.path.split('/').length).slice(0, 3);
 
-    const manifests = await Promise.all(manifestFiles.map(f =>
-      this.fetchRepoFile(owner, repo, f.path, branch, 20000).then(t => [f.path, t]).catch(() => null)));
+    const readme = tree.items.find(f => f.type === 'blob' && /^readme(\.\w+)?$/i.test(f.path));
+    // Manifests and README in parallel
+    const [manifests, rawReadme] = await Promise.all([
+      Promise.all(manifestFiles.map(f =>
+        this.fetchRepoFile(owner, repo, f.path, branch, 20000).then(t => [f.path, t]).catch(() => null))),
+      readme ? this.fetchRepoFile(owner, repo, readme.path, branch, 60000).catch(() => '') : ''
+    ]);
     for (const entry of manifests.filter(Boolean)) {
       const [path, raw] = entry;
       const lines = raw.split('\n').filter(l => /^[ \t]*["\w\-_]+[:==]/.test(l)).join('\n');
@@ -842,10 +896,6 @@ First Task: Based on the tree and tech stack, what is the single most important 
 
     // --- README: Preserve code blocks, filter fluff ---
     let semanticContext = `PROJECT: ${owner}/${repo}\n========================\n`;
-    const readme = treeData.tree.find(f => f.type === 'blob' && /^readme(\.\w+)?$/i.test(f.path));
-    const rawReadme = readme
-      ? await this.fetchRepoFile(owner, repo, readme.path, branch, 60000).catch(() => '')
-      : '';
     if (rawReadme) {
       const sections = rawReadme.match(/(##|###).*?(?=(##|###)|$)/gs) || [rawReadme.substring(0, 2000)];
       sections.forEach(section => {
@@ -861,7 +911,7 @@ First Task: Based on the tree and tech stack, what is the single most important 
     const logicExtensions = ['.py', '.go', '.js', '.ts', '.java', '.cpp', '.rs', '.rb', '.php', '.cs'];
     const baselineExclude = ['node_modules', '.github', 'dist', 'vendor', 'build'];
 
-    let validFiles = treeData.tree.filter(item => {
+    let validFiles = tree.items.filter(item => {
       const parts = item.path.split('/');
       const name = parts[parts.length - 1];
       if (baselineExclude.some(d => parts.includes(d)) || name.startsWith('.')) return false;
@@ -880,7 +930,7 @@ First Task: Based on the tree and tech stack, what is the single most important 
     });
 
     // Full path list (blobs + trees) for the agent's TREE / SEARCH_CODE tools
-    const treeItems = treeData.tree
+    const treeItems = tree.items
       .slice(0, 4000)
       .map(i => ({ path: i.path, type: i.type }));
 
@@ -906,31 +956,26 @@ First Task: Based on the tree and tech stack, what is the single most important 
 
     if (text == null) {
       // Private repos (with a token) and anything raw couldn't serve
-      const token = await this.getGithubToken();
-      const encoded = cleanPath.split('/').map(encodeURIComponent).join('/');
-      const url = `https://api.github.com/repos/${owner}/${repo}/contents/${encoded}?ref=${encodeURIComponent(ref)}`;
-      const res = await fetch(url, { headers: this.ghHeaders(token) });
-      if (!res.ok) {
-        if (res.status === 403 || res.status === 429) throw new Error(token ? 'rate limited or access denied' : 'rate limited (add a GitHub token in Settings to lift the 60/hr limit)');
-        if (res.status === 404) throw new Error(token ? 'file not found' : 'not found (private repo? add a GitHub token in Settings)');
-        throw new Error(`GitHub ${res.status}`);
-      }
+      const res = await this.ghApi(`repos/${owner}/${repo}/contents/${encodePath(cleanPath)}?ref=${encodeURIComponent(ref)}`,
+        { notFound: 'file not found' });
       const data = await res.json();
       if (Array.isArray(data)) throw new Error('path is a directory');
       if (!data.content) throw new Error('no content (file may be too large — over 1MB)');
       text = this.decodeB64(data.content);
     }
 
-    // Agent uses a small cap (huge pastes freeze the input); the file browser
-    // passes a huge cap so attached files arrive whole. When we must truncate,
-    // cut on a newline so it never ends mid-line.
-    if (text.length > maxChars) {
-      let cut = text.slice(0, maxChars);
-      const lastNl = cut.lastIndexOf('\n');
-      if (lastNl > maxChars * 0.5) cut = cut.slice(0, lastNl);
-      text = cut + `\n\n… [truncated — full file is ${text.length} chars]`;
-    }
-    return text;
+    return this.truncateText(text, maxChars);
+  }
+
+  // Agent uses a small cap (huge pastes freeze the input); the reader passes a
+  // huge cap so attached files arrive whole. When we must truncate, cut on a
+  // newline so it never ends mid-line.
+  truncateText(text, maxChars) {
+    if (text.length <= maxChars) return text;
+    let cut = text.slice(0, maxChars);
+    const lastNl = cut.lastIndexOf('\n');
+    if (lastNl > maxChars * 0.5) cut = cut.slice(0, lastNl);
+    return cut + `\n\n… [truncated — full file is ${text.length} chars]`;
   }
 
   // ========== GitHub Deep-Dive Agent ==========
@@ -1610,6 +1655,8 @@ Begin: state a one-line plan, then issue your first tool call.`;
 
   // First visit to a repo: slide the dock out briefly and explain the reader
   async maybeShowReaderTip() {
+    if (this._readerTipDone) return;   // skip the storage read on every tab change
+    this._readerTipDone = true;
     try {
       if ((await chrome.storage.local.get('readerTipShown')).readerTipShown) return;
       await chrome.storage.local.set({ readerTipShown: true });
@@ -2039,19 +2086,8 @@ Begin: state a one-line plan, then issue your first tool call.`;
       }
     } catch (e) { /* session storage unavailable */ }
 
-    const token = await this.getGithubToken();
-    const res = await fetch(
-      `https://api.github.com/repos/${owner}/${repo}/git/trees/${encodeURIComponent(ref)}?recursive=1`,
-      { headers: this.ghHeaders(token) });
-    if (!res.ok) {
-      const err = new Error(res.status === 404
-        ? (token ? 'repo or branch not found' : 'not found (private repo? add a GitHub token in Settings)')
-        : res.status === 403 || res.status === 429
-          ? 'GitHub rate limit hit, add a free token in Settings to lift it'
-          : 'GitHub ' + res.status);
-      err.status = res.status;
-      throw err;
-    }
+    const res = await this.ghApi(`repos/${owner}/${repo}/git/trees/${encodeURIComponent(ref)}?recursive=1`,
+      { notFound: 'repo or branch not found' });
     const data = await res.json();
     const tree = {
       owner, repo, ref, ts: Date.now(), truncated: !!data.truncated,
@@ -2085,13 +2121,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
 
     const sameRepo = this.repoTree && this.repoTree.owner === gh.owner && this.repoTree.repo === gh.repo;
     if (!sameRepo) this.selectedFiles = new Set();
-    this.repoTree = {
-      ...tree,
-      branch: tree.ref,
-      fileSet: new Set(tree.items.filter(i => i.type === 'blob').map(i => i.path)),
-      sizes: new Map(tree.items.filter(i => i.type === 'blob').map(i => [i.path, i.size])),
-      root: this.buildFileTree(tree.items)
-    };
+    this.repoTree = { ...tree, ...this.deriveTree(tree) };
     this.activeRepoFile = gh.kind === 'blob' && activePath && this.repoTree.fileSet.has(activePath)
       ? { path: activePath, lines: gh.lines }
       : null;
@@ -2118,14 +2148,52 @@ Begin: state a one-line plan, then issue your first tool call.`;
   }
 
   // Read a file from whichever source the reader is showing
+  // Contents are cached per repo+ref+path, so "+ Imports" then Send, or a
+  // README preview then Explain, download each file only once.
   async readRepoFile(path, maxChars = 2000000) {
     const t = this.repoTree;
-    if (t.source === 'local') return this.readLocalFile(path, maxChars);
-    return this.fetchRepoFile(t.owner, t.repo, path, t.ref, maxChars);
+    const key = `${t.source || 'github'}:${t.owner}/${t.repo}@${t.ref}:${path}`;
+    this._fileCache = this._fileCache || new Map();
+    let pending = this._fileCache.get(key);
+    if (!pending) {
+      pending = t.source === 'local'
+        ? this.readLocalFile(path, 2000000)
+        : this.fetchRepoFile(t.owner, t.repo, path, t.ref, 2000000);
+      pending.catch(() => this._fileCache.delete(key)); // don't cache failures
+      this._fileCache.set(key, pending);
+      if (this._fileCache.size > 80) this._fileCache.delete(this._fileCache.keys().next().value);
+    }
+    return this.truncateText(await pending, maxChars);
+  }
+
+  // Lookup structures for a tree, built once per tree object (trees are
+  // cached, so reopening the reader doesn't rebuild them)
+  deriveTree(tree) {
+    this._derived = this._derived || new WeakMap();
+    let d = this._derived.get(tree);
+    if (!d) {
+      const blobs = tree.items.filter(i => i.type === 'blob');
+      d = {
+        fileSet: new Set(blobs.map(i => i.path)),
+        sizes: new Map(blobs.map(i => [i.path, i.size])),
+        root: this.buildFileTree(tree.items),
+        // [path, lowercased path, lowercased name] for search
+        searchIndex: blobs.map(i => [i.path, i.path.toLowerCase(), i.path.split('/').pop().toLowerCase()])
+      };
+      this._derived.set(tree, d);
+    }
+    return d;
+  }
+
+  // Drop cached file contents whose key starts with prefix ('' = all)
+  clearFileCache(prefix = '') {
+    for (const k of [...(this._fileCache?.keys() || [])]) if (k.startsWith(prefix)) this._fileCache.delete(k);
   }
 
   async loadReadMarks() {
     const key = this.readMarksKey();
+    if (key && key === this._readMarksKey) return; // already loaded; markRead keeps it current
+    this._readMarksKey = key;
     this.readMarks = new Set();
     if (!key) return;
     try { this.readMarks = new Set((await chrome.storage.local.get(key))[key] || []); } catch (e) { /* ignore */ }
@@ -2200,6 +2268,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
       await this.openLocalFolder({ reuse: true });
       return;
     }
+    this.clearFileCache();
     if (this.repoTree) {
       const key = `tree:${this.repoTree.owner}/${this.repoTree.repo}@${this.repoTree.ref}`;
       this._treeCache?.delete(key);
@@ -2414,9 +2483,9 @@ Begin: state a one-line plan, then issue your first tool call.`;
 
     // Every space-separated term must appear; shorter paths and name hits rank first
     const terms = q.split(/\s+/);
-    const matches = [...this.repoTree.fileSet]
-      .filter(p => terms.every(t => p.toLowerCase().includes(t)))
-      .map(p => ({ p, score: (terms.every(t => p.split('/').pop().toLowerCase().includes(t)) ? 0 : 1000) + p.length }))
+    const matches = this.repoTree.searchIndex
+      .filter(([, lower]) => terms.every(t => lower.includes(t)))
+      .map(([p, , name]) => ({ p, score: (terms.every(t => name.includes(t)) ? 0 : 1000) + p.length }))
       .sort((a, b) => a.score - b.score)
       .slice(0, 200);
 
@@ -2435,6 +2504,12 @@ Begin: state a one-line plan, then issue your first tool call.`;
   }
 
   // ----- Rebuild it yourself -----
+
+  // The runner language for a plan ('python' | 'javascript' | null)
+  rebuildLang(plan) {
+    const l = plan?.language || '';
+    return /python/i.test(l) ? 'python' : /javascript|node|^js$/i.test(l) ? 'javascript' : null;
+  }
 
   rebuildKey() {
     const k = this.readMarksKey();
@@ -2483,13 +2558,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
 
   async resetRebuild() {
     if (!this.rebuild?.plan) return;
-    if (!this._resetArmed) {
-      this._resetArmed = true;
-      this.showNotification('Click ↺ again to discard this plan and start over');
-      setTimeout(() => { this._resetArmed = false; }, 3000);
-      return;
-    }
-    this._resetArmed = false;
+    if (!this.confirmTwice('rebuild', 'Click ↺ again to discard this plan and start over')) return;
     await this.saveRebuild(null);
     this.renderRebuild();
   }
@@ -2521,7 +2590,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
     const i = Math.min(current, n - 1);
     const s = plan.steps[i];
     const pct = Math.round((done.length / n) * 100);
-    const lang = /python/i.test(plan.language) ? 'python' : /javascript|node|^js$/i.test(plan.language) ? 'javascript' : null;
+    const lang = this.rebuildLang(plan);
     const studyChips = (s.study || []).map(p => {
       const ok = this.repoTree.fileSet.has(p);
       return `<button type="button" class="files-start-chip${ok ? '' : ' missing'}" data-rb="study" data-path="${esc(p)}"${ok ? '' : ' disabled title="Not found in this repo"'}>${esc(p.split('/').pop())}</button>`;
@@ -2604,21 +2673,16 @@ Begin: state a one-line plan, then issue your first tool call.`;
     } else if (act === 'check') {
       if (!code.trim()) { this.showNotification('Write your code for this step first'); return; }
       const study = (st.plan.steps[i].study || []).filter(p => this.repoTree.fileSet.has(p));
-      let attached = false;
-      if (study.length) {
-        const files = (await this.fetchRepoFilesMany(study)).filter(f => !f.error);
-        if (files.length) {
-          const pack = buildPack({ owner: this.repoTree.owner, repo: this.repoTree.repo, files });
-          this.forwardAttachToIframe(`step-${i + 1}-original.md`, pack, 'text/markdown');
-          attached = true;
-        }
+      const files = study.length ? (await this.fetchRepoFilesMany(study)).filter(f => !f.error) : [];
+      if (files.length) {
+        this.attachThenPrompt(`step-${i + 1}-original.md`, this.packFor(files), checkPrompt(st.plan, i, code, true));
+      } else {
+        this.forwardToIframe({ prompt: checkPrompt(st.plan, i, code, false), autoSubmit: false });
       }
-      setTimeout(() => this.forwardToIframe({ prompt: checkPrompt(st.plan, i, code, attached), autoSubmit: false }), attached ? 1500 : 0);
       this.rebuildPanel.classList.add('hidden');
       this.showNotification('🧑‍🏫 Your code is in the chat input, press send for a review');
     } else if (act === 'try') {
-      const lang = /python/i.test(st.plan.language) ? 'python' : 'javascript';
-      this.openRunPanel({ lang, code, autoRun: !!code.trim() });
+      this.openRunPanel({ lang: this.rebuildLang(st.plan), code, autoRun: !!code.trim() });
     }
   }
 
@@ -2631,9 +2695,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
     try {
       const files = (await this.fetchRepoFilesMany(paths)).filter(f => !f.error);
       if (!files.length) throw new Error('could not read the project files');
-      const { owner, repo, ref, source } = this.repoTree;
-      const pack = buildPack({ owner, repo, ref: source === 'local' ? '' : this.refLabel(ref), files, treePaths: [...this.repoTree.fileSet] });
-      this.forwardAttachToIframe(`${repo}-core-files.md`.replace(/[^\w.-]+/g, '-'), pack, 'text/markdown');
+      this.forwardAttachToIframe(`${this.repoTree.repo}-core-files.md`.replace(/[^\w.-]+/g, '-'), this.packFor(files), 'text/markdown');
       this.rebuildPanel.classList.add('hidden');
       this.showNotification('🛠 Sent the core files, the AI is writing your plan…');
       await new Promise(r => setTimeout(r, 2500)); // let the attachment upload
@@ -2659,14 +2721,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
 
   // Read the chat's latest answer and resolve with its text
   captureLastAnswerText() {
-    if (!this.aiFrame?.contentWindow) return Promise.reject(new Error('no AI chat loaded'));
-    const id = 'capw_' + Date.now();
-    return new Promise((resolve, reject) => {
-      this._captureWaiter = { id, resolve, reject, timer: setTimeout(() => {
-        if (this._captureWaiter?.id === id) { this._captureWaiter = null; reject(new Error('the chat did not respond')); }
-      }, 5000) };
-      this.aiFrame.contentWindow.postMessage({ action: 'CAPTURE_LAST_ANSWER', requestId: id }, '*');
-    });
+    return this.chatRequest('CAPTURE_LAST_ANSWER', { timeoutMs: 5000 });
   }
 
   async loadPlanFromChat() {
@@ -2711,18 +2766,16 @@ Begin: state a one-line plan, then issue your first tool call.`;
       return;
     }
 
-    const blobs = tree.items.filter(i => i.type === 'blob');
     this.repoTree = {
       source: 'local', owner: '', repo: tree.name, ref: '', truncated: tree.truncated,
-      items: tree.items,
-      fileSet: new Set(blobs.map(i => i.path)),
-      sizes: new Map(blobs.map(i => [i.path, i.size])),
-      root: this.buildFileTree(tree.items)
+      items: tree.items, ...this.deriveTree(tree)
     };
+    const blobs = this.repoTree.fileSet;
     this.localFiles = tree.files;
     this.activeRepoFile = null;
     this.selectedFiles = new Set();
     this._readmeCache?.clear();
+    this.clearFileCache('local:');
     await this.loadReadMarks();
 
     this.filesPanel.classList.remove('hidden');
@@ -2731,7 +2784,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
     this.setFilesView('files', false);
     this.renderFilesTree();
     this.filesSearch.focus();
-    this.showNotification(`📂 Opened ${tree.name} (${blobs.length} files${tree.truncated ? ', list trimmed' : ''})`);
+    this.showNotification(`📂 Opened ${tree.name} (${blobs.size} files${tree.truncated ? ', list trimmed' : ''})`);
   }
 
   showLocalLoading(name) {
@@ -2744,10 +2797,11 @@ Begin: state a one-line plan, then issue your first tool call.`;
   async scanDirectoryHandle(root, limit = 8000) {
     const items = [];
     const files = new Map();
+    const sizeReads = [];
     let truncated = false;
     const queue = [[root, '']];
-    while (queue.length) {
-      const [dir, prefix] = queue.shift();
+    for (let q = 0; q < queue.length && !truncated; q++) {   // index, not shift(): O(1)
+      const [dir, prefix] = queue[q];
       for await (const [name, handle] of dir.entries()) {
         if (items.length >= limit) { truncated = true; break; }
         const path = prefix + name;
@@ -2756,15 +2810,18 @@ Begin: state a one-line plan, then issue your first tool call.`;
           items.push({ path, type: 'tree' });
           queue.push([handle, path + '/']);
         } else if (!isSecretPath(path)) {
-          let size = null;
-          if (isReadablePath(path)) {
-            try { size = (await handle.getFile()).size; } catch (e) { /* unreadable */ }
-          }
-          items.push({ path, type: 'blob', size });
+          const item = { path, type: 'blob', size: null };
+          items.push(item);
           files.set(path, handle);
+          // Sizes are read in parallel below instead of one await per file
+          if (isReadablePath(path)) sizeReads.push(item);
         }
       }
-      if (truncated) break;
+    }
+    for (let i = 0; i < sizeReads.length; i += 64) {
+      await Promise.all(sizeReads.slice(i, i + 64).map(async (item) => {
+        try { item.size = (await files.get(item.path).getFile()).size; } catch (e) { /* unreadable */ }
+      }));
     }
     return { name: root.name, items, files, truncated };
   }
@@ -2816,9 +2873,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
       throw new Error('the folder changed or permission was lost, reopen it');
     }
     if (file.size > 5 * 1024 * 1024) throw new Error('file is over 5 MB');
-    let text = await file.text();
-    if (text.length > maxChars) text = text.slice(0, maxChars) + `\n\n… [truncated, full file is ${text.length} chars]`;
-    return text;
+    return this.truncateText(await file.text(), maxChars);
   }
 
   // Tiny IndexedDB key/value store (directory handles can't go in chrome.storage)
@@ -2917,15 +2972,12 @@ Begin: state a one-line plan, then issue your first tool call.`;
 
     let list = [];
     try {
-      const feed = `https://github.com/${owner}/${repo}/commits${ref === 'HEAD' ? '' : '/' + ref.split('/').map(encodeURIComponent).join('/')}.atom`;
+      const feed = `https://github.com/${owner}/${repo}/commits${ref === 'HEAD' ? '' : '/' + encodePath(ref)}.atom`;
       const res = await fetch(feed, { credentials: 'omit' });
       if (res.ok) list = parseCommitsAtom(await res.text());
     } catch (e) { /* try the API */ }
     if (!list.length) {
-      const token = await this.getGithubToken();
-      const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/commits?per_page=20${ref === 'HEAD' ? '' : '&sha=' + encodeURIComponent(ref)}`,
-        { headers: this.ghHeaders(token) });
-      if (!res.ok) throw new Error(res.status === 403 || res.status === 429 ? 'GitHub rate limit hit, try again later or add a token' : 'GitHub ' + res.status);
+      const res = await this.ghApi(`repos/${owner}/${repo}/commits?per_page=20${ref === 'HEAD' ? '' : '&sha=' + encodeURIComponent(ref)}`);
       list = commitsFromApi(await res.json());
     }
     this._commitsCache.set(key, { ts: Date.now(), list });
@@ -3118,7 +3170,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
     if (this._sendingFiles) return;
     this._sendingFiles = true;
     if (this.filesSend) this.filesSend.disabled = true;
-    const { owner, repo, ref, source } = this.repoTree;
+    const { repo } = this.repoTree;
     const repoName = this.repoDisplayName();
     this.showNotification(`📄 Reading ${paths.length === 1 ? paths[0].split('/').pop() : paths.length + ' files'}…`);
 
@@ -3141,23 +3193,19 @@ Begin: state a one-line plan, then issue your first tool call.`;
 
       if (single && single.content.length <= 4000) {
         // Small single file: inline, so the code is visible in the chat
-        const fence = single.content.includes('```') ? '~~~~' : '```';
         const block = `\`${single.path}\`${single.lines ? ` (lines ${single.lines.start}-${single.lines.end})` : ''} from ${repoName}:\n\n` +
-          `${fence}${langFromPath(single.path)}\n${single.content.replace(/\n$/, '')}\n${fence}`;
+          fencedFile(single);
         this.forwardToIframe({ prompt: question ? `${block}\n\n${question}` : block, autoSubmit: false });
       } else {
         // Several (or big) files: ONE attachment with a repo map, then the question
-        const pack = buildPack({ owner, repo, ref: source === 'local' ? '' : this.refLabel(ref), files, treePaths: [...this.repoTree.fileSet] });
         const fname = single
           ? single.path.split('/').pop() + '.md'
           : `${repo}-${files.length}-files.md`.replace(/[^\w.-]+/g, '-');
-        this.forwardAttachToIframe(fname, pack, 'text/markdown');
         if (question) {
           question = `The attached "${fname}" contains ${single ? what : `${files.length} files from ${repoName}`}` +
             `${single ? '' : ` (${files.map(f => f.path).join(', ')})`}, starting with a map of the repository.\n\n${question}`;
-          // Give the upload a moment before the text lands
-          setTimeout(() => this.forwardToIframe({ prompt: question, autoSubmit: false }), 1500);
         }
+        this.attachThenPrompt(fname, this.packFor(files), question);
       }
 
       await this.markRead(files.map(f => f.path));
@@ -3174,6 +3222,19 @@ Begin: state a one-line plan, then issue your first tool call.`;
       this._sendingFiles = false;
       if (this.filesSend) this.filesSend.disabled = false;
     }
+  }
+
+  // The reader's files as one Markdown pack (with the repository map)
+  packFor(files) {
+    const { owner, repo, ref, source } = this.repoTree;
+    return buildPack({ owner, repo, ref: source === 'local' ? '' : this.refLabel(ref), files, treePaths: [...this.repoTree.fileSet] });
+  }
+
+  // Attach a file, then put the prompt in the chat input once the upload has
+  // had a moment to land
+  attachThenPrompt(filename, content, prompt, { mime = 'text/markdown', settleMs = 1500 } = {}) {
+    this.forwardAttachToIframe(filename, content, mime);
+    if (prompt) setTimeout(() => this.forwardToIframe({ prompt, autoSubmit: false }), settleMs);
   }
 
   // ----- Pull requests & commits -----
@@ -3199,7 +3260,6 @@ Begin: state a one-line plan, then issue your first tool call.`;
       const fname = gh.kind === 'pull' ? `${gh.repo}-pr-${gh.number}.diff` : `${gh.repo}-${gh.sha.slice(0, 7)}.diff`;
       const pageTitle = (gh.title || '').split(' · ')[0].trim();
 
-      this.forwardAttachToIframe(fname, body, 'text/plain');
       this._readingContext = { label: `${gh.owner}/${gh.repo}`, ts: Date.now() };
       const prompt =
         `The attached "${fname}" is the diff of ${label} in ${gh.owner}/${gh.repo}` +
@@ -3209,7 +3269,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
         `2. File by file: what changed and why it was needed.\n` +
         `3. Techniques or patterns worth learning from it.\n` +
         `4. Anything risky, missing (tests, edge cases), or that you would do differently.`;
-      setTimeout(() => this.forwardToIframe({ prompt, autoSubmit: false }), 1500);
+      this.attachThenPrompt(fname, body, prompt, { mime: 'text/plain' });
       this.showNotification(`🔀 Sent the ${label} diff (${files} file${files === 1 ? '' : 's'}, ~${formatCount(estimateTokens(body.length))} tokens)`);
     } catch (e) {
       this.showNotification('⚠️ Could not get the diff: ' + e.message);
@@ -3224,12 +3284,8 @@ Begin: state a one-line plan, then issue your first tool call.`;
       const res = await fetch(`https://github.com/${gh.owner}/${gh.repo}/${path}.diff`, { credentials: 'include' });
       if (res.ok) return await res.text();
     } catch (e) { /* fall back to the API */ }
-    const token = await this.getGithubToken();
     const apiPath = gh.kind === 'pull' ? `pulls/${gh.number}` : `commits/${gh.sha}`;
-    const res = await fetch(`https://api.github.com/repos/${gh.owner}/${gh.repo}/${apiPath}`, {
-      headers: { ...this.ghHeaders(token), Accept: 'application/vnd.github.diff' }
-    });
-    if (!res.ok) throw new Error(res.status === 404 ? 'not found (private repo? add a GitHub token)' : 'GitHub ' + res.status);
+    const res = await this.ghApi(`repos/${gh.owner}/${gh.repo}/${apiPath}`, { accept: 'application/vnd.github.diff' });
     return res.text();
   }
 
@@ -3396,16 +3452,8 @@ Begin: state a one-line plan, then issue your first tool call.`;
       const data = event.data;
       if (!data || typeof data !== 'object') return;
 
-      // Programmatic capture (e.g. "Load plan from chat")
-      if (this._captureWaiter && data.requestId === this._captureWaiter.id &&
-          (data.action === 'ANSWER_CAPTURED' || data.action === 'ANSWER_CAPTURE_FAILED')) {
-        const w = this._captureWaiter;
-        this._captureWaiter = null;
-        clearTimeout(w.timer);
-        if (data.action === 'ANSWER_CAPTURED') w.resolve(data.text || '');
-        else w.reject(new Error(data.reason === 'no-messages' ? 'no answer in the chat yet' : 'could not read the answer'));
-        return;
-      }
+      // Replies to chatRequest() (plan capture, fresh-chat handoff…)
+      if (this.settleChatRequest(data)) return;
 
       if (data.action === 'ANSWER_CAPTURED') {
         if (this._pendingCaptureId && data.requestId && data.requestId !== this._pendingCaptureId) return;
@@ -3435,16 +3483,6 @@ Begin: state a one-line plan, then issue your first tool call.`;
         return;
       }
 
-      // ----- One-shot question (e.g. the fresh-chat handoff) -----
-      if (this._oneShot && data.requestId === this._oneShot.id) {
-        const { resolve, reject } = this._oneShot;
-        if (data.action === 'ANSWER_SETTLED') { this._oneShot = null; resolve(data.text || ''); return; }
-        if (/^ANSWER_WATCH_(STALLED|TIMEOUT|FAILED)$/.test(data.action)) {
-          this._oneShot = null;
-          reject(new Error(data.action === 'ANSWER_WATCH_FAILED' ? 'answer reading is not supported on this model' : 'no reply from the AI'));
-          return;
-        }
-      }
 
       // ----- Deep-dive agent watch replies -----
       if (data.action === 'ANSWER_SETTLED') {
@@ -3511,46 +3549,59 @@ Begin: state a one-line plan, then issue your first tool call.`;
 
   // ----- History storage (chrome.storage.local) -----
 
+  // History is kept in memory after the first read (it can be several MB);
+  // writes go through setHistory, and changes from another Yavar window come
+  // in through storage.onChanged.
   async getHistory() {
+    if (this._history) return this._history;
     try {
       const { yavarHistory } = await chrome.storage.local.get('yavarHistory');
-      return Array.isArray(yavarHistory) ? yavarHistory : [];
+      this._history = Array.isArray(yavarHistory) ? yavarHistory : [];
     } catch (e) {
       console.error('[Yavar] Failed to load history:', e);
       return [];
     }
+    return this._history;
+  }
+
+  async setHistory(list) {
+    this._history = list;
+    await chrome.storage.local.set({ yavarHistory: list });
   }
 
   async addHistoryEntry(entry) {
-    const history = await this.getHistory();
-    history.unshift(entry);
-    if (history.length > 200) history.length = 200; // keep the 200 most recent
-    await chrome.storage.local.set({ yavarHistory: history });
+    // keep the 200 most recent
+    await this.setHistory([entry, ...(await this.getHistory())].slice(0, 200));
   }
 
   async deleteHistoryEntry(id) {
-    const history = (await this.getHistory()).filter(e => e.id !== id);
-    await chrome.storage.local.set({ yavarHistory: history });
+    await this.setHistory((await this.getHistory()).filter(e => e.id !== id));
     this.renderHistory();
   }
 
   async clearHistory() {
-    await chrome.storage.local.set({ yavarHistory: [] });
+    await this.setHistory([]);
     this.renderHistory();
   }
 
-  handleClearHistoryClick() {
-    // Two-click confirm (window.confirm can be unreliable inside side panels)
-    if (this._clearArmed) {
-      clearTimeout(this._clearTimer);
-      this._clearArmed = false;
-      this.clearHistory();
-      this.showNotification('🗑️ History cleared');
-      return;
+  // Two-click confirm (window.confirm is unreliable inside side panels):
+  // true on a second click within 3 s; otherwise arms and shows the hint.
+  confirmTwice(key, hint = 'Click clear again to confirm') {
+    this._armed = this._armed || new Map();
+    if (this._armed.has(key)) {
+      clearTimeout(this._armed.get(key));
+      this._armed.delete(key);
+      return true;
     }
-    this._clearArmed = true;
-    this.showNotification('Click clear again to confirm');
-    this._clearTimer = setTimeout(() => { this._clearArmed = false; }, 3000);
+    this._armed.set(key, setTimeout(() => this._armed.delete(key), 3000));
+    this.showNotification(hint);
+    return false;
+  }
+
+  handleClearHistoryClick() {
+    if (!this.confirmTwice('history')) return;
+    this.clearHistory();
+    this.showNotification('🗑️ History cleared');
   }
 
   // ----- History panel UI -----
@@ -3720,19 +3771,12 @@ Begin: state a one-line plan, then issue your first tool call.`;
     chrome.storage.local.set({ yavarNotes: this.cmEditor.getValue() });
   }
 
-  // Two-click confirm, same as history: one stray click shouldn't wipe notes
+  // One stray click shouldn't wipe notes
   handleClearNotesClick() {
     if (!this.cmEditor.getValue()) return;
-    if (this._clearNotesArmed) {
-      clearTimeout(this._clearNotesTimer);
-      this._clearNotesArmed = false;
-      this.clearNotes();
-      this.showNotification('🗑️ Notes cleared');
-      return;
-    }
-    this._clearNotesArmed = true;
-    this.showNotification('Click clear again to confirm');
-    this._clearNotesTimer = setTimeout(() => { this._clearNotesArmed = false; }, 3000);
+    if (!this.confirmTwice('notes')) return;
+    this.clearNotes();
+    this.showNotification('🗑️ Notes cleared');
   }
 
   downloadNotes() {
@@ -3788,42 +3832,6 @@ Begin: state a one-line plan, then issue your first tool call.`;
       this.showNotification('Copied notes to clipboard!');
     } catch (e) {
       console.error('[Yavar] Failed to copy notes:', e);
-    }
-  }
-
-  // ========== Copy Functions ==========
-
-  async copyPageContent() {
-    try {
-      const [tab] = await this.getActiveTabs();
-
-      const result = await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        func: extractPageContent
-      });
-
-      const content = result[0]?.result || '';
-
-      if (content) {
-        await navigator.clipboard.writeText(content);
-        this.showNotification('📋 Page content copied!');
-      } else {
-        this.showNotification('⚠️ Could not extract content');
-      }
-
-    } catch (error) {
-      console.error('[Yavar] Failed to copy page:', error);
-      this.showNotification('❌ Failed to copy page content');
-    }
-  }
-
-  async copyLink() {
-    try {
-      const [tab] = await this.getActiveTabs();
-      await navigator.clipboard.writeText(tab.url);
-      this.showNotification('🔗 URL copied to clipboard!');
-    } catch (error) {
-      console.error('[Yavar] Failed to copy link:', error);
     }
   }
 
@@ -3919,7 +3927,8 @@ Begin: state a one-line plan, then issue your first tool call.`;
     if (!code.trim()) return;
     const id = 'run_' + Date.now();
     this._runId = id;
-    this._runResult = { code, lang: this.runLang, output: '', ok: null };
+    this._runResult = { code, lang: this.runLang, output: '' };
+    this._runPending = null;
     this.runOutput.textContent = '';
     this.runOutput.classList.remove('has-error');
     this.runFollowups.classList.add('hidden');
@@ -3942,13 +3951,17 @@ Begin: state a one-line plan, then issue your first tool call.`;
       const span = document.createElement('span');
       if (m.stream === 'stderr') span.className = 'run-err';
       span.textContent = m.text;
-      this.runOutput.appendChild(span);
-      this.runOutput.scrollTop = this.runOutput.scrollHeight;
+      // Batch DOM appends: a print loop can send thousands of lines
+      this._runPending = this._runPending || document.createDocumentFragment();
+      this._runPending.appendChild(span);
+      if (!this._runFlushQueued) {
+        this._runFlushQueued = true;
+        requestAnimationFrame(() => this.flushRunOutput());
+      }
       this._runResult.output += m.text;
     } else if (m.type === 'done') {
+      this.flushRunOutput();
       this._runId = null;
-      this._runResult.ok = m.ok;
-      this._runResult.error = m.error;
       this.runGo.disabled = false;
       this.runStop.classList.add('hidden');
       this.runOutput.classList.toggle('has-error', !m.ok);
@@ -3961,10 +3974,18 @@ Begin: state a one-line plan, then issue your first tool call.`;
     }
   }
 
+  flushRunOutput() {
+    this._runFlushQueued = false;
+    if (!this._runPending) return;
+    this.runOutput.appendChild(this._runPending);
+    this._runPending = null;
+    this.runOutput.scrollTop = this.runOutput.scrollHeight;
+  }
+
   askAboutRun(kind) {
     const r = this._runResult;
     if (!r) return;
-    const lang = r.lang === 'python' ? 'python' : 'javascript';
+    const lang = r.lang;   // already 'python' | 'javascript' (setRunLang)
     const name = lang === 'python' ? 'Python' : 'JavaScript';
     const output = (r.output || '(no output)').slice(0, 8000);
     const block = `\`\`\`${lang}\n${r.code.replace(/\n$/, '')}\n\`\`\`\n\nOutput:\n\`\`\`\n${output.replace(/\n$/, '')}\n\`\`\``;
@@ -4186,6 +4207,9 @@ Begin: state a one-line plan, then issue your first tool call.`;
     // Listen for screenshot data that arrives after sidepanel loads
     chrome.storage.onChanged.addListener((changes, areaName) => {
       if (areaName === 'sync' && changes.promptTemplates) this.sendTemplatesToFrame();
+      if (areaName === 'local' && changes.yavarHistory && this._history) {
+        this._history = changes.yavarHistory.newValue || [];
+      }
       if (areaName !== 'session') return;
 
       if (changes.pendingAction?.newValue) {
@@ -4196,7 +4220,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
       // Context-menu text while the panel is already open
       if (changes.pendingText?.newValue) {
         const text = changes.pendingText.newValue;
-        chrome.storage.session.remove(['pendingText', 'pendingNotification']);
+        chrome.storage.session.remove('pendingText');
         this.handlePendingText(text);
       }
 
@@ -4222,7 +4246,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
 
   async checkPendingData() {
     try {
-      const result = await chrome.storage.session.get(['pendingText', 'pendingScreenshot', 'pendingScreenshotRect', 'pendingNotification', 'pendingAction']);
+      const result = await chrome.storage.session.get(['pendingText', 'pendingScreenshot', 'pendingScreenshotRect', 'pendingAction']);
 
       if (result.pendingAction) {
         await chrome.storage.session.remove('pendingAction');
@@ -4230,7 +4254,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
       }
 
       if (result.pendingText) {
-        await chrome.storage.session.remove(['pendingText', 'pendingNotification']);
+        await chrome.storage.session.remove('pendingText');
         this.handlePendingText(result.pendingText);
       }
 
@@ -4320,14 +4344,6 @@ Begin: state a one-line plan, then issue your first tool call.`;
   }
 }
 
-// Content extraction function (runs in page context)
-function extractPageContent() {
-  const article = document.querySelector('article');
-  if (article) return article.innerText;
-  const main = document.querySelector('main');
-  if (main) return main.innerText;
-  return document.body.innerText;
-}
 
 // Initialize panel
 const panel = new YavarSidePanel();

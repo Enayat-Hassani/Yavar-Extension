@@ -158,24 +158,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  // Handle storing pending text (content scripts can't use chrome.storage.session)
-  if (message.action === 'store_pending_text') {
-    (async () => {
-      try {
-        await chrome.storage.session.set({
-          pendingText: message.text,
-          pendingNotification: message.notification
-        });
-        console.log('[Background] Stored pending text in session');
-        sendResponse({ success: true });
-      } catch (error) {
-        console.error('[Background] Failed to store pending text:', error);
-        sendResponse({ success: false, error: error.message });
-      }
-    })();
-    return true;
-  }
-
   // Handle opening sidebar — must be synchronous to preserve user gesture
   if (message.action === 'open_sidebar') {
     const tabId = sender.tab?.id;
