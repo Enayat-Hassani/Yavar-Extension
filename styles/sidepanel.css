@@ -764,6 +764,31 @@ html, body {
   border-color: var(--accent);
 }
 
+.form-group textarea {
+  width: 100%;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.5);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  resize: vertical;
+  min-height: 64px;
+  transition: border-color 0.15s;
+}
+
+.form-group textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.input-dialog-hint {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-secondary, rgba(0, 0, 0, 0.5));
+}
+
 .form-group input[type="checkbox"] {
   margin-right: 8px;
 }

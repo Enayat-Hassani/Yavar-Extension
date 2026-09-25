@@ -78,6 +78,7 @@ class YavarSidePanel {
     this.dockAddPageLabel = this.dockAddPage?.querySelector('.files-tab-label');
     this.dockResearchPage = document.getElementById('dock-research-page');
     this.dockVideoResearch = document.getElementById('dock-video-research');
+    this.dockTranscribeResults = document.getElementById('dock-transcribe-results');
     this.filesQuickName = this.filesQuickAdd?.querySelector('.files-quick-name');
     this.filesPanel = document.getElementById('files-panel');
     this.filesTree = document.getElementById('files-tree');
@@ -210,6 +211,7 @@ class YavarSidePanel {
     });
     this.dockResearchPage?.addEventListener('click', () => this.researchThisPage());
     this.dockVideoResearch?.addEventListener('click', () => this.researchVideosOnTopic());
+    this.dockTranscribeResults?.addEventListener('click', () => this.transcribeSearchResults());
     this.btnCloseFiles.addEventListener('click', () => this.filesPanel.classList.add('hidden'));
     this.btnRefreshFiles.addEventListener('click', () => this.refreshFiles());
     this.filesSearch.addEventListener('input', () => this.filterFilesTree());
@@ -844,13 +846,12 @@ First Task: Based on the tree and tech stack, what is the single most important 
       return;
     }
 
-    let query = '';
-    try {
-      query = (window.prompt('What should the AI research?') || '').trim();
-    } catch (e) {
-      this.showNotification('⚠️ Could not open the input dialog');
-      return;
-    }
+    const query = (await this.promptDialog({
+      title: 'Web research',
+      label: 'What should the AI research?',
+      placeholder: 'e.g. best budget mirrorless cameras in 2026',
+      okLabel: 'Research'
+    }) || '').trim();
     if (!query) return;
 
     // Deep mode raises the limits and pushes the AI to cover more sources
@@ -1484,6 +1485,10 @@ Begin: state a one-line plan, then issue your first tool call.`;
     this.dockResearchPage?.classList.toggle('hidden', !usable);
     this.dockVideoResearch?.classList.toggle('hidden', !usable);
 
+    // "Transcribe results" only on a YouTube search results page.
+    const isYouTubeSearch = /:\/\/(www\.)?youtube\.com\/results\?/i.test(url);
+    this.dockTranscribeResults?.classList.toggle('hidden', !(usable && isYouTubeSearch));
+
     // On a YouTube watch page, "Add page" becomes "Add video" (grab transcript)
     const isYouTubeWatch = /:\/\/(www\.)?youtube\.com\/watch\?/i.test(url) || /:\/\/youtu\.be\//i.test(url);
     this._addPageIsVideo = usable && isYouTubeWatch;
@@ -1696,6 +1701,90 @@ Begin: state a one-line plan, then issue your first tool call.`;
     }
   }
 
+  // In-panel input dialog styled like the rest of Yavar — replaces the native
+  // window.prompt(). Resolves to the trimmed string on OK, null on cancel, or
+  // the string '__extra__' when the optional extra action button is clicked.
+  // NOTE: visibility is toggled via style.display, not a `.hidden` class — the
+  // stylesheet has no generic `.hidden` rule (only scoped ones).
+  promptDialog({ title = 'Input', label = '', placeholder = '', value = '', okLabel = 'OK', multiline = false, extraLabel = '' } = {}) {
+    return new Promise((resolve) => {
+      const dlg = document.getElementById('input-dialog');
+      if (!dlg) { // fallback if markup missing
+        const r = window.prompt(label || title, value);
+        resolve(r === null ? null : r.trim());
+        return;
+      }
+      const titleEl = document.getElementById('input-dialog-title');
+      const labelEl = document.getElementById('input-dialog-label');
+      const input = document.getElementById('input-dialog-field');
+      const textarea = document.getElementById('input-dialog-textarea');
+      const hint = document.getElementById('input-dialog-hint');
+      const okBtn = document.getElementById('input-dialog-ok');
+      const form = document.getElementById('input-dialog-form');
+      const cancelBtn = document.getElementById('input-dialog-cancel');
+      const closeBtn = document.getElementById('input-dialog-close');
+      const actions = okBtn.parentElement;
+
+      const field = multiline ? textarea : input;
+      const other = multiline ? input : textarea;
+      titleEl.textContent = title;
+      labelEl.textContent = label;
+      labelEl.style.display = label ? '' : 'none';
+      okBtn.textContent = okLabel;
+      field.value = value;
+      field.placeholder = placeholder;
+      field.style.display = '';
+      other.style.display = 'none';
+      if (multiline) {
+        hint.textContent = 'Press ⌘/Ctrl + Enter to submit';
+        hint.style.display = '';
+      } else {
+        hint.style.display = 'none';
+      }
+
+      // Optional third button (e.g. "Transcribe this page's results").
+      let extraBtn = null;
+      if (extraLabel) {
+        extraBtn = document.createElement('button');
+        extraBtn.type = 'button';
+        extraBtn.className = 'btn-secondary';
+        extraBtn.id = 'input-dialog-extra';
+        extraBtn.textContent = extraLabel;
+        actions.insertBefore(extraBtn, cancelBtn);
+      }
+
+      let done = false;
+      const cleanup = () => {
+        dlg.classList.add('hidden');
+        form.removeEventListener('submit', onSubmit);
+        cancelBtn.removeEventListener('click', onCancel);
+        closeBtn.removeEventListener('click', onCancel);
+        dlg.removeEventListener('mousedown', onBackdrop);
+        field.removeEventListener('keydown', onKey);
+        if (extraBtn) { extraBtn.removeEventListener('click', onExtra); extraBtn.remove(); }
+      };
+      const finish = (result) => { if (done) return; done = true; cleanup(); resolve(result); };
+      const onSubmit = (e) => { e.preventDefault(); finish(field.value.trim()); };
+      const onCancel = () => finish(null);
+      const onExtra = () => finish('__extra__');
+      const onBackdrop = (e) => { if (e.target === dlg) finish(null); };
+      const onKey = (e) => {
+        if (e.key === 'Escape') { e.preventDefault(); finish(null); }
+        else if (e.key === 'Enter' && multiline && (e.metaKey || e.ctrlKey)) { e.preventDefault(); finish(field.value.trim()); }
+      };
+
+      form.addEventListener('submit', onSubmit);
+      cancelBtn.addEventListener('click', onCancel);
+      closeBtn.addEventListener('click', onCancel);
+      dlg.addEventListener('mousedown', onBackdrop);
+      field.addEventListener('keydown', onKey);
+      if (extraBtn) extraBtn.addEventListener('click', onExtra);
+
+      dlg.classList.remove('hidden');
+      setTimeout(() => { field.focus(); field.select?.(); }, 30);
+    });
+  }
+
   // Read ytx server config from settings (with sane defaults).
   async getYtxSettings() {
     let s = {};
@@ -1764,40 +1853,29 @@ Begin: state a one-line plan, then issue your first tool call.`;
   }
 
   // Feature: research a topic across the top YouTube videos. Searches YouTube,
-  // pulls each video's transcript from the ytx server, and hands the bundle to
-  // the AI to synthesize against the plan in Notes.
+  // then transcribes + synthesizes the results. When the active tab is already a
+  // YouTube search page, the dialog also offers to use those on-screen results.
   async researchVideosOnTopic() {
-    let topic = '';
+    let onYouTubeSearch = false;
     try {
-      topic = (window.prompt('Research a topic across YouTube videos:\n\nWhat do you want to look into?') || '').trim();
-    } catch (e) {
-      this.showNotification('⚠️ Could not open the input dialog');
-      return;
-    }
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      onYouTubeSearch = /:\/\/(www\.)?youtube\.com\/results\?/i.test(tab?.url || '');
+    } catch (e) {}
+
+    const answer = await this.promptDialog({
+      title: 'Research videos',
+      label: 'What topic do you want to dig into across YouTube?',
+      placeholder: 'e.g. beginner sourdough mistakes',
+      okLabel: 'Search & transcribe',
+      extraLabel: onYouTubeSearch ? 'Use this page’s results' : ''
+    });
+    if (answer === null) return;
+    if (answer === '__extra__') { await this.transcribeSearchResults(); return; }
+    const topic = (answer || '').trim();
     if (!topic) return;
 
-    const { base, count, clean } = await this.getYtxSettings();
+    const { count } = await this.getYtxSettings();
 
-    // The plan/lens: prefer the persistent Notes content, else ask for a goal.
-    let plan = '';
-    try { plan = ((await chrome.storage.local.get('yavarNotes')).yavarNotes || '').trim(); } catch (e) {}
-    if (!plan) {
-      try {
-        plan = (window.prompt('Your Notes are empty. What should the AI optimize the summary for?\n(e.g. "a 4-day trip, love food + hikes, on a budget")') || '').trim();
-      } catch (e) {}
-    }
-
-    // ytx must be running for bulk fetching.
-    this.showNotification('🎬 Checking ytx server…');
-    try {
-      const h = await fetch(`${base}/health`);
-      if (!h.ok) throw new Error('bad status');
-    } catch (e) {
-      this.showNotification(`⚠️ ytx server not reachable at ${base}. Start it: uv run uvicorn ytx_api.main:app --port 8000`);
-      return;
-    }
-
-    // Search.
     this.showNotification(`🔎 Searching YouTube for “${topic}”…`);
     let videos;
     try {
@@ -1809,6 +1887,97 @@ Begin: state a one-line plan, then issue your first tool call.`;
     if (!videos.length) {
       this.showNotification('⚠️ No videos found for that topic');
       return;
+    }
+    await this.synthesizeVideos({ topic, videos });
+  }
+
+  // Feature: transcribe the videos already shown on the current YouTube search
+  // results page (the top N the user is looking at), then synthesize them.
+  async transcribeSearchResults() {
+    const { count } = await this.getYtxSettings();
+    let topic = 'these videos';
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      topic = new URL(tab.url).searchParams.get('search_query') || topic;
+    } catch (e) {}
+
+    this.showNotification('🎬 Reading the videos on this page…');
+    let videos;
+    try {
+      videos = await this.getSearchResultsFromPage(count);
+    } catch (e) {
+      this.showNotification('⚠️ ' + e.message);
+      return;
+    }
+    if (!videos.length) {
+      this.showNotification('⚠️ No videos found on this page (scroll the results, then retry)');
+      return;
+    }
+    await this.synthesizeVideos({ topic, videos });
+  }
+
+  // Read the video list rendered on the active YouTube search results page, in
+  // display order, top `n`. Reads the DOM the user is actually looking at, so it
+  // honors whatever filters/sort they applied.
+  async getSearchResultsFromPage(n) {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id) throw new Error('No active tab');
+    const [res] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: (max) => {
+        const out = [];
+        const seen = new Set();
+        // Title links give clean titles and correct order on both the classic
+        // and newer search layouts; fall back to any watch link if none match.
+        let links = document.querySelectorAll(
+          'a#video-title, a#video-title-link, a.yt-lockup-metadata-view-model-wiz__title'
+        );
+        if (!links.length) links = document.querySelectorAll('a[href*="/watch?v="]');
+        for (const a of links) {
+          if (out.length >= max) break;
+          const href = a.href || a.getAttribute('href') || '';
+          const m = href.match(/[?&]v=([\w-]{11})/);
+          if (!m) continue;
+          const id = m[1];
+          if (seen.has(id)) continue;
+          seen.add(id);
+          const title = (a.getAttribute('title') || a.textContent || '').trim().replace(/\s+/g, ' ') || id;
+          out.push({ id, title });
+        }
+        return out;
+      },
+      args: [n]
+    });
+    return res?.result || [];
+  }
+
+  // Shared: pull each video's transcript from ytx and hand the bundle to the AI
+  // to synthesize against the plan in Notes. Used by both the topic search and
+  // the "transcribe these results" flows.
+  async synthesizeVideos({ topic, videos }) {
+    const { base, clean } = await this.getYtxSettings();
+
+    // ytx must be running for bulk fetching.
+    this.showNotification('🎬 Checking ytx server…');
+    try {
+      const h = await fetch(`${base}/health`, { signal: AbortSignal.timeout(2000) });
+      if (!h.ok) throw new Error('bad status');
+    } catch (e) {
+      this.showNotification(`⚠️ ytx server not reachable at ${base}. Start it (see the README) or set the URL in Settings.`);
+      return;
+    }
+
+    // The plan/lens: prefer the persistent Notes content, else ask for a goal.
+    let plan = '';
+    try { plan = ((await chrome.storage.local.get('yavarNotes')).yavarNotes || '').trim(); } catch (e) {}
+    if (!plan) {
+      plan = (await this.promptDialog({
+        title: 'What matters to you?',
+        label: 'Your Notes are empty — what should the summary optimize for?',
+        placeholder: 'e.g. a 4-day trip, love food + hikes, on a budget',
+        okLabel: 'Continue',
+        multiline: true
+      }) || '').trim();
     }
 
     // Fetch transcripts.
@@ -1826,7 +1995,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
       `## Video ${i + 1}: ${v.title}\nhttps://www.youtube.com/watch?v=${v.id}\n\n${v.text}`
     ).join('\n\n---\n\n');
 
-    const fname = 'videos-' + (topic.replace(/[^\w.-]+/g, '-').slice(0, 40) || 'topic') + '.md';
+    const fname = 'videos-' + (String(topic).replace(/[^\w.-]+/g, '-').slice(0, 40) || 'topic') + '.md';
     this.forwardAttachToIframe(fname, bundle);
 
     const planBlock = plan ? `\n\nMY PLAN / WHAT I CARE ABOUT:\n"""\n${plan}\n"""` : '';
@@ -1857,13 +2026,12 @@ Begin: state a one-line plan, then issue your first tool call.`;
       return;
     }
 
-    let question = '';
-    try {
-      question = (window.prompt(`Research this page:\n"${page.title}"\n\nWhat do you want to know? (blank = summarize & dig deeper)`) || '').trim();
-    } catch (e) {
-      this.showNotification('⚠️ Could not open the input dialog');
-      return;
-    }
+    const question = await this.promptDialog({
+      title: 'Research this page',
+      label: page.title ? `“${page.title}”` : 'Research this page',
+      placeholder: 'What do you want to know? (blank = summarize & dig deeper)',
+      okLabel: 'Research'
+    });
     if (question === null) return;
 
     let deep = false;
