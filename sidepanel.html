@@ -99,7 +99,7 @@
     </div>
 
     <!-- History Panel (captured AI answers) -->
-    <div id="history-panel" class="history-panel hidden">
+    <div id="history-panel" class="history-panel sheet hidden">
       <div class="history-header">
         <span class="history-title">Saved Answers</span>
         <div class="history-header-actions">
@@ -194,7 +194,7 @@
     </div>
 
     <!-- Repo Reader: browse, pick several files, send them as one pack -->
-    <div id="files-panel" class="files-panel hidden" aria-label="Repo Reader">
+    <div id="files-panel" class="files-panel sheet hidden" aria-label="Repo Reader">
       <div class="files-header">
         <div class="files-heading">
           <span class="files-title">Repo Reader</span>
@@ -423,7 +423,7 @@
     </div>
 
     <!-- Code runner: run JS/Python from answers (or your own) in a sandbox -->
-    <div id="run-panel" class="run-panel hidden" role="dialog" aria-label="Code runner">
+    <div id="run-panel" class="run-panel sheet hidden" role="dialog" aria-label="Code runner">
       <div class="run-header">
         <div class="run-title">
           <span>Run code</span>
@@ -440,16 +440,20 @@
         <button id="run-stop" type="button" class="run-stop hidden">■ Stop</button>
         <span id="run-status" class="run-status" aria-live="polite"></span>
       </div>
-      <pre id="run-output" class="run-output" aria-label="Output"></pre>
-      <div id="run-followups" class="run-followups hidden">
-        <button type="button" class="files-chip-btn" data-ask="fix">Ask AI to fix it</button>
-        <button type="button" class="files-chip-btn" data-ask="explain">Explain the output</button>
-        <button type="button" class="files-chip-btn" data-ask="next">What should I try next?</button>
+      <div class="run-scroll">
+        <pre id="run-output" class="run-output" aria-label="Output"></pre>
+        <div id="run-followups" class="run-followups hidden">
+          <button type="button" class="files-chip-btn" data-ask="fix">Ask AI to fix it</button>
+          <button type="button" class="files-chip-btn" data-ask="explain">Explain the output</button>
+          <button type="button" class="files-chip-btn" data-ask="next">What should I try next?</button>
+        </div>
+        <!-- Answers to the buttons above appear here, streamed from the chat -->
+        <div id="run-answers" class="run-answers"></div>
       </div>
     </div>
 
     <!-- Rebuild it yourself: a step-by-step plan to rebuild the project -->
-    <div id="rebuild-panel" class="run-panel rebuild-panel hidden" role="dialog" aria-label="Rebuild it yourself">
+    <div id="rebuild-panel" class="run-panel rebuild-panel sheet hidden" role="dialog" aria-label="Rebuild it yourself">
       <div class="run-header">
         <div class="files-heading">
           <span class="files-title">Rebuild it yourself</span>
