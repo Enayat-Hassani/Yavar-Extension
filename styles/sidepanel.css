@@ -1024,8 +1024,8 @@ html, body {
   color: var(--text-secondary);
 }
 
-.answer-status { display: inline-flex; align-items: center; }
-.answer-status .files-spinner { width: 10px; height: 10px; margin-right: 6px; }
+.answer-status { display: inline-flex; align-items: center; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.answer-card.is-failed .answer-status { color: var(--danger); white-space: normal; }
 
 .answer-link[hidden] { display: none; }
 
@@ -1965,3 +1965,214 @@ button.lens-item:focus-visible {
 .composer-tool { color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface)); border-color: color-mix(in srgb, var(--accent) 30%, var(--border)); }
 .model-mark[data-model="api"] { background: linear-gradient(135deg, #5e5ce6, #bf5af2); }
 .composer-item-size { flex-shrink: 0; font-size: 10.5px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+
+/* ========== Answers: rendering, actions, motion ========== */
+
+/* Messages arrive with a short rise; nothing moves once it's there */
+@keyframes msgIn {
+  from { opacity: 0; translate: 0 6px; }
+  to { opacity: 1; translate: 0 0; }
+}
+.thread-q, .thread-body .answer-card, .thread-note { animation: msgIn 0.28s var(--ease-out) both; }
+
+/* Before the first word: three soft lines that shimmer */
+.answer-wait { display: flex; flex-direction: column; gap: 7px; padding: 4px 0 2px; }
+.answer-wait i {
+  display: block;
+  height: 9px;
+  border-radius: 5px;
+  background: linear-gradient(90deg, var(--bg-secondary) 0%, var(--bg-tertiary) 50%, var(--bg-secondary) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+.answer-wait i:nth-child(1) { width: 92%; }
+.answer-wait i:nth-child(2) { width: 78%; animation-delay: 0.12s; }
+.answer-wait i:nth-child(3) { width: 54%; animation-delay: 0.24s; }
+@keyframes shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+
+/* While text streams in, a caret at its end */
+.answer-card.is-writing .answer-body > p:last-child::after,
+.answer-card.is-writing .answer-body > :is(ul, ol):last-child > li:last-child::after {
+  content: '';
+  display: inline-block;
+  width: 2px;
+  height: 1.05em;
+  margin-left: 2px;
+  vertical-align: -0.18em;
+  border-radius: 1px;
+  background: var(--accent);
+  animation: caret 1s steps(1) infinite;
+}
+@keyframes caret { 50% { opacity: 0; } }
+
+/* Actions under a finished answer: quiet until you reach for them */
+.answer-foot {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-top: 6px;
+  animation: fadeIn 0.2s ease both;
+}
+.answer-foot[hidden] { display: none; }
+.answer-act {
+  width: 28px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+.answer-act:hover { color: var(--text-primary); background: var(--bg-secondary); }
+.answer-act:focus-visible, .answer-chip:focus-visible, .answer-followup:focus-visible, .thread-q-edit:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.answer-act.is-done { color: var(--success); }
+.answer-act:disabled { cursor: default; }
+.answer-chip {
+  margin-left: auto;
+  padding: 4px 10px;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.answer-chip:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.answer-chip:disabled { opacity: 0.5; cursor: default; }
+
+/* Suggested next questions (API answers) */
+.answer-followups { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin-top: 10px; }
+.answer-followup {
+  max-width: 100%;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  color: var(--text-primary);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  cursor: pointer;
+  animation: msgIn 0.3s var(--ease-out) both;
+  animation-delay: calc(var(--i, 0) * 60ms);
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+.answer-followup::before { content: '↳ '; color: var(--text-secondary); }
+.answer-followup:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+
+/* Your question: edit and ask again */
+.thread-q { position: relative; }
+.thread-q-edit {
+  position: absolute;
+  top: 50%;
+  right: calc(100% + 4px);
+  translate: 0 -50%;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  border-radius: 7px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, background-color 0.15s ease;
+}
+.thread-q:hover .thread-q-edit, .thread-q-edit:focus-visible { opacity: 1; }
+.thread-q-edit:hover { background: var(--bg-secondary); color: var(--text-primary); }
+
+/* Code: colours from the editor's palette; long blocks start folded */
+.tok-k { color: var(--cm-keyword); }
+.tok-s { color: var(--cm-string); }
+.tok-c { color: var(--cm-comment); font-style: italic; }
+.tok-n { color: var(--cm-number); }
+.md-code.is-folded pre { max-height: 22em; overflow: hidden; mask-image: linear-gradient(#000 70%, transparent); }
+.md-code-more {
+  display: block;
+  width: 100%;
+  padding: 6px;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--accent);
+  background: var(--bg-primary);
+  border: none;
+  border-top: 1px solid var(--border);
+  cursor: pointer;
+}
+.md-code-more:hover { background: var(--bg-secondary); }
+
+/* Tables scroll sideways inside the answer instead of widening it */
+.md-table { margin: 8px 0 10px; overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; }
+.md-table table { width: 100%; border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.md-table th, .md-table td { padding: 6px 10px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--border); }
+.md-table th { font-weight: 600; background: var(--bg-secondary); white-space: nowrap; }
+.md-table tr:last-child td { border-bottom: none; }
+.md del { color: var(--text-secondary); }
+.md ul ul, .md ol ol, .md ul ol, .md ol ul { margin: 2px 0 0; }
+
+/* Checklists */
+.md ul.md-tasks { padding-left: 2px; list-style: none; }
+.md-tasks li { display: flex; gap: 8px; align-items: baseline; }
+.md-task {
+  flex-shrink: 0;
+  width: 13px;
+  height: 13px;
+  translate: 0 2px;
+  border: 1.5px solid var(--text-secondary);
+  border-radius: 4px;
+}
+.md-task { position: relative; }
+.md-task.is-done { background: var(--accent); border-color: var(--accent); }
+.md-task.is-done::after {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 0;
+  width: 3px;
+  height: 7px;
+  border: solid #fff;
+  border-width: 0 1.5px 1.5px 0;
+  rotate: 45deg;
+}
+.md-task.is-done + .md-task-text { color: var(--text-secondary); }
+
+/* Back to the newest message after scrolling up */
+.thread-latest {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 10px);
+  translate: -50% 0;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 12px;
+  font: 600 11.5px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  color: var(--text-primary);
+  background: var(--surface-glass);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+  cursor: pointer;
+  transition: opacity 0.18s ease, display 0.18s allow-discrete;
+}
+.thread-latest.hidden { display: none; opacity: 0; }
+@starting-style { .thread-latest:not(.hidden) { opacity: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .thread-q, .thread-body .answer-card, .thread-note, .answer-foot, .answer-followup { animation: none; }
+  .answer-wait i { animation: none; }
+  .answer-card.is-writing .answer-body > p:last-child::after,
+  .answer-card.is-writing .answer-body > :is(ul, ol):last-child > li:last-child::after { animation: none; }
+}
