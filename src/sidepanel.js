@@ -2554,6 +2554,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
       }
 
       await this.markRead(files.map(f => f.path));
+      this._readingContext = { label: repoName, ts: Date.now() };
       this.selectedFiles.clear();
       this.filesPanel.classList.add('hidden'); // show the chat so you can read / ask
       const size = `~${formatCount(estimateTokens(totalChars))} tokens`;
@@ -2588,6 +2589,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
       const pageTitle = (gh.title || '').split(' · ')[0];
 
       this.forwardAttachToIframe(fname, body, 'text/plain');
+      this._readingContext = { label: `${gh.owner}/${gh.repo}`, ts: Date.now() };
       const prompt =
         `The attached "${fname}" is the diff of ${label} in ${gh.owner}/${gh.repo}` +
         `${pageTitle ? ` ("${pageTitle}")` : ''}, touching ${files} file${files === 1 ? '' : 's'}.\n\n` +
@@ -2854,7 +2856,9 @@ Begin: state a one-line plan, then issue your first tool call.`;
       platform: data.platform || model?.name || 'AI',
       url: data.url || '',
       prompt,
-      answer
+      answer,
+      // What you were reading when you asked (repo files, a PR…), if recent
+      topic: (this._readingContext && Date.now() - this._readingContext.ts < 3600000) ? this._readingContext.label : ''
     };
 
     await this.addHistoryEntry(entry);
@@ -2935,7 +2939,8 @@ Begin: state a one-line plan, then issue your first tool call.`;
       ? history.filter(e =>
           (e.answer || '').toLowerCase().includes(q) ||
           (e.prompt || '').toLowerCase().includes(q) ||
-          (e.platform || '').toLowerCase().includes(q))
+          (e.platform || '').toLowerCase().includes(q) ||
+          (e.topic || '').toLowerCase().includes(q))
       : history;
 
     if (!filtered.length) {
@@ -2958,6 +2963,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
         <div class="history-item" data-id="${e.id}">
           <div class="history-meta">
             <span class="history-platform">${this.escapeHtml(e.platform || 'AI')}</span>
+            ${e.topic ? `<button class="history-topic" data-topic="${this.escapeHtml(e.topic)}" title="Show answers about ${this.escapeHtml(e.topic)}">${this.escapeHtml(e.topic)}</button>` : ''}
             <span class="history-date">${date}</span>
           </div>
           ${promptLine}
@@ -2972,6 +2978,12 @@ Begin: state a one-line plan, then issue your first tool call.`;
   }
 
   handleHistoryListClick(e) {
+    const topicEl = e.target.closest('.history-topic');
+    if (topicEl) {
+      this.historySearch.value = topicEl.dataset.topic;
+      this.renderHistory();
+      return;
+    }
     const answerEl = e.target.closest('.history-answer[data-act="expand"]');
     if (answerEl) {
       this.toggleHistoryAnswer(answerEl);
@@ -3106,7 +3118,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
       return;
     }
     const blocks = history.map(e => {
-      const head = `## ${e.platform || 'AI'} · ${new Date(e.ts).toLocaleString()}`;
+      const head = `## ${e.topic ? e.topic + ' · ' : ''}${e.platform || 'AI'} · ${new Date(e.ts).toLocaleString()}`;
       const src = e.url ? `\n\n<${e.url}>` : '';
       const prompt = e.prompt ? `\n\n**Prompt:**\n\n${e.prompt}` : '';
       return `${head}${src}${prompt}\n\n**Answer:**\n\n${e.answer || ''}`;
