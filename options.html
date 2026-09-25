@@ -33,6 +33,48 @@
         <p class="help-text">Any chat site that can open in a frame. Off hides a model from the model menu.</p>
       </section>
 
+      <!-- Model APIs: answers without the chat sites -->
+      <section class="settings-section" id="apis">
+        <h2>Model APIs</h2>
+        <p class="help-text">Choose <strong>API</strong> in Yavar's model menu to answer through these instead of a chat site. Yavar tries them in order: your local gateway, then the free models, then the paid one. Keys are stored on this device only, never synced or exported.</p>
+
+        <div class="setting-item">
+          <label for="openrouter-key">OpenRouter key</label>
+          <div class="input-row">
+            <input type="password" id="openrouter-key" placeholder="sk-or-…" autocomplete="off">
+            <button id="save-openrouter-key" class="btn-secondary">Save</button>
+          </div>
+        </div>
+
+        <div class="setting-item">
+          <label>Free models, tried in order</label>
+          <div id="free-models" class="free-models"><p class="help-text">Load OpenRouter's current list, then tick the ones to use.</p></div>
+          <button id="load-free-models" class="btn-secondary">Load free models</button>
+          <p class="help-text">Free models have daily limits and are sometimes busy; Yavar moves to the next one when that happens.</p>
+        </div>
+
+        <div class="setting-item">
+          <label for="paid-model">Paid model, when the free ones fail</label>
+          <input type="text" id="paid-model" placeholder="e.g. anthropic/claude-haiku-4.5 (blank: never pay)">
+          <p class="help-text">An OpenRouter model id. Uses your OpenRouter credits.</p>
+        </div>
+
+        <div class="setting-item">
+          <label for="gateway-base">Local gateway (optional, tried first)</label>
+          <input type="text" id="gateway-base" placeholder="OmniRoute, Ollama… e.g. http://localhost:11434/v1">
+          <div class="input-row">
+            <input type="text" id="gateway-model" placeholder="Model, e.g. llama3.1">
+            <input type="password" id="gateway-key" placeholder="Key, if it needs one" autocomplete="off">
+          </div>
+          <p class="help-text">Any server with an OpenAI-compatible <code>/chat/completions</code>.</p>
+        </div>
+
+        <div class="setting-item">
+          <button id="test-api" class="btn-primary">Test</button>
+          <p id="test-api-result" class="help-text" aria-live="polite"></p>
+        </div>
+      </section>
+
       <!-- How Yavar asks -->
       <section class="settings-section">
         <h2>Asking the AI</h2>

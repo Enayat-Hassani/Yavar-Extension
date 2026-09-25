@@ -2,6 +2,7 @@
 
 import { loadTemplates, saveTemplates, DEFAULT_TEMPLATES } from './utils/templates.js';
 import { loadModels } from './utils/models.js';
+import { OPENROUTER_BASE, isFreeModel, loadApiConfig, buildRoute, askRoute } from './utils/llm.js';
 
 const DEFAULT_SETTINGS = {
   defaultAI: 'chatgpt',
@@ -12,7 +13,12 @@ const DEFAULT_SETTINGS = {
   deepResearch: false,
   inChatButtons: true,
   ytxBaseUrl: 'http://localhost:8722',
-  ytxVideoCount: 12
+  ytxVideoCount: 12,
+  answerWith: 'chat',
+  apiFreeModels: [],
+  apiPaidModel: '',
+  apiGatewayBase: '',
+  apiGatewayModel: ''
 };
 
 // Toggles that map one checkbox to one boolean setting
@@ -39,6 +45,7 @@ class OptionsPage {
     await this.loadModelsList();
     this.renderShortcuts();
     this.loadGithubToken();
+    this.loadApiKeys();
     const version = document.getElementById('app-version');
     if (version) version.textContent = 'v' + chrome.runtime.getManifest().version;
     this.templates = await loadTemplates();
@@ -101,6 +108,15 @@ class OptionsPage {
     });
 
     document.getElementById('save-github-token')?.addEventListener('click', () => this.saveGithubToken());
+
+    document.getElementById('save-openrouter-key')?.addEventListener('click', () => this.saveLocalKey('openrouterKey', 'openrouter-key'));
+    document.getElementById('gateway-key')?.addEventListener('change', () => this.saveLocalKey('gatewayKey', 'gateway-key'));
+    document.getElementById('load-free-models')?.addEventListener('click', () => this.loadFreeModels());
+    document.getElementById('free-models')?.addEventListener('change', () => this.saveFreeModels());
+    document.getElementById('paid-model')?.addEventListener('change', (e) => this.saveSetting({ apiPaidModel: e.target.value.trim() }));
+    document.getElementById('gateway-base')?.addEventListener('change', (e) => this.saveSetting({ apiGatewayBase: e.target.value.trim().replace(/\/+$/, '') }));
+    document.getElementById('gateway-model')?.addEventListener('change', (e) => this.saveSetting({ apiGatewayModel: e.target.value.trim() }));
+    document.getElementById('test-api')?.addEventListener('click', () => this.testApi());
 
     this.addSiteBtn.addEventListener('click', () => this.addDisabledSite());
     // Delegated: inline onclick handlers are blocked by the extension CSP
@@ -165,6 +181,10 @@ class OptionsPage {
     }
     if (this.ytxBaseUrlInput) this.ytxBaseUrlInput.value = this.settings.ytxBaseUrl;
     if (this.ytxVideoCountInput) this.ytxVideoCountInput.value = this.settings.ytxVideoCount;
+    document.getElementById('paid-model').value = this.settings.apiPaidModel || '';
+    document.getElementById('gateway-base').value = this.settings.apiGatewayBase || '';
+    document.getElementById('gateway-model').value = this.settings.apiGatewayModel || '';
+    this.renderFreeModels();
     this.renderDisabledSites();
   }
 
@@ -280,6 +300,77 @@ class OptionsPage {
     this.showToast(token ? 'Token saved' : 'Token removed');
   }
 
+  // ===== Model APIs (keys local only) =====
+  async loadApiKeys() {
+    try {
+      const keys = await chrome.storage.local.get(['openrouterKey', 'gatewayKey']);
+      document.getElementById('openrouter-key').value = keys.openrouterKey || '';
+      document.getElementById('gateway-key').value = keys.gatewayKey || '';
+    } catch (e) { /* leave empty */ }
+  }
+
+  async saveLocalKey(storageKey, inputId) {
+    const value = document.getElementById(inputId).value.trim();
+    await chrome.storage.local.set({ [storageKey]: value });
+    this.showToast(value ? 'Key saved' : 'Key removed');
+  }
+
+  // OpenRouter's current free models, biggest context first; ticked ones are
+  // the chosen models (kept in the order you chose them)
+  async loadFreeModels() {
+    const btn = document.getElementById('load-free-models');
+    btn.disabled = true;
+    try {
+      const res = await fetch(`${OPENROUTER_BASE}/models`);
+      if (!res.ok) throw new Error('OpenRouter answered ' + res.status);
+      const { data } = await res.json();
+      this.freeCatalog = (data || []).filter(isFreeModel)
+        .sort((a, b) => (b.context_length || 0) - (a.context_length || 0));
+      this.renderFreeModels();
+    } catch (e) {
+      this.showToast('Could not load the models: ' + e.message, true);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  renderFreeModels() {
+    const box = document.getElementById('free-models');
+    const chosen = this.settings.apiFreeModels || [];
+    // Chosen models first, in order, even before the list is loaded
+    const byId = new Map((this.freeCatalog || []).map(m => [m.id, m]));
+    const rows = [...chosen.map(id => byId.get(id) || { id }), ...(this.freeCatalog || []).filter(m => !chosen.includes(m.id))];
+    if (!rows.length) return;
+    box.innerHTML = rows.map(m => {
+      const ctx = m.context_length ? `${Math.round(m.context_length / 1000)}k context` : '';
+      const n = chosen.indexOf(m.id);
+      return `<label class="free-model"><input type="checkbox" value="${this.escapeHtml(m.id)}"${n >= 0 ? ' checked' : ''}>` +
+        `<span class="free-model-name">${n >= 0 ? `<b>${n + 1}.</b> ` : ''}${this.escapeHtml(m.name || m.id)}</span>` +
+        `<span class="free-model-meta">${this.escapeHtml(ctx)}</span></label>`;
+    }).join('');
+  }
+
+  saveFreeModels() {
+    const ticked = [...document.querySelectorAll('#free-models input:checked')].map(i => i.value);
+    const kept = (this.settings.apiFreeModels || []).filter(id => ticked.includes(id));
+    const added = ticked.filter(id => !kept.includes(id));
+    this.saveSetting({ apiFreeModels: [...kept, ...added] }).then(() => this.renderFreeModels());
+  }
+
+  async testApi() {
+    const out = document.getElementById('test-api-result');
+    const route = buildRoute(await loadApiConfig());
+    out.textContent = 'Asking…';
+    try {
+      const { text, step } = await askRoute(route, [{ role: 'user', content: 'Reply with just: OK' }], {
+        onAttempt: (s) => { out.textContent = `Trying ${s.label}…`; }
+      });
+      out.textContent = `✓ ${step.label}${step.paid ? ' (paid)' : ''} answered: ${text.trim().slice(0, 80)}`;
+    } catch (e) {
+      out.textContent = '✕ ' + e.message;
+    }
+  }
+
   renderShortcuts() {
     if (!this.shortcutsList || !chrome.commands?.getAll) return;
     chrome.commands.getAll((commands) => {
@@ -379,6 +470,11 @@ class OptionsPage {
         if (Array.isArray(imported.disabledSites)) clean.disabledSites = imported.disabledSites.filter(x => typeof x === 'string');
         if (typeof imported.ytxBaseUrl === 'string') clean.ytxBaseUrl = imported.ytxBaseUrl;
         if (Number.isFinite(imported.ytxVideoCount)) clean.ytxVideoCount = imported.ytxVideoCount;
+        for (const k of ['apiPaidModel', 'apiGatewayBase', 'apiGatewayModel']) {
+          if (typeof imported[k] === 'string') clean[k] = imported[k];
+        }
+        if (Array.isArray(imported.apiFreeModels)) clean.apiFreeModels = imported.apiFreeModels.filter(x => typeof x === 'string');
+        if (imported.answerWith === 'chat' || imported.answerWith === 'api') clean.answerWith = imported.answerWith;
         for (const k of ['autoSubmit', 'tempChats', 'deepResearch', 'inChatButtons']) {
           if (typeof imported[k] === 'boolean') clean[k] = imported[k];
         }
