@@ -54,9 +54,11 @@ export function refCandidates(rest, maxRefParts = 4) {
   return out;
 }
 
+// Encode each segment of a slash-separated path (keeps the slashes)
+export const encodePath = (p) => p.split('/').map(encodeURIComponent).join('/');
+
 export function rawFileUrl(owner, repo, ref, path) {
-  const enc = s => s.split('/').map(encodeURIComponent).join('/');
-  return `https://raw.githubusercontent.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${enc(ref)}/${enc(path)}`;
+  return `https://raw.githubusercontent.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${encodePath(ref)}/${encodePath(path)}`;
 }
 
 // Files that are useless (or harmful) to paste into a chat.
@@ -299,6 +301,13 @@ export function outlineTree(paths, selected, maxLines = 120) {
   return lines.join('\n');
 }
 
+// A file's content in a Markdown code fence (a longer fence if the content
+// itself contains ```)
+export function fencedFile({ path, content }) {
+  const fence = content.includes('```') ? '~~~~' : '```';
+  return `${fence}${langFromPath(path)}\n${content.replace(/\n$/, '')}\n${fence}`;
+}
+
 // One Markdown document holding several files, so a single chat message (and
 // a single attachment) carries them all.
 export function buildPack({ owner, repo, ref, files, treePaths = [] }) {
@@ -309,8 +318,7 @@ export function buildPack({ owner, repo, ref, files, treePaths = [] }) {
     : '';
   const body = files.map(f => {
     const range = f.lines ? ` (lines ${f.lines.start}-${f.lines.end})` : '';
-    const fence = f.content.includes('```') ? '~~~~' : '```';
-    return `\n## ${f.path}${range}\n\n${fence}${langFromPath(f.path)}\n${f.content.replace(/\n$/, '')}\n${fence}\n`;
+    return `\n## ${f.path}${range}\n\n${fencedFile(f)}\n`;
   }).join('');
   return head + map + body;
 }

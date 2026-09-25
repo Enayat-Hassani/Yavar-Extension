@@ -19,23 +19,22 @@
       if (v instanceof Error) return v.stack || String(v);
       if (typeof v === 'function') return v.toString().split('\n')[0] + ' …';
       try {
-        const seen = new WeakSet();
-        const replacer = (k, x) => {
-          if (typeof x === 'bigint') return x.toString() + 'n';
-          if (x && typeof x === 'object') { if (seen.has(x)) return '[Circular]'; seen.add(x); }
-          if (x instanceof Map) return Object.fromEntries(x);
-          if (x instanceof Set) return [...x];
-          return x;
+        // Each JSON pass needs its own "seen" set for cycle detection
+        const makeReplacer = () => {
+          const seen = new WeakSet();
+          return (k, x) => {
+            if (typeof x === 'bigint') return x.toString() + 'n';
+            if (x && typeof x === 'object') { if (seen.has(x)) return '[Circular]'; seen.add(x); }
+            if (x instanceof Map) return Object.fromEntries(x);
+            if (x instanceof Set) return [...x];
+            return x;
+          };
         };
         // One line when short (like Node's console), indented when long
-        const flat = JSON.stringify(v, replacer);
+        const flat = JSON.stringify(v, makeReplacer());
         if (flat === undefined) return String(v);
         if (flat.length <= 72) return flat.replace(/,(?=["\[{\d-]|true|false|null)/g, ', ');
-        const seen2 = new WeakSet();
-        return JSON.stringify(v, (k, x) => {
-          if (x && typeof x === 'object') { if (seen2.has(x)) return '[Circular]'; seen2.add(x); }
-          return typeof x === 'bigint' ? x.toString() + 'n' : x instanceof Map ? Object.fromEntries(x) : x instanceof Set ? [...x] : x;
-        }, 2);
+        return JSON.stringify(v, makeReplacer(), 2);
       } catch (e) {
         return String(v);
       }
@@ -58,8 +57,9 @@
         const m = String(err && err.stack || '').match(/<anonymous>:(\d+):(\d+)/);
         const where = m ? ` (line ${Number(m[1]) - 2})` : '';
         const name = err && err.name ? err.name + ': ' : '';
-        out('stderr')(`${name}${err && err.message !== undefined ? err.message : err}${where}`);
-        postMessage({ kind: 'done', ok: false, error: `${name}${err && err.message || err}${where}` });
+        const msg = `${name}${err && err.message !== undefined ? err.message : err}${where}`;
+        out('stderr')(msg);
+        postMessage({ kind: 'done', ok: false, error: msg });
       }
     };
   }
@@ -94,8 +94,9 @@
         }
         send({ kind: 'done', ok: true });
       } catch (err) {
-        send({ kind: 'out', stream: 'stderr', text: cleanTraceback(String(err && err.message || err)) + '\n' });
-        const last = cleanTraceback(String(err && err.message || err)).split('\n').filter(l => /^\w+(Error|Exception|Interrupt|Exit)\b/.test(l)).pop();
+        const tb = cleanTraceback(String(err && err.message || err));
+        send({ kind: 'out', stream: 'stderr', text: tb + '\n' });
+        const last = tb.split('\n').filter(l => /^\w+(Error|Exception|Interrupt|Exit)\b/.test(l)).pop();
         send({ kind: 'done', ok: false, error: last || 'error' });
       }
     };
@@ -120,8 +121,14 @@
     };
   }
 
-  const workerFrom = (fn) =>
-    new Worker(URL.createObjectURL(new Blob([`(${fn.toString()})()`], { type: 'text/javascript' })));
+  // One blob URL per worker kind, reused for every run (never leaked per run)
+  const workerUrls = new Map();
+  const workerFrom = (fn) => {
+    if (!workerUrls.has(fn)) {
+      workerUrls.set(fn, URL.createObjectURL(new Blob([`(${fn.toString()})()`], { type: 'text/javascript' })));
+    }
+    return new Worker(workerUrls.get(fn));
+  };
 
   // Python stays loaded between runs (loading is the slow part), but is
   // released after a few idle minutes so it doesn't hold ~50-100 MB.

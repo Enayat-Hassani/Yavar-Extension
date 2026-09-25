@@ -298,7 +298,7 @@ class YavarContentHandler {
     document.addEventListener('selectionchange', () => {
       if (!this.menuVisible() || this.isInteracting) return;
       const text = this.textareaSel
-        ? (this.readOnlyTextareaSelection()?.text || '')
+        ? this.hasTextareaSelection()
         : (window.getSelection()?.toString() || '').trim();
       if (!text) this.forceHide();
     });
@@ -319,17 +319,31 @@ class YavarContentHandler {
     });
   }
 
-  // Selected text in the focused read-only textarea, with 1-based line numbers
+  // Selected text in the focused read-only textarea (GitHub's code view)
   readOnlyTextareaSelection() {
     const el = document.activeElement;
     if (!el || el.tagName !== 'TEXTAREA' || !el.readOnly) return null;
-    const { selectionStart: a, selectionEnd: b, value } = el;
-    if (a == null || b == null || a === b) return null;
-    const text = value.slice(a, b).trim();
-    if (!text || text.length >= 20000) return null;
-    const startLine = value.slice(0, a).split('\n').length;
-    const endLine = startLine + value.slice(a, b).replace(/\n+$/, '').split('\n').length - 1;
-    return { text, startLine, endLine };
+    const { selectionStart: a, selectionEnd: b } = el;
+    if (a == null || b == null || a === b || b - a >= 20000) return null;
+    const text = el.value.slice(a, b).trim();
+    return text ? { text, el, a, b } : null;
+  }
+
+  // Cheap check for selectionchange (fires on every drag step)
+  hasTextareaSelection() {
+    const el = document.activeElement;
+    return !!(el && el.tagName === 'TEXTAREA' && el.selectionStart !== el.selectionEnd);
+  }
+
+  // 1-based line range of a textarea selection, computed only when needed
+  textareaLines({ el, a, b }) {
+    const v = el.value;
+    let start = 1;
+    for (let i = v.indexOf('\n'); i !== -1 && i < a; i = v.indexOf('\n', i + 1)) start++;
+    let end = start;
+    const last = v.slice(a, b).replace(/\n+$/, '');
+    for (let i = last.indexOf('\n'); i !== -1; i = last.indexOf('\n', i + 1)) end++;
+    return { startLine: start, endLine: end };
   }
 
   showFloatingMenu(selection) {
@@ -441,8 +455,11 @@ class YavarContentHandler {
     if (location.hostname !== 'github.com' || !m) return '';
     let path;
     try { path = decodeURIComponent(m[3]); } catch { path = m[3]; }
-    const ta = this.textareaSel;
-    const lines = ta ? (ta.startLine === ta.endLine ? `Line ${ta.startLine}` : `Lines ${ta.startLine}-${ta.endLine}`) + ' of ' : 'From ';
+    let lines = 'From ';
+    if (this.textareaSel) {
+      const { startLine, endLine } = this.textareaLines(this.textareaSel);
+      lines = (startLine === endLine ? `Line ${startLine}` : `Lines ${startLine}-${endLine}`) + ' of ';
+    }
     return `(${lines}\`${path}\` in ${m[1]}/${m[2]})`;
   }
 
