@@ -5,6 +5,10 @@ import { ContextMenuHandler } from './utils/contextMenu.js';
 import { CommandHandler } from './utils/commands.js';
 import { MessageHandler } from './utils/messageHandler.js';
 import { syncFrameRules } from './utils/frameRules.js';
+import { openPanel, trackPanels, setupActionClick } from './utils/panel.js';
+
+trackPanels();
+setupActionClick();
 
 // Session rules are cleared when the browser restarts, so register them on
 // every worker start (cheap and idempotent), and again when models change.
@@ -41,8 +45,8 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 });
 
 // Command handler (keyboard shortcuts)
-chrome.commands.onCommand.addListener(async (command) => {
-  await CommandHandler.handleCommand(command);
+chrome.commands.onCommand.addListener((command, tab) => {
+  CommandHandler.handleCommand(command, tab);
 });
 
 // Message routing - single listener for all messages
@@ -73,9 +77,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // Open sidepanel synchronously — no await before this call
     if (tabId) {
       console.log('[Yavar BG] Opening sidepanel for tab:', tabId);
-      chrome.sidePanel.open({ tabId }).catch(err => {
-        console.error('[Yavar BG] sidePanel.open failed:', err);
-      });
+      openPanel({ tabId, windowId: sender.tab?.windowId });
     }
 
     // Staggered messages to sidepanel — it may not have its listener ready yet
@@ -142,9 +144,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // Open sidebar to show the screenshot
         const tabId = sender.tab?.id;
         if (tabId) {
-          chrome.sidePanel.open({ tabId }).catch(err => {
-            console.error('[Yavar BG] sidePanel.open failed:', err);
-          });
+          openPanel({ tabId, windowId: sender.tab?.windowId });
         }
 
         // An already-open panel picks this up via its storage listener
@@ -180,9 +180,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'open_sidebar') {
     const tabId = sender.tab?.id;
     if (tabId) {
-      chrome.sidePanel.open({ tabId }).catch(err => {
-        console.error('[Background] Failed to open sidebar:', err);
-      });
+      openPanel({ tabId, windowId: sender.tab?.windowId });
     }
     sendResponse({ success: true });
     return true;
@@ -199,14 +197,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   sendResponse({ error: 'No handler for message' });
   return true;
 });
-
-// Side panel setup - open on action click
-chrome.action.onClicked.addListener(async (tab) => {
-  await chrome.sidePanel.open({ windowId: tab.windowId });
-});
-
-// Set side panel behavior
-chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
 
 // Injected into the active tab to let the user draw a selection rectangle
 function injectAreaSelector() {

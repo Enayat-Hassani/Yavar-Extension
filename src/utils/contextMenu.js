@@ -1,5 +1,7 @@
 // Context Menu Handler
 
+import { openPanel } from './panel.js';
+
 export const ContextMenuHandler = {
   async createMenus() {
     // Remove existing menus first
@@ -65,7 +67,7 @@ ${selectionText}
       // Copy to clipboard via Yavar
       // Open first: sidePanel.open() must run before any await to keep the
       // user gesture from the menu click.
-      const opening = chrome.sidePanel.open({ windowId: tab.windowId });
+      const opening = openPanel({ windowId: tab.windowId });
       await chrome.storage.session.set({ pendingText: prompt });
       await opening;
     } catch (error) {
@@ -79,7 +81,7 @@ ${selectionText}
     try {
       // The service worker has no clipboard access; the side panel pastes
       // pendingText into the chat when it picks it up.
-      const opening = chrome.sidePanel.open({ windowId: tab.windowId });
+      const opening = openPanel({ windowId: tab.windowId });
       await chrome.storage.session.set({ pendingText: text });
       await opening;
     } catch (error) {
@@ -91,7 +93,7 @@ ${selectionText}
   // pages as a file, so hand off to it rather than pasting raw innerText.
   async copyPageToYavar(tab) {
     try {
-      const opening = chrome.sidePanel.open({ windowId: tab.windowId });
+      const opening = openPanel({ windowId: tab.windowId });
       await chrome.storage.session.set({ pendingAction: 'add_page' });
       await opening;
     } catch (error) {
@@ -102,7 +104,7 @@ ${selectionText}
   async captureAndSend(tab) {
     try {
       // Open first (needs the menu click's user gesture), then capture
-      const opening = chrome.sidePanel.open({ windowId: tab.windowId });
+      const opening = openPanel({ windowId: tab.windowId });
       const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
       await chrome.storage.session.set({ pendingScreenshot: dataUrl });
       await opening;
