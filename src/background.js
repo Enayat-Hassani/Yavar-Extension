@@ -5,6 +5,10 @@ import { ContextMenuHandler } from './utils/contextMenu.js';
 import { CommandHandler } from './utils/commands.js';
 import { MessageHandler } from './utils/messageHandler.js';
 import { syncFrameRules } from './utils/frameRules.js';
+import { openPanel, trackPanels, setupActionClick } from './utils/panel.js';
+
+trackPanels();
+setupActionClick();
 
 // Session rules are cleared when the browser restarts, so register them on
 // every worker start (cheap and idempotent), and again when models change.
@@ -41,8 +45,8 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 });
 
 // Command handler (keyboard shortcuts)
-chrome.commands.onCommand.addListener(async (command) => {
-  await CommandHandler.handleCommand(command);
+chrome.commands.onCommand.addListener((command, tab) => {
+  CommandHandler.handleCommand(command, tab);
 });
 
 // Message routing - single listener for all messages
@@ -73,9 +77,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // Open sidepanel synchronously — no await before this call
     if (tabId) {
       console.log('[Yavar BG] Opening sidepanel for tab:', tabId);
-      chrome.sidePanel.open({ tabId }).catch(err => {
-        console.error('[Yavar BG] sidePanel.open failed:', err);
-      });
+      openPanel({ tabId, windowId: sender.tab?.windowId });
     }
 
     // Staggered messages to sidepanel — it may not have its listener ready yet
@@ -98,7 +100,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'start_area_select') {
     (async () => {
       try {
-        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        const tab = await getUserTab();
         if (!tab) { sendResponse({ success: false }); return; }
 
         // Inject the area selection overlay into the active tab
@@ -142,9 +144,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // Open sidebar to show the screenshot
         const tabId = sender.tab?.id;
         if (tabId) {
-          chrome.sidePanel.open({ tabId }).catch(err => {
-            console.error('[Yavar BG] sidePanel.open failed:', err);
-          });
+          openPanel({ tabId, windowId: sender.tab?.windowId });
         }
 
         // An already-open panel picks this up via its storage listener
@@ -158,31 +158,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  // Handle storing pending text (content scripts can't use chrome.storage.session)
-  if (message.action === 'store_pending_text') {
-    (async () => {
-      try {
-        await chrome.storage.session.set({
-          pendingText: message.text,
-          pendingNotification: message.notification
-        });
-        console.log('[Background] Stored pending text in session');
-        sendResponse({ success: true });
-      } catch (error) {
-        console.error('[Background] Failed to store pending text:', error);
-        sendResponse({ success: false, error: error.message });
-      }
-    })();
-    return true;
-  }
-
   // Handle opening sidebar — must be synchronous to preserve user gesture
   if (message.action === 'open_sidebar') {
     const tabId = sender.tab?.id;
     if (tabId) {
-      chrome.sidePanel.open({ tabId }).catch(err => {
-        console.error('[Background] Failed to open sidebar:', err);
-      });
+      openPanel({ tabId, windowId: sender.tab?.windowId });
     }
     sendResponse({ success: true });
     return true;
@@ -200,13 +180,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return true;
 });
 
-// Side panel setup - open on action click
-chrome.action.onClicked.addListener(async (tab) => {
-  await chrome.sidePanel.open({ windowId: tab.windowId });
-});
-
-// Set side panel behavior
-chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+// The tab the user is looking at. When Yavar runs as its own window
+// (browsers without a side panel), the "current window" is Yavar itself, so
+// fall back to the last focused normal browser window.
+async function getUserTab() {
+  const own = chrome.runtime.getURL('');
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (tab && !(tab.url || '').startsWith(own)) return tab;
+  try {
+    const win = await chrome.windows.getLastFocused({ windowTypes: ['normal'] });
+    const [t] = await chrome.tabs.query({ active: true, windowId: win.id });
+    return t || null;
+  } catch (e) {
+    return null;
+  }
+}
 
 // Injected into the active tab to let the user draw a selection rectangle
 function injectAreaSelector() {

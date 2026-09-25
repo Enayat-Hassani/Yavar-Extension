@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 function mockChrome(aiModels) {
   const calls = [];
   globalThis.chrome = {
+    runtime: { id: 'yavarextid' },
     tabs: { TAB_ID_NONE: -1 },
     storage: { sync: { get: async () => ({ aiModels }) } },
     declarativeNetRequest: {
@@ -27,7 +28,13 @@ test('rule only targets side-panel sub-frames of the chat sites', async () => {
   assert.equal(calls.length, 1);
   const { removeRuleIds, addRules } = calls[0];
   assert.deepEqual(removeRuleIds, [7]);
-  assert.equal(addRules.length, 1);
+  assert.equal(addRules.length, 2);
+
+  // Rule 2: frames loaded by Yavar's own pages (Opera sidebar, panel window)
+  assert.deepEqual(addRules[1].condition.initiatorDomains, ['yavarextid']);
+  assert.deepEqual(addRules[1].condition.resourceTypes, ['sub_frame']);
+  assert.deepEqual(addRules[1].condition.requestDomains, addRules[0].condition.requestDomains);
+  assert.equal(addRules[0].id !== addRules[1].id, true);
 
   const { condition, action } = addRules[0];
   assert.deepEqual(condition.tabIds, [-1]);
