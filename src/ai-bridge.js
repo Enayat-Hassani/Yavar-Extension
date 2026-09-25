@@ -339,37 +339,13 @@
     }
   }
 
-  // Guard against duplicate submissions from retries
-  let lastSubmittedPrompt = '';
-  let lastSubmitTime = 0;
-  let lastScreenshotData = '';
-  let lastScreenshotTime = 0;
-
+  // The panel sends each message exactly once, after BRIDGE_READY (see the
+  // message listener), so no duplicate filtering is needed here.
   function handleAutoSubmit(prompt) {
-    const now = Date.now();
-    // Dedupe: ignore if same prompt within 8 seconds (covers staggered retries)
-    if (prompt === lastSubmittedPrompt && now - lastSubmitTime < 8000) {
-      console.log('[Yavar Bridge] Ignoring duplicate submit');
-      return;
-    }
-    lastSubmittedPrompt = prompt;
-    lastSubmitTime = now;
     autoSubmit(prompt);
   }
 
-  let lastPastedPrompt = '';
-  let lastPasteTime = 0;
-
   function handleAutoPasteOnly(prompt) {
-    const now = Date.now();
-    // Dedupe: ignore if same prompt within 8 seconds (covers staggered retries)
-    if (prompt === lastPastedPrompt && now - lastPasteTime < 8000) {
-      console.log('[Yavar Bridge] Ignoring duplicate paste');
-      return;
-    }
-    lastPastedPrompt = prompt;
-    lastPasteTime = now;
-
     const platform = detectPlatform();
     if (!platform) {
       console.warn('[Yavar Bridge] Unknown platform, cannot paste');
@@ -396,16 +372,6 @@
   }
 
   function handleAutoPasteScreenshot(imageDataUrl) {
-    const now = Date.now();
-    // Dedupe: ignore if same screenshot within 8 seconds (covers staggered retries)
-    if (imageDataUrl === lastScreenshotData && now - lastScreenshotTime < 8000) {
-      console.log('[Yavar Bridge] Ignoring duplicate screenshot paste');
-      return;
-    }
-    lastScreenshotData = imageDataUrl;
-    lastScreenshotTime = now;
-    
-    // Call the async function
     (async () => {
       const platform = detectPlatform();
       if (!platform) {
@@ -466,19 +432,7 @@
 
   // Attach a text file (e.g. a big source file as .md) to the chat input.
   // Web UIs accept far larger content as an attachment than as pasted text.
-  let lastAttachKey = '';
-  let lastAttachTime = 0;
-
   function handleAttachFile(filename, content, mime) {
-    const now = Date.now();
-    const key = filename + '|' + (content ? content.length : 0);
-    if (key === lastAttachKey && now - lastAttachTime < 6000) {
-      console.log('[Yavar Bridge] Ignoring duplicate attach');
-      return;
-    }
-    lastAttachKey = key;
-    lastAttachTime = now;
-
     const platform = detectPlatform();
     if (!platform) { console.warn('[Yavar Bridge] Unknown platform, cannot attach'); return; }
     const selectors = SELECTORS[platform];
@@ -897,6 +851,12 @@
   window.addEventListener('message', (event) => {
     if (!isFromYavar(event)) return;
 
+    // Handshake: the panel queues messages until it knows we're listening
+    if (event.data?.action === 'BRIDGE_PING') {
+      postToYavar({ action: 'BRIDGE_READY', platform: detectPlatform() });
+      return;
+    }
+
     if (event.data?.action === 'AUTO_SUBMIT_PROMPT' && event.data?.prompt) {
       console.log('[Yavar Bridge] Received AUTO_SUBMIT_PROMPT via postMessage (paste + submit)');
       handleAutoSubmit(event.data.prompt);
@@ -962,21 +922,9 @@
     }
   });
 
-  // Also listen for chrome runtime messages (if injected as content script)
-  if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) {
-    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-      if (message.action === 'AUTO_SUBMIT_PROMPT' && message.prompt) {
-        console.log('[Yavar Bridge] Received AUTO_SUBMIT_PROMPT via runtime message');
-        handleAutoSubmit(message.prompt);
-        sendResponse({ success: true });
-      }
-      if (message.action === 'AUTO_PASTE_SCREENSHOT' && message.imageData) {
-        console.log('[Yavar Bridge] Received AUTO_PASTE_SCREENSHOT via runtime message');
-        handleAutoPasteScreenshot(message.imageData);
-        sendResponse({ success: true });
-      }
-      return true;
-    });
+  // Tell the Yavar panel we're ready to receive messages
+  if (EXTENSION_ORIGIN && window.parent !== window && detectPlatform()) {
+    postToYavar({ action: 'BRIDGE_READY', platform: detectPlatform() });
   }
 
   console.log('[Yavar Bridge] AI Bridge loaded on:', detectPlatform());
