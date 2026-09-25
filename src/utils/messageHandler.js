@@ -16,15 +16,6 @@ export const MessageHandler = {
           sendResponse({ success: true });
           break;
           
-        case 'TEXT_SELECTION':
-        case 'PAGE_SUMMARY':
-          // Store for sidebar to pick up
-          if (message.text) {
-            await chrome.storage.session.set({ pendingText: message.text });
-          }
-          sendResponse({ success: true });
-          break;
-          
         case 'IS_SITE_DISABLED':
           const disabled = await this.isSiteDisabled(message.url);
           sendResponse({ disabled });
