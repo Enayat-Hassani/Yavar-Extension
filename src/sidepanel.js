@@ -2785,6 +2785,9 @@ Begin: state a one-line plan, then issue your first tool call.`;
           console.log('[Yavar Sidepanel] Received AUTO_SUBMIT_PROMPT, forwarding to iframe');
           this._lastForwardedPrompt = message.prompt;
           this._lastForwardedTime = Date.now();
+          // Handled here, so drop the stored copy; otherwise the next frame load
+          // (model switch, new chat) would paste this prompt again.
+          chrome.storage.session.remove(['pendingAutoSubmit', 'lastSubmitTime']).catch(() => {});
           this.getAutoPasteSettings().then(({ autoPaste, autoSubmit }) => {
             if (autoPaste) this.forwardToIframe({ prompt: message.prompt, autoSubmit });
             else navigator.clipboard.writeText(message.prompt)
