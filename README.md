@@ -122,7 +122,9 @@ Yavar-Extension/
 │   ├── options.js        # Settings page
 │   └── utils/
 │       ├── commands.js   # Keyboard shortcut handlers
-│       ├── templates.js  # Prompt templates (defaults + {{variable}} expansion)
+│       ├── template-core.js # Prompt templates: defaults + {{variable}} expansion
+│       │                    #   (classic script, shared by content script and pages)
+│       ├── templates.js  # ES-module wrapper around template-core for extension pages
 │       ├── frameRules.js # Lets the chat sites load in the sidebar (see below)
 │       ├── net.js        # URL guard for the research agent
 │       ├── messageHandler.js
