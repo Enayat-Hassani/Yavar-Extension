@@ -210,7 +210,17 @@
           <button id="btn-close-files" class="history-action-btn" title="Close (Esc)">✕</button>
         </div>
       </div>
-      <div class="files-search-wrap">
+      <div class="files-toolbar">
+        <div class="files-tabs" role="tablist">
+          <button type="button" role="tab" class="files-tab active" data-view="files" aria-selected="true">Files</button>
+          <button type="button" role="tab" class="files-tab" data-view="changes" aria-selected="false">Recent changes</button>
+        </div>
+        <div class="files-links">
+          <button type="button" class="files-ext-link" data-ext="deepwiki" title="Open an AI-written wiki of this repo on DeepWiki (free)">DeepWiki ↗</button>
+          <button type="button" class="files-ext-link" data-ext="gitingest" title="Turn the whole repo into one prompt-ready text file on GitIngest (free)">GitIngest ↗</button>
+        </div>
+      </div>
+      <div class="files-search-wrap" id="files-search-wrap">
         <input id="files-search" type="search" class="files-search" placeholder="Find a file…  ( / )" autocomplete="off">
       </div>
       <div id="files-tree" class="files-tree"></div>

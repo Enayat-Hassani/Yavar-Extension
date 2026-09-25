@@ -84,3 +84,41 @@ test('every mode except "add" produces a prompt naming the target', () => {
     else assert.ok(p.includes('`x.js`') && p.includes('o/r'), m.id);
   }
 });
+
+import { parseCommitsAtom, commitsFromApi, timeAgo, folderReadme, readmeSnippet } from '../src/utils/github.js';
+
+test('parses the commits Atom feed', () => {
+  const xml = `<?xml version="1.0"?><feed><entry>
+    <id>tag:github.com,2008:Grit::Commit/0123456789abcdef0123456789abcdef01234567</id>
+    <link type="text/html" rel="alternate" href="https://github.com/o/r/commit/0123456789abcdef0123456789abcdef01234567"/>
+    <title>
+        Fix &quot;parser&quot; &amp; tests
+    </title>
+    <updated>2026-09-20T10:00:00Z</updated>
+    <author><name>Ada</name><uri>https://github.com/ada</uri></author>
+  </entry><entry><id>x</id><title>no sha</title></entry></feed>`;
+  assert.deepEqual(parseCommitsAtom(xml), [{
+    sha: '0123456789abcdef0123456789abcdef01234567', title: 'Fix "parser" & tests',
+    url: 'https://github.com/o/r/commit/0123456789abcdef0123456789abcdef01234567',
+    author: 'Ada', date: '2026-09-20T10:00:00Z'
+  }]);
+});
+
+test('normalises API commits and formats age', () => {
+  const [c] = commitsFromApi([{ sha: 'abc1234', html_url: 'u', commit: { message: 'Add x\n\nbody', author: { name: 'B', date: '2026-01-01T00:00:00Z' } } }]);
+  assert.deepEqual(c, { sha: 'abc1234', title: 'Add x', author: 'B', date: '2026-01-01T00:00:00Z', url: 'u' });
+  const now = Date.parse('2026-01-03T00:00:00Z');
+  assert.equal(timeAgo('2026-01-01T00:00:00Z', now), '2d ago');
+  assert.equal(timeAgo('2026-01-02T23:30:00Z', now), '30m ago');
+  assert.equal(timeAgo('nope', now), '');
+});
+
+test('finds folder READMEs and extracts a clean snippet', () => {
+  const files = new Set(['README.md', 'src/lib/README.md', 'src/a.js']);
+  assert.equal(folderReadme('', files), 'README.md');
+  assert.equal(folderReadme('src/lib', files), 'src/lib/README.md');
+  assert.equal(folderReadme('src', files), null);
+  const md = '# Title\n[![ci](x)](y)\n<p align="center"><img src="x"></p>\n\nA **fast** [parser](http://x) for `toml`.\n\n```js\ncode\n```\n| a | b |';
+  assert.equal(readmeSnippet(md), 'A fast parser for toml.');
+  assert.ok(readmeSnippet('word '.repeat(100), 50).endsWith('…'));
+});

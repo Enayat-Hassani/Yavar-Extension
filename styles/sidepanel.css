@@ -1835,6 +1835,151 @@ div.toggle-switch.active::after {
 .files-row:hover .files-size { display: none; }
 .files-quick:hover { background: var(--accent); color: #fff; }
 
+/* Toolbar: Files | Recent changes, plus external links */
+.files-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 16px 0;
+}
+
+.files-tabs {
+  display: inline-flex;
+  padding: 2px;
+  background: var(--bg-secondary);
+  border-radius: 9px;
+}
+
+.files-tab {
+  padding: 5px 12px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.files-tab.active {
+  color: var(--text-primary);
+  background: var(--surface);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.files-links {
+  display: flex;
+  gap: 10px;
+}
+
+.files-ext-link {
+  padding: 0;
+  font: inherit;
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.files-ext-link:hover { color: var(--accent); }
+
+.files-search-wrap.hidden { display: none; }
+
+/* README preview cards */
+.files-readme {
+  margin: 4px 0 6px;
+  padding: 10px 12px;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.files-children > .files-readme {
+  margin: 4px 6px 6px 18px;
+}
+
+.files-readme-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.files-readme-text {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+
+.files-readme-actions {
+  display: flex;
+  gap: 14px;
+  margin-top: 8px;
+}
+
+.files-readme-actions .files-link-btn {
+  margin: 0;
+  color: var(--accent);
+}
+
+.files-readme-actions .files-link-btn:hover { text-decoration: underline; color: var(--accent); }
+
+/* Recent changes */
+.files-changes-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-right: 4px;
+}
+
+.files-commit {
+  padding: 9px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.files-commit + .files-commit { border-top: 1px solid var(--border); }
+
+.files-commit:hover {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.files-commit-title {
+  font-size: 13px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.files-commit-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 22px;
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.files-commit-meta code {
+  padding: 1px 5px;
+  font-size: 11px;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+
+.files-commit-meta .files-quick { margin-left: auto; }
+.files-commit:hover .files-quick { display: inline-block; }
+
 /* Selection action bar */
 .files-actionbar {
   display: flex;

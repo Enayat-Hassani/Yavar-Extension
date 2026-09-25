@@ -36,6 +36,9 @@ Add, edit, or remove your own templates in Settings using `{{selection}}`, `{{pa
 - **Line ranges:** select lines on GitHub (`#L10-L25`) and the dock's quick-read tab sends just those lines.
 - **Read marks (✓)**, file sizes, and a token estimate so you know when a pack is too big for a free plan.
 - **Works on any branch or tag**, including names with slashes.
+- **About cards:** the repo's README (and any folder's README when you expand it) previews at the top, with one-click *Explain it*.
+- **Recent changes tab:** the latest commits on the branch. Click one to have the AI explain its diff, or ask *What's been happening?* for a themed summary of recent work.
+- **DeepWiki / GitIngest links** open the repo in those free tools (an AI-written wiki, or the whole repo as one prompt-ready file).
 - **Barely touches the GitHub API:** file contents come from `raw.githubusercontent.com`, and the tree is one cached API call per repo, so the 60 requests/hour anonymous limit stops being a problem.
 
 **Explain PR / commit** — on a pull request or commit page, one click attaches the diff and asks the AI to explain the goal, each file's change, what to learn from it, and what's risky.
