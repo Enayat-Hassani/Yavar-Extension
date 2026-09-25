@@ -1,56 +1,12 @@
 // Content Script - Text Selection & Keyboard Shortcuts
 // Runs on all pages to handle text selection and capture
 //
-// NOTE: this runs on EVERY page, so it must never fail to load. We inline the
-// template helpers here (rather than `import`-ing utils/templates.js) because a
-// module content script whose import fails to resolve executes nothing at all.
-// Keep DEFAULT_TEMPLATES in sync with src/utils/templates.js (used by the
-// options page and sidepanel, which are regular extension pages).
+// NOTE: this runs on EVERY page, so it must never fail to load: it is a
+// classic script (a module whose import fails would run nothing). The
+// template helpers come from utils/template-core.js, which the manifest loads
+// just before this file.
 
-const DEFAULT_TEMPLATES = [
-  { id: 'send',      name: 'Send',            icon: '➤', menu: true,  body: '{{selection}}' },
-  { id: 'explain',   name: 'Explain',         icon: '?', menu: true,  primary: true, body: 'Explain this to me using "Guided Learning" mode:\n\n{{selection}}' },
-  { id: 'summarize', name: 'Summarize',       icon: '≡', menu: true,  body: 'Summarize the key points of this clearly and concisely:\n\n{{selection}}' },
-  { id: 'improve',   name: 'Improve writing', icon: '✎', menu: false, body: 'Improve the clarity, grammar and flow of this text. Return only the rewritten version:\n\n{{selection}}' },
-  { id: 'translate', name: 'Translate → EN',  icon: '文', menu: false, body: 'Translate this into natural English. Return only the translation:\n\n{{selection}}' },
-  { id: 'ask-page',  name: 'Ask about page',  icon: '◆', menu: false, body: 'Here is the page I\'m reading:\n\n{{page}}\n\n---\nAnswer my question about it: ' },
-];
-
-function varsInTemplate(body) {
-  return [...new Set([...String(body).matchAll(/\{\{\s*(\w+)\s*\}\}/g)].map(m => m[1]))];
-}
-
-async function expandTemplate(body, ctx = {}) {
-  const getters = {
-    selection: () => ctx.selection ?? '',
-    page:      () => ctx.page ?? '',
-    repo:      () => ctx.repo ?? '',
-    url:       () => ctx.url ?? '',
-    title:     () => ctx.title ?? '',
-    clipboard: async () => {
-      if (ctx.clipboard != null) return ctx.clipboard;
-      try { return await navigator.clipboard.readText(); } catch { return ''; }
-    },
-  };
-  // Resolve every referenced value first, then substitute in ONE pass, so
-  // text inside a value (e.g. a selection containing "{{page}}") is never expanded.
-  const PLACEHOLDER = /\{\{\s*(\w+)\s*\}\}/g;
-  const values = {};
-  for (const name of new Set([...body.matchAll(PLACEHOLDER)].map(m => m[1]))) {
-    const getter = getters[name];
-    values[name] = getter ? String(await getter() ?? '') : '';
-  }
-  const out = body.replace(PLACEHOLDER, (_, name) => values[name]);
-  return out.trim();
-}
-
-async function loadTemplates() {
-  try {
-    const { promptTemplates } = await chrome.storage.sync.get('promptTemplates');
-    if (Array.isArray(promptTemplates) && promptTemplates.length) return promptTemplates;
-  } catch { /* fall through to defaults */ }
-  return DEFAULT_TEMPLATES.slice();
-}
+const { DEFAULT_TEMPLATES, expandTemplate, varsInTemplate, loadTemplates } = globalThis.YavarTemplateCore;
 
 // Crisp line icons for the built-in templates. Custom templates fall back to
 // their glyph. Keyed by template id; each is the inner markup of a 24-box SVG.

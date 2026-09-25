@@ -10,6 +10,10 @@ import {
   fencedFile, parseCommitsAtom, commitsFromApi, timeAgo, folderReadme, readmeSnippet, LOCAL_SKIP_DIRS, isSecretPath
 } from './utils/github.js';
 
+// Session-storage keys other parts of the extension use to hand work to the panel
+const PENDING_KEYS = ['pendingAutoSubmit', 'lastSubmitTime', 'pendingText', 'pendingAction',
+  'pendingScreenshot', 'pendingScreenshotRect'];
+
 class YavarSidePanel {
   constructor() {
     // Default AI models
@@ -55,7 +59,7 @@ class YavarSidePanel {
     this.setupStorageListener();
     this.initCodeMirror();
     this.setupFilesRailVisibility();
-    this.checkPendingData();
+    this.drainPending();
   }
 
   cacheElements() {
@@ -392,8 +396,7 @@ class YavarSidePanel {
     const model = this.getCurrentModel();
     if (model) {
       this.loadingState.classList.remove('hidden');
-      this._frameReady = false;
-      this.cancelChatRequests();
+      this.chatNavigating();
       this.aiFrame.src = model.url;
     }
   }
@@ -409,15 +412,12 @@ class YavarSidePanel {
   handleFrameLoad() {
     this._frameReady = true;
     this._frameWaiters.splice(0).forEach(resolve => resolve());
-    this.sendTemplatesToFrame();
+    // In case the bridge announced itself before we were listening
+    try { this.aiFrame.contentWindow.postMessage({ action: 'BRIDGE_PING' }, '*'); } catch (e) { /* ignore */ }
 
     setTimeout(() => {
       this.loadingState.classList.add('hidden');
     }, 500);
-
-    // Retry any pending auto-submit after iframe loads
-    console.log('[Yavar Sidepanel] Iframe fully loaded:', this.aiFrame.src);
-    this.checkPendingAutoSubmit();
   }
 
   openNewChat() {
@@ -427,13 +427,44 @@ class YavarSidePanel {
       this.loadingState.classList.remove('hidden');
       const url = new URL(model.url);
       url.searchParams.set('_yavar', Date.now());
-      this._frameReady = false;
-      this.cancelChatRequests();
+      this.chatNavigating();
       this.aiFrame.src = url.href;
     }
   }
 
   // Send a prompt, wait for the reply to finish, and resolve with its text.
+  // ----- Talking to the chat frame -----
+  // The bridge inside the chat announces BRIDGE_READY once it is listening.
+  // Until then messages wait in a queue, so each is delivered exactly once
+  // (no timed resends, no duplicate filtering on the other side).
+  postToChat(payload) {
+    if (this._bridgeReady && this.aiFrame?.contentWindow) {
+      this.aiFrame.contentWindow.postMessage(payload, '*');
+      return;
+    }
+    this._chatQueue = this._chatQueue || [];
+    this._chatQueue.push(payload);
+    if (this._chatQueue.length > 30) this._chatQueue.shift();   // chats without a bridge
+  }
+
+  onBridgeReady() {
+    this._bridgeReady = true;
+    const queued = this._chatQueue || [];
+    this._chatQueue = [];
+    queued.forEach(p => this.aiFrame?.contentWindow?.postMessage(p, '*'));
+    this.sendTemplatesToFrame();
+  }
+
+  // The chat frame is (re)loading: queue until its new bridge is ready, and
+  // drop requests that only made sense for the old page.
+  chatNavigating() {
+    this._bridgeReady = false;
+    this._frameReady = false;
+    this.cancelChatRequests();
+    this._chatQueue = (this._chatQueue || [])
+      .filter(p => !/^(WATCH_FOR_ANSWER|CAPTURE_LAST_ANSWER|STOP_WATCH)$/.test(p.action));
+  }
+
   // Post { action, requestId } to the chat bridge and resolve with the
   // reply's text (ANSWER_SETTLED / ANSWER_CAPTURED) or reject on its failure
   // messages or a timeout. Replies are matched by requestId in the listener.
@@ -446,7 +477,7 @@ class YavarSidePanel {
         if (this._chatRequests.delete(id)) reject(new Error('the chat did not respond'));
       }, timeoutMs) : null;
       this._chatRequests.set(id, { resolve, reject, timer });
-      this.aiFrame.contentWindow.postMessage({ action, requestId: id }, '*');
+      this.postToChat({ action, requestId: id });
     });
   }
 
@@ -1164,29 +1195,8 @@ Begin: state a one-line plan, then issue your first tool call.`;
 
     this._lastAgentPrompt = prompt;
     this._lastAgentAttachments = attachments;
-    const send = () => {
-      // The agent may have been stopped during the delay
-      if (!this.agent?.active || !this.aiFrame?.contentWindow) return;
-      const requestId = 'agent_' + Date.now();
-      this._agentRequestId = requestId;
-      // Arm the answer-watch BEFORE sending so we catch the reply as it settles
-      this.aiFrame.contentWindow.postMessage({ action: 'WATCH_FOR_ANSWER', requestId }, '*');
-
-      // Attach any large files first, then submit the text after they've uploaded
-      let delay = 0;
-      for (const a of attachments) {
-        setTimeout(() => {
-          this.aiFrame?.contentWindow?.postMessage(
-            { action: 'AUTO_ATTACH_FILE', filename: a.filename, content: a.content, mime: 'text/plain' }, '*');
-        }, delay);
-        delay += 400;
-      }
-      // Give attachments time to upload before the message is sent
-      const submitDelay = attachments.length ? delay + 2500 : 0;
-      setTimeout(() => {
-        if (this.agent?.active) this.forwardToIframe({ prompt, autoSubmit: true });
-      }, submitDelay);
-    };
+    // The agent may have been stopped during the delay
+    const send = () => { if (this.agent?.active) this.sendAgentMessage(prompt, attachments); };
 
     // Brief pause before follow-up turns so the AI's input can re-enable and the
     // DOM can settle after the previous reply (more reliable, and easier to watch).
@@ -1460,29 +1470,27 @@ Begin: state a one-line plan, then issue your first tool call.`;
       this.finishAgent('Could not resend — stopped.');
       return;
     }
+    this.sendAgentMessage(this._lastAgentPrompt, this._lastAgentAttachments || []);
+  }
+
+  // Arm the answer watch, attach any large files, then submit the prompt once
+  // the attachments have had time to upload
+  sendAgentMessage(prompt, attachments = []) {
     const requestId = 'agent_' + Date.now();
     this._agentRequestId = requestId;
-    this.aiFrame.contentWindow.postMessage({ action: 'WATCH_FOR_ANSWER', requestId }, '*');
-
-    const attachments = this._lastAgentAttachments || [];
-    let delay = 0;
-    for (const a of attachments) {
-      setTimeout(() => {
-        this.aiFrame?.contentWindow?.postMessage(
-          { action: 'AUTO_ATTACH_FILE', filename: a.filename, content: a.content, mime: 'text/plain' }, '*');
-      }, delay);
-      delay += 400;
-    }
+    this.postToChat({ action: 'WATCH_FOR_ANSWER', requestId });
+    attachments.forEach((a, k) => setTimeout(() =>
+      this.forwardAttachToIframe(a.filename, a.content, 'text/plain'), k * 400));
     setTimeout(() => {
-      if (this.agent?.active) this.forwardToIframe({ prompt: this._lastAgentPrompt, autoSubmit: true });
-    }, attachments.length ? delay + 2500 : 0);
+      if (this.agent?.active) this.forwardToIframe({ prompt, autoSubmit: true });
+    }, attachments.length ? attachments.length * 400 + 2500 : 0);
   }
 
   stopRepoAgent() {
     if (!this.agent?.active) return;
     this.agent.active = false;
     this._agentRequestId = null;
-    this.aiFrame?.contentWindow?.postMessage({ action: 'STOP_WATCH' }, '*');
+    this.postToChat({ action: 'STOP_WATCH' });
     if (this.agentBar) this.agentBar.classList.add('hidden');
     if (this.workPill) this.workPill.classList.add('hidden');
     this.liftCurtain();
@@ -1492,7 +1500,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
   finishAgent(message) {
     if (this.agent) this.agent.active = false;
     this._agentRequestId = null;
-    this.aiFrame?.contentWindow?.postMessage({ action: 'STOP_WATCH' }, '*');
+    this.postToChat({ action: 'STOP_WATCH' });
     this.showNotification('✅ ' + (message || 'Done'));
     if (this.agentBar) this.agentBar.classList.add('hidden');
     if (this.workPill) this.workPill.classList.add('hidden');
@@ -3310,12 +3318,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
 
   // Attach text as a file (paste-a-File, like screenshots) so large files don't overflow the input
   forwardAttachToIframe(filename, content, mime = 'text/plain') {
-    const payload = { action: 'AUTO_ATTACH_FILE', filename, content, mime };
-    [0, 500].forEach(delay => {
-      setTimeout(() => {
-        try { this.aiFrame?.contentWindow?.postMessage(payload, '*'); } catch (e) {}
-      }, delay);
-    });
+    this.postToChat({ action: 'AUTO_ATTACH_FILE', filename, content, mime });
   }
 
   // ========== Screenshot Functions ==========
@@ -3387,29 +3390,10 @@ Begin: state a one-line plan, then issue your first tool call.`;
     }
   }
 
-  forwardScreenshotToIframe(screenshotDataUrl) {
-    const payload = { 
-      action: 'AUTO_PASTE_SCREENSHOT', 
-      imageData: screenshotDataUrl 
-    };
-
-    // Staggered sends — the iframe/bridge may not be fully interactive yet
-    const delays = [0, 400, 1200, 2500];
-    delays.forEach(delay => {
-      setTimeout(() => {
-        try {
-          if (this.aiFrame && this.aiFrame.contentWindow) {
-            console.log(`[Yavar Sidepanel] Sending screenshot to iframe (delay=${delay}ms)`);
-            this.aiFrame.contentWindow.postMessage(payload, '*');
-          } else {
-            console.warn(`[Yavar Sidepanel] Iframe not ready at delay=${delay}ms`);
-          }
-        } catch (e) {
-          console.warn('[Yavar Sidepanel] postMessage failed:', e);
-        }
-      }, delay);
-    });
+  forwardScreenshotToIframe(imageData) {
+    this.postToChat({ action: 'AUTO_PASTE_SCREENSHOT', imageData });
   }
+
 
   dismissScreenshot() {
     this.capturedScreenshot = null;
@@ -3459,7 +3443,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
       }
     }, 4000);
 
-    this.aiFrame.contentWindow.postMessage({ action: 'CAPTURE_LAST_ANSWER', requestId }, '*');
+    this.postToChat({ action: 'CAPTURE_LAST_ANSWER', requestId });
     this.showNotification('⏳ Capturing answer…');
   }
 
@@ -3470,6 +3454,11 @@ Begin: state a one-line plan, then issue your first tool call.`;
       if (!this.aiFrame || event.source !== this.aiFrame.contentWindow) return;
       const data = event.data;
       if (!data || typeof data !== 'object') return;
+
+      if (data.action === 'BRIDGE_READY') {
+        this.onBridgeReady();
+        return;
+      }
 
       // Replies to chatRequest() (plan capture, fresh-chat handoff…)
       if (this.settleChatRequest(data)) return;
@@ -3539,8 +3528,8 @@ Begin: state a one-line plan, then issue your first tool call.`;
     // own button; otherwise pair with the last prompt we forwarded (< 15 min)
     const prompt = data.prompt != null
       ? data.prompt
-      : (this._lastForwardedPrompt && Date.now() - (this._lastForwardedTime || 0) < 900000)
-        ? this._lastForwardedPrompt
+      : (this._lastPrompt && Date.now() - (this._lastPromptTime || 0) < 900000)
+        ? this._lastPrompt
         : '';
 
     const entry = {
@@ -4068,76 +4057,21 @@ Begin: state a one-line plan, then issue your first tool call.`;
   // ========== Message Listener ==========
 
   setupMessageListener() {
-    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-      console.log('[Yavar Sidepanel] Message received:', message);
-
-      if (message.type === 'TEXT_SELECTION') {
-        this.handleTextSelection(message.text);
-      }
-
-      if (message.type === 'SCREENSHOT_CAPTURED') {
-        console.log('[Yavar Sidepanel] SCREENSHOT_CAPTURED received, rect:', message.rect, 'imageData length:', message.imageData?.length);
-        if (message.rect) {
-          // Crop to selected area
-          console.log('[Yavar Sidepanel] Calling cropAndShowScreenshot');
-          this.cropAndShowScreenshot(message.imageData, message.rect);
-        } else {
-          console.log('[Yavar Sidepanel] No rect, showing full screenshot');
-          this.capturedScreenshot = message.imageData;
-          this.showScreenshotPanel(message.imageData);
-        }
-      }
-
-      if (message.action === 'trigger_learn') {
-        this.analyzeGitHubRepo();
-      }
-
-      if (message.action === 'toggle_notes') {
-        this.toggleNotes();
-      }
-
-      if (message.action === 'AUTO_SUBMIT_PROMPT' && message.prompt) {
-        // Only forward if we haven't already handled this prompt via checkPendingAutoSubmit
-        // The background sends staggered retries — only honor the first one
-        if (!this._lastForwardedPrompt || this._lastForwardedPrompt !== message.prompt ||
-            Date.now() - (this._lastForwardedTime || 0) > 8000) {
-          console.log('[Yavar Sidepanel] Received AUTO_SUBMIT_PROMPT, forwarding to iframe');
-          this._lastForwardedPrompt = message.prompt;
-          this._lastForwardedTime = Date.now();
-          // Handled here, so drop the stored copy; otherwise the next frame load
-          // (model switch, new chat) would paste this prompt again.
-          chrome.storage.session.remove(['pendingAutoSubmit', 'lastSubmitTime']).catch(() => {});
-          this.getAutoPasteSettings().then(({ autoPaste, autoSubmit }) => {
-            if (autoPaste) this.forwardToIframe({ prompt: message.prompt, autoSubmit });
-            else navigator.clipboard.writeText(message.prompt)
-              .then(() => this.showNotification('📋 Prompt copied - paste it into the chat'))
-              .catch(() => {});
-          });
-        } else {
-          console.log('[Yavar Sidepanel] Ignoring duplicate AUTO_SUBMIT_PROMPT from staggered retry');
-        }
-      }
-
-      sendResponse({ received: true });
-      return true;
+    // Only answer our own messages: runtime messages also reach the
+    // background, and replying to theirs (e.g. the options page's
+    // GET_SETTINGS) could win the race with an empty response.
+    chrome.runtime.onMessage.addListener((message) => {
+      if (message.action === 'trigger_learn') this.analyzeGitHubRepo();
+      else if (message.action === 'toggle_notes') this.toggleNotes();
+      return false;
     });
-  }
-
-  async handleTextSelection(text) {
-    if (!text) return;
-
-    await navigator.clipboard.writeText(text);
-    const preview = text.substring(0, 50) + (text.length > 50 ? '...' : '');
-    this.showNotification(`📋 "${preview}" copied!`);
   }
 
   // The in-chat "Prompts" menu lists the user's templates
   async sendTemplatesToFrame() {
     try {
       const templates = (await loadTemplates()).map(t => ({ id: t.id, name: t.name, icon: t.icon }));
-      // The chat UI may still be booting; send again shortly after
-      [0, 2000, 6000].forEach(d => setTimeout(() =>
-        this.aiFrame?.contentWindow?.postMessage({ action: 'YAVAR_TEMPLATES', templates }, '*'), d));
+      this.postToChat({ action: 'YAVAR_TEMPLATES', templates });
     } catch (e) { /* ignore */ }
   }
 
@@ -4163,7 +4097,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
       return;
     }
     const prompt = await expandTemplate(tpl.body, ctx);
-    this.aiFrame?.contentWindow?.postMessage({ action: 'AUTO_REPLACE_PROMPT', prompt }, '*');
+    this.postToChat({ action: 'AUTO_REPLACE_PROMPT', prompt });
   }
 
   // Buttons inside the chat page (bridge → panel)
@@ -4203,16 +4137,9 @@ Begin: state a one-line plan, then issue your first tool call.`;
   // content): paste it into the chat input so the user can add a question,
   // and also try the clipboard (which fails if the panel isn't focused).
   async handlePendingText(text) {
-    // The storage listener and the on-open check can both see the same text
-    if (text === this._lastPendingText && Date.now() - this._lastPendingTime < 5000) return;
-    this._lastPendingText = text;
-    this._lastPendingTime = Date.now();
-
     const { autoPaste } = await this.getAutoPasteSettings();
     if (autoPaste) {
-      await this.whenFrameReady();
-      this._lastForwardedPrompt = text;
-      this._lastForwardedTime = Date.now();
+      this.rememberPrompt(text);
       this.forwardToIframe({ prompt: text, autoSubmit: false });
     }
     let copied = false;
@@ -4223,7 +4150,6 @@ Begin: state a one-line plan, then issue your first tool call.`;
   }
 
   setupStorageListener() {
-    // Listen for screenshot data that arrives after sidepanel loads
     chrome.storage.onChanged.addListener((changes, areaName) => {
       if (areaName === 'sync' && changes.promptTemplates) this.sendTemplatesToFrame();
       if (areaName === 'local' && changes.yavarHistory && this._history) {
@@ -4231,136 +4157,68 @@ Begin: state a one-line plan, then issue your first tool call.`;
       }
       if (areaName !== 'session') return;
 
-      if (changes.pendingAction?.newValue) {
-        chrome.storage.session.remove('pendingAction');
-        this.runPendingAction(changes.pendingAction.newValue);
-      }
-
-      // Context-menu text while the panel is already open
-      if (changes.pendingText?.newValue) {
-        const text = changes.pendingText.newValue;
-        chrome.storage.session.remove('pendingText');
-        this.handlePendingText(text);
-      }
-
-      if (changes.pendingScreenshot) {
-        const { newValue, oldValue } = changes.pendingScreenshot;
-        if (newValue) {
-          console.log('[Yavar Sidepanel] Storage listener: screenshot arrived');
-          chrome.storage.session.get('pendingScreenshotRect').then(result => {
-            const rect = result?.pendingScreenshotRect;
-            if (rect) {
-              this.cropAndShowScreenshot(newValue, rect);
-              chrome.storage.session.remove('pendingScreenshotRect');
-            } else {
-              this.capturedScreenshot = newValue;
-              this.showScreenshotPanel(newValue);
-            }
-            chrome.storage.session.remove('pendingScreenshot');
-          });
-        }
-      }
+      if (PENDING_KEYS.some(k => changes[k]?.newValue !== undefined)) this.drainPending();
     });
   }
 
-  async checkPendingData() {
-    try {
-      const result = await chrome.storage.session.get(['pendingText', 'pendingScreenshot', 'pendingScreenshotRect', 'pendingAction']);
-
-      if (result.pendingAction) {
-        await chrome.storage.session.remove('pendingAction');
-        this.runPendingAction(result.pendingAction);
-      }
-
-      if (result.pendingText) {
-        await chrome.storage.session.remove('pendingText');
-        this.handlePendingText(result.pendingText);
-      }
-
-      if (result.pendingScreenshot) {
-        console.log('[Yavar Sidepanel] Found pending screenshot in storage, rect:', result.pendingScreenshotRect);
-        if (result.pendingScreenshotRect) {
-          // Crop to selected area
-          this.cropAndShowScreenshot(result.pendingScreenshot, result.pendingScreenshotRect);
-        } else {
-          this.capturedScreenshot = result.pendingScreenshot;
-          this.showScreenshotPanel(result.pendingScreenshot);
-        }
-        await chrome.storage.session.remove('pendingScreenshot');
-        await chrome.storage.session.remove('pendingScreenshotRect');
-      }
-    } catch (error) {
-      console.error('[Yavar] Failed to check pending data:', error);
-    }
-
-    // Also check for pending auto-submit
-    this.checkPendingAutoSubmit();
+  // Items handed over through chrome.storage.session (floating-menu prompt,
+  // context-menu text, queued actions, screenshots). One serialized drain
+  // reads and removes them, so however many signals arrive (panel open,
+  // storage changes), each item is handled exactly once.
+  drainPending() {
+    this._drain = (this._drain || Promise.resolve())
+      .then(() => this.drainPendingOnce())
+      .catch(e => console.error('[Yavar] Failed to handle pending items:', e));
+    return this._drain;
   }
 
-  async checkPendingAutoSubmit() {
-    console.log('[Yavar Sidepanel] checkPendingAutoSubmit called');
-    try {
-      const result = await chrome.storage.session.get(['pendingAutoSubmit', 'lastSubmitTime']);
-      console.log('[Yavar Sidepanel] checkPendingAutoSubmit result:', result);
-      if (result.pendingAutoSubmit && Date.now() - result.lastSubmitTime < 120000) {
-        console.log('[Yavar Sidepanel] Found pending auto-submit prompt, length:', result.pendingAutoSubmit?.length);
-        
-        // Check settings
-        const { autoPaste, autoSubmit } = await this.getAutoPasteSettings();
-        
-        if (autoPaste) {
-          // Only forward if message listener hasn't already handled this prompt
-          if (this._lastForwardedPrompt === result.pendingAutoSubmit &&
-              Date.now() - (this._lastForwardedTime || 0) < 8000) {
-            console.log('[Yavar Sidepanel] Skipping checkPending — already forwarded by message listener');
-          } else {
-            this._lastForwardedPrompt = result.pendingAutoSubmit;
-            this._lastForwardedTime = Date.now();
-            this.forwardToIframe({ prompt: result.pendingAutoSubmit, autoSubmit: autoSubmit });
-            console.log('[Yavar Sidepanel] Forwarding to iframe (autoSubmit:', autoSubmit + ')');
-          }
-        } else {
-          // Just notify user
-          this.showNotification('📋 Text ready - click to paste manually');
-          console.log('[Yavar Sidepanel] Auto-paste disabled, showing notification');
-        }
-        
-        await chrome.storage.session.remove(['pendingAutoSubmit', 'lastSubmitTime']);
-        console.log('[Yavar Sidepanel] Cleared pending auto-submit');
+  async drainPendingOnce() {
+    const r = await chrome.storage.session.get(PENDING_KEYS);
+    const present = PENDING_KEYS.filter(k => r[k] !== undefined);
+    if (!present.length) return;
+    await chrome.storage.session.remove(present);
+
+    if (r.pendingAction) this.runPendingAction(r.pendingAction);
+    if (r.pendingText) this.handlePendingText(r.pendingText);
+    if (r.pendingScreenshot) {
+      if (r.pendingScreenshotRect) {
+        this.cropAndShowScreenshot(r.pendingScreenshot, r.pendingScreenshotRect);
       } else {
-        console.log('[Yavar Sidepanel] No valid pending auto-submit (expired or missing)');
+        this.capturedScreenshot = r.pendingScreenshot;
+        this.showScreenshotPanel(r.pendingScreenshot);
       }
-    } catch (error) {
-      console.error('[Yavar Sidepanel] Failed to check pending auto-submit:', error);
+    }
+    // Floating-menu prompts older than 2 minutes are stale (panel closed meanwhile)
+    if (r.pendingAutoSubmit && Date.now() - (r.lastSubmitTime || 0) < 120000) {
+      this.handlePendingPrompt(r.pendingAutoSubmit);
     }
   }
 
-  forwardToIframe(message) {
-    const { prompt, autoSubmit } = message;
-    const payload = { 
-      action: autoSubmit ? 'AUTO_SUBMIT_PROMPT' : 'AUTO_PASTE_PROMPT',
-      prompt: prompt
-    };
-
-    console.log('[Yavar Sidepanel] forwardToIframe:', payload.action);
-
-    // Staggered sends — the iframe/bridge may not be fully interactive yet
-    const delays = [0, 400, 1200, 2500];
-    delays.forEach(delay => {
-      setTimeout(() => {
-        try {
-          if (this.aiFrame && this.aiFrame.contentWindow) {
-            console.log(`[Yavar Sidepanel] postMessage to iframe (delay=${delay}ms)`);
-            this.aiFrame.contentWindow.postMessage(payload, '*');
-          } else {
-            console.warn(`[Yavar Sidepanel] Iframe not ready at delay=${delay}ms`);
-          }
-        } catch (e) {
-          console.warn('[Yavar Sidepanel] postMessage failed:', e);
-        }
-      }, delay);
-    });
+  async handlePendingPrompt(prompt) {
+    const { autoPaste, autoSubmit } = await this.getAutoPasteSettings();
+    if (autoPaste) {
+      this.rememberPrompt(prompt);
+      this.forwardToIframe({ prompt, autoSubmit });   // queued until the chat is ready
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(prompt);
+      this.showNotification('📋 Prompt copied - paste it into the chat');
+    } catch (e) {
+      this.showNotification('📋 Prompt ready - enable auto-paste in Settings to send it directly');
+    }
   }
+
+  // The last prompt we put in the chat, to pair with a saved answer
+  rememberPrompt(prompt) {
+    this._lastPrompt = prompt;
+    this._lastPromptTime = Date.now();
+  }
+
+  forwardToIframe({ prompt, autoSubmit }) {
+    this.postToChat({ action: autoSubmit ? 'AUTO_SUBMIT_PROMPT' : 'AUTO_PASTE_PROMPT', prompt });
+  }
+
 }
 
 
