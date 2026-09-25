@@ -6,6 +6,14 @@ A Chrome extension that embeds ChatGPT, Claude, and Gemini in a sidebar — so y
 
 **AI sidebar** — opens `gemini.google.com`, `chatgpt.com`, or `claude.ai` in a full-viewport sidebar, with a model switcher (and support for adding your own custom models). Send selected text, screenshots, or whole-page content straight to the model.
 
+**Yavar inside the chat** — when ChatGPT, Claude or Gemini is open in the sidebar, Yavar's controls sit right in the chat (inside isolated shadow DOM, so they never clash with the site's styles):
+
+- Under every finished answer: **Save** (stores that exact answer *with the question you asked*), **→ Notes**, **Copy MD**, and **View diagram** when the answer contains a Mermaid chart.
+- Above the message box: **📚 Repo**, **📄 Page**, **✨ Prompts** (wraps what you typed in any of your templates), **▶ Code**, **🧳 Fresh** (continue in a fresh chat).
+- **▶ Run** on Python and JavaScript code blocks.
+
+Turn them off under *Settings → Inside the chat*. They never appear in your normal chat tabs.
+
 **Floating menu** — select text (or code on GitHub, where it also tells the AI the file and line numbers) on any page and a compact icon menu appears, driven by **customizable prompt templates**. Built-ins include:
 
 - **Send** — send the selection straight to your default AI platform.

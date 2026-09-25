@@ -579,7 +579,10 @@
         const code = codeText(pre);
         postToYavar({ action: 'RUN_CODE', lang: codeLanguage(pre, code) || lang, code });
       });
-      if (getComputedStyle(pre).position === 'static') pre.style.position = 'relative';
+      const cs = getComputedStyle(pre);
+      if (cs.position === 'static') pre.style.position = 'relative';
+      // Room for the button so it never covers the last line of code
+      pre.style.paddingBottom = `calc(${cs.paddingBottom} + 30px)`;
       pre.appendChild(btn);
     });
   }
@@ -596,6 +599,274 @@
     };
     if (document.body) start();
     else document.addEventListener('DOMContentLoaded', start);
+  }
+
+  // ---- Yavar controls inside the chat ----
+  // An action row under each finished answer, and a chip bar above the
+  // message box. Rendered in shadow roots so the site's CSS can't touch
+  // them (and ours can't leak), re-attached when the site re-renders.
+  // Only in the Yavar side panel; can be turned off in Settings.
+
+  const USER_SELECTORS = {
+    chatgpt: 'div[data-message-author-role="user"]',
+    claude: '[data-testid="user-message"]',
+    gemini: 'user-query'
+  };
+
+  let inChatEnabled = true;
+  let yavarTemplates = [];
+
+  const UI_CSS = `
+    :host { all: initial; --fg:#1d1d1f; --muted:#6e6e73; --bg:#ffffff; --line:rgba(0,0,0,.12); --hover:rgba(0,113,227,.09); --accent:#0071e3; }
+    :host([dark]) { --fg:#f5f5f7; --muted:#a1a1a6; --bg:#2c2c2e; --line:rgba(255,255,255,.14); --hover:rgba(10,132,255,.18); --accent:#4aa3ff; }
+    * { box-sizing: border-box; font: 500 12px/1.2 system-ui, -apple-system, 'Segoe UI', sans-serif; }
+    .row { display:flex; flex-wrap:wrap; align-items:center; gap:4px; margin:8px 0 2px; opacity:.72; transition:opacity .15s; }
+    .row:hover, .row:focus-within { opacity:1; }
+    .brand { color:var(--muted); font-weight:600; font-size:11px; margin-right:2px; letter-spacing:.02em; }
+    button { display:inline-flex; align-items:center; gap:4px; padding:4px 9px; color:var(--fg); background:transparent;
+      border:1px solid var(--line); border-radius:999px; cursor:pointer; white-space:nowrap; }
+    button:hover { background:var(--hover); border-color:var(--accent); color:var(--accent); }
+    button:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+    button.ok { color:#1f9d55; border-color:#1f9d55; }
+    .bar { position:fixed; z-index:2147483000; display:flex; gap:4px; align-items:center; padding:3px; max-width:calc(100vw - 16px);
+      overflow-x:auto; scrollbar-width:none; background:var(--bg); border:1px solid var(--line); border-radius:999px;
+      box-shadow:0 2px 10px rgba(0,0,0,.1); }
+    .bar::-webkit-scrollbar { display:none; }
+    .bar button { border-color:transparent; padding:4px 8px; }
+    .menu { position:fixed; z-index:2147483001; min-width:200px; max-height:260px; overflow:auto; padding:4px; background:var(--bg);
+      border:1px solid var(--line); border-radius:12px; box-shadow:0 8px 24px rgba(0,0,0,.18); }
+    .menu button { display:flex; width:100%; border:none; border-radius:8px; padding:7px 10px; text-align:left; }
+    .menu .hint { padding:6px 10px 8px; color:var(--muted); font-size:11px; font-weight:400; line-height:1.4; }
+    [hidden] { display:none !important; }
+  `;
+
+  function looksDark() {
+    const pick = (el) => {
+      const m = el && getComputedStyle(el).backgroundColor.match(/\d+(\.\d+)?/g);
+      if (!m || (m.length === 4 && Number(m[3]) === 0)) return null;
+      const [r, g, b] = m.map(Number);
+      return (0.299 * r + 0.587 * g + 0.114 * b) < 128;
+    };
+    const fromBg = pick(document.body) ?? pick(document.documentElement);
+    if (fromBg != null) return fromBg;
+    return document.documentElement.classList.contains('dark') || matchMedia('(prefers-color-scheme: dark)').matches;
+  }
+
+  function makeHost(tag) {
+    const host = document.createElement(tag);
+    host.setAttribute('data-yavar-ui', '');
+    const root = host.attachShadow({ mode: 'open' });
+    const style = document.createElement('style');
+    style.textContent = UI_CSS;
+    root.appendChild(style);
+    host.toggleAttribute('dark', looksDark());
+    return { host, root };
+  }
+
+  function flash(btn, label) {
+    const old = btn.dataset.label || btn.textContent;
+    btn.dataset.label = old;
+    btn.textContent = label;
+    btn.classList.add('ok');
+    setTimeout(() => { btn.textContent = old; btn.classList.remove('ok'); }, 1600);
+  }
+
+  function answerMarkdown(msgEl) {
+    const sel = RESPONSE_SELECTORS[detectPlatform()];
+    const contentEl = sel?.content ? (msgEl.querySelector(sel.content) || msgEl) : msgEl;
+    return cleanMarkdown(nodeToMarkdown(contentEl)) || (contentEl.innerText || '').trim();
+  }
+
+  // The user's question that this answer replies to (last one before it)
+  function questionFor(msgEl) {
+    const sel = USER_SELECTORS[detectPlatform()];
+    if (!sel) return '';
+    let q = null;
+    for (const u of document.querySelectorAll(sel)) {
+      if (u.compareDocumentPosition(msgEl) & Node.DOCUMENT_POSITION_FOLLOWING) q = u;
+    }
+    return q ? (q.innerText || '').trim().slice(0, 4000) : '';
+  }
+
+  function addAnswerBar(msgEl) {
+    const { host, root } = makeHost('yavar-answer-bar');
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.innerHTML =
+      '<span class="brand">Yavar</span>' +
+      '<button data-a="save" title="Save this answer to Yavar history">Save</button>' +
+      '<button data-a="notes" title="Append this answer to your Yavar notes">→ Notes</button>' +
+      '<button data-a="copy" title="Copy as Markdown">Copy MD</button>' +
+      '<button data-a="diagram" title="Open the diagram in this answer" hidden>View diagram</button>';
+    root.appendChild(row);
+    const md0 = answerMarkdown(msgEl);
+    if (/```mermaid/i.test(md0)) row.querySelector('[data-a="diagram"]').hidden = false;
+
+    row.addEventListener('click', async (e) => {
+      const btn = e.target.closest('button');
+      if (!btn) return;
+      e.stopPropagation();
+      const text = answerMarkdown(msgEl);
+      const base = { platform: detectPlatform(), url: location.href };
+      if (btn.dataset.a === 'save') {
+        postToYavar({ action: 'ANSWER_CAPTURED', text, prompt: questionFor(msgEl), ...base });
+        flash(btn, 'Saved ✓');
+      } else if (btn.dataset.a === 'notes') {
+        postToYavar({ action: 'YAVAR_TO_NOTES', text, prompt: questionFor(msgEl), ...base });
+        flash(btn, 'Added ✓');
+      } else if (btn.dataset.a === 'copy') {
+        try { await navigator.clipboard.writeText(text); flash(btn, 'Copied ✓'); }
+        catch (err) { postToYavar({ action: 'YAVAR_COPY', text }); flash(btn, 'Copied ✓'); }
+      } else if (btn.dataset.a === 'diagram') {
+        const m = text.match(/```mermaid\s*\n([\s\S]*?)```/i);
+        if (m) postToYavar({ action: 'YAVAR_DIAGRAM', code: m[1].trim() });
+      }
+    });
+    msgEl.appendChild(host);
+  }
+
+  function decorateAnswers() {
+    const sel = RESPONSE_SELECTORS[detectPlatform()];
+    if (!sel) return;
+    const msgs = [...document.querySelectorAll(sel.message)];
+    const generating = !!document.querySelector(STOP_SELECTORS);
+    msgs.forEach((m, i) => {
+      if (generating && i === msgs.length - 1) return;           // still streaming
+      if (m.parentElement?.closest(sel.message)) return;           // nested match
+      if (m.querySelector(':scope > yavar-answer-bar')) return;
+      if (!(m.innerText || '').trim()) return;
+      addAnswerBar(m);
+    });
+  }
+
+  // ---- Chip bar above the message box ----
+  let composer = null;
+
+  function currentComposerText() {
+    const el = document.querySelector(SELECTORS[detectPlatform()]?.input);
+    if (!el) return '';
+    return (el.value !== undefined ? el.value : el.innerText || '').trim();
+  }
+
+  function buildComposer() {
+    const { host, root } = makeHost('yavar-composer-bar');
+    const bar = document.createElement('div');
+    bar.className = 'bar';
+    bar.innerHTML =
+      '<button data-c="reader" title="Repo Reader: pick repo or folder files to read with the AI">📚 Repo</button>' +
+      '<button data-c="add_page" title="Add the page open in your tab">📄 Page</button>' +
+      '<button data-c="prompts" title="Apply a prompt template to what you typed">✨ Prompts</button>' +
+      '<button data-c="run" title="Open the code playground">▶ Code</button>' +
+      '<button data-c="carry_over" title="Summarize this chat and continue in a fresh one">🧳 Fresh</button>';
+    const menu = document.createElement('div');
+    menu.className = 'menu';
+    menu.hidden = true;
+    root.append(bar, menu);
+
+    bar.addEventListener('click', (e) => {
+      const btn = e.target.closest('button');
+      if (!btn) return;
+      e.stopPropagation();
+      const c = btn.dataset.c;
+      if (c === 'prompts') {
+        if (!menu.hidden) { menu.hidden = true; return; }
+        const typed = currentComposerText();
+        menu.innerHTML = (typed
+          ? '<div class="hint">Wraps what you typed in the chosen prompt.</div>'
+          : '<div class="hint">Type or paste something first; the prompt wraps it. Prompts using the page work either way.</div>') +
+          (yavarTemplates.length ? yavarTemplates : [{ id: '', name: '(no templates)' }])
+            .map(t => `<button data-t="${String(t.id).replace(/"/g, '&quot;')}">${String(t.icon || '•').replace(/</g, '&lt;')}&nbsp; ${String(t.name).replace(/</g, '&lt;')}</button>`).join('');
+        const r = btn.getBoundingClientRect();
+        menu.hidden = false;
+        menu.style.left = Math.max(8, Math.min(r.left, innerWidth - 216)) + 'px';
+        menu.style.top = Math.max(8, r.top - menu.offsetHeight - 6) + 'px';
+        return;
+      }
+      menu.hidden = true;
+      postToYavar({ action: 'YAVAR_OPEN', what: c });
+    });
+    menu.addEventListener('click', (e) => {
+      const t = e.target.closest('[data-t]');
+      if (!t || !t.dataset.t) return;
+      e.stopPropagation();
+      menu.hidden = true;
+      postToYavar({ action: 'YAVAR_TEMPLATE', id: t.dataset.t, inputText: currentComposerText() });
+    });
+    document.addEventListener('click', () => { menu.hidden = true; });
+    document.documentElement.appendChild(host);
+    return { host, bar, menu };
+  }
+
+  function placeComposer() {
+    const input = inChatEnabled && document.querySelector(SELECTORS[detectPlatform()]?.input);
+    if (!input) { if (composer) composer.host.hidden = true; return; }
+    composer = composer && composer.host.isConnected ? composer : buildComposer();
+    const anchor = input.closest('form') || input.parentElement?.parentElement || input;
+    const r = anchor.getBoundingClientRect();
+    const barH = composer.bar.offsetHeight || 30;
+    const top = r.top - barH - 6;
+    composer.host.hidden = r.width === 0 || top < 4;
+    composer.bar.style.left = Math.max(8, r.left) + 'px';
+    composer.bar.style.top = top + 'px';
+    composer.host.toggleAttribute('dark', looksDark());
+  }
+
+  function removeInChatUi() {
+    document.querySelectorAll('yavar-answer-bar').forEach(el => el.remove());
+    if (composer) { composer.host.remove(); composer = null; }
+  }
+
+  function refreshInChatUi() {
+    if (!inChatEnabled) return;
+    decorateAnswers();
+    placeComposer();
+  }
+
+  if (EXTENSION_ORIGIN && window.parent !== window && window.parent === window.top && detectPlatform()) {
+    try {
+      chrome.storage.sync.get('settings').then(({ settings }) => {
+        inChatEnabled = settings?.inChatButtons ?? true;
+        if (!inChatEnabled) removeInChatUi(); else refreshInChatUi();
+      }).catch(() => {});
+      chrome.storage.onChanged.addListener((changes, area) => {
+        if (area !== 'sync' || !changes.settings) return;
+        inChatEnabled = changes.settings.newValue?.inChatButtons ?? true;
+        if (!inChatEnabled) removeInChatUi(); else refreshInChatUi();
+      });
+    } catch (e) { /* storage unavailable: keep defaults */ }
+
+    let queued = null;
+    const schedule = () => {
+      if (queued) return;
+      queued = setTimeout(() => { queued = null; refreshInChatUi(); }, 700);
+    };
+    const start = () => {
+      refreshInChatUi();
+      new MutationObserver(schedule).observe(document.body, { childList: true, subtree: true });
+      addEventListener('resize', () => placeComposer());
+      addEventListener('scroll', () => placeComposer(), true);
+      setInterval(placeComposer, 1500); // layout shifts the observer can't see
+    };
+    if (document.body) start();
+    else document.addEventListener('DOMContentLoaded', start);
+  }
+
+  function replaceComposerText(text) {
+    const platform = detectPlatform();
+    if (!platform) return;
+    waitForElement(SELECTORS[platform].input, 10000).then((el) => {
+      el.focus();
+      if (el.value !== undefined) {
+        el.select();
+      } else {
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+      insertTextIntoInput(el, text);
+    }).catch(() => {});
   }
 
   // Listen for postMessage from sidepanel
@@ -651,6 +922,14 @@
     if (event.data?.action === 'WATCH_FOR_ANSWER') {
       console.log('[Yavar Bridge] Received WATCH_FOR_ANSWER');
       startAnswerWatch(event.data.requestId);
+    }
+
+    if (event.data?.action === 'YAVAR_TEMPLATES' && Array.isArray(event.data.templates)) {
+      yavarTemplates = event.data.templates;
+    }
+
+    if (event.data?.action === 'AUTO_REPLACE_PROMPT' && typeof event.data.prompt === 'string') {
+      replaceComposerText(event.data.prompt);
     }
 
     if (event.data?.action === 'STOP_WATCH') {

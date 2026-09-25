@@ -2,6 +2,7 @@
 // Full viewport chat with bottom navigation and model management
 
 import { isPublicWebUrl } from './utils/net.js';
+import { loadTemplates, expandTemplate, varsInTemplate } from './utils/templates.js';
 import { pickCoreFiles, planPrompt, hintPrompt, checkPrompt, parseRebuildPlan } from './utils/rebuild.js';
 import {
   parseGitHubUrl, refCandidates, rawFileUrl, isReadablePath, estimateTokens, formatCount, formatBytes,
@@ -399,6 +400,7 @@ class YavarSidePanel {
   handleFrameLoad() {
     this._frameReady = true;
     this._frameWaiters.splice(0).forEach(resolve => resolve());
+    this.sendTemplatesToFrame();
 
     setTimeout(() => {
       this.loadingState.classList.add('hidden');
@@ -559,6 +561,8 @@ class YavarSidePanel {
       const autoSubmitToggle = document.getElementById('setting-auto-submit-toggle');
       const screenshotPreviewToggle = document.getElementById('setting-screenshot-preview-toggle');
       const deepResearchToggle = document.getElementById('setting-deep-research-toggle');
+      const inChatToggle = document.getElementById('setting-inchat-toggle');
+      if (inChatToggle) inChatToggle.checked = settings?.inChatButtons ?? true;
 
       if (autoPasteToggle) autoPasteToggle.checked = autoPaste;
       if (autoSubmitToggle) autoSubmitToggle.checked = autoSubmit;
@@ -571,6 +575,7 @@ class YavarSidePanel {
         autoSubmitToggle?.addEventListener('change', (e) => this.saveSetting('autoSubmit', e.target.checked));
         screenshotPreviewToggle?.addEventListener('change', (e) => this.saveSetting('showScreenshotPreview', e.target.checked));
         deepResearchToggle?.addEventListener('change', (e) => this.saveSetting('deepResearch', e.target.checked));
+        inChatToggle?.addEventListener('change', (e) => this.saveSetting('inChatButtons', e.target.checked));
         this.settingsListenersAdded = true;
       }
     } catch (error) {
@@ -3482,6 +3487,11 @@ Begin: state a one-line plan, then issue your first tool call.`;
         this.showNotification('⚠️ ' + msg);
       }
 
+      if (/^YAVAR_(TO_NOTES|DIAGRAM|COPY|TEMPLATE|OPEN)$/.test(data.action || '')) {
+        this.handleInChatAction(data);
+        return;
+      }
+
       // "▶ Run" clicked on a code block in an answer
       if (data.action === 'RUN_CODE' && typeof data.code === 'string') {
         this.openRunPanel({ lang: data.lang, code: data.code, autoRun: true });
@@ -3531,10 +3541,13 @@ Begin: state a one-line plan, then issue your first tool call.`;
     }
     if (answer.length > 100000) answer = answer.slice(0, 100000) + '\n\n…[truncated]';
 
-    // Pair with the last prompt we forwarded, if it was recent (< 15 min)
-    const prompt = (this._lastForwardedPrompt && Date.now() - (this._lastForwardedTime || 0) < 900000)
-      ? this._lastForwardedPrompt
-      : '';
+    // The question comes from the chat itself when saved from the answer's
+    // own button; otherwise pair with the last prompt we forwarded (< 15 min)
+    const prompt = data.prompt != null
+      ? data.prompt
+      : (this._lastForwardedPrompt && Date.now() - (this._lastForwardedTime || 0) < 900000)
+        ? this._lastForwardedPrompt
+        : '';
 
     const entry = {
       id: 'h_' + Date.now(),
@@ -4144,6 +4157,61 @@ Begin: state a one-line plan, then issue your first tool call.`;
     this.showNotification(`📋 "${preview}" copied!`);
   }
 
+  // The in-chat "Prompts" menu lists the user's templates
+  async sendTemplatesToFrame() {
+    try {
+      const templates = (await loadTemplates()).map(t => ({ id: t.id, name: t.name, icon: t.icon }));
+      // The chat UI may still be booting; send again shortly after
+      [0, 2000, 6000].forEach(d => setTimeout(() =>
+        this.aiFrame?.contentWindow?.postMessage({ action: 'YAVAR_TEMPLATES', templates }, '*'), d));
+    } catch (e) { /* ignore */ }
+  }
+
+  // "✨ Prompts" in the chat: expand a template around what the user typed
+  async applyTemplateFromChat(id, inputText) {
+    const tpl = (await loadTemplates()).find(t => t.id === id);
+    if (!tpl) return;
+    const vars = varsInTemplate(tpl.body);
+    const ctx = { selection: inputText || '' };
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      ctx.url = tab?.url || '';
+      ctx.title = tab?.title || '';
+      const gh = parseGitHubUrl(ctx.url);
+      if (gh) ctx.repo = `${gh.owner}/${gh.repo}`;
+    } catch (e) { /* no tab info */ }
+    if (vars.includes('page')) {
+      try { ctx.page = (await this.getActivePageText(12000)).text; }
+      catch (e) { this.showNotification('⚠️ Could not read the page: ' + e.message); return; }
+    }
+    if (vars.includes('selection') && !ctx.selection) {
+      this.showNotification('✨ Type or paste something in the chat first, then pick the prompt');
+      return;
+    }
+    const prompt = await expandTemplate(tpl.body, ctx);
+    this.aiFrame?.contentWindow?.postMessage({ action: 'AUTO_REPLACE_PROMPT', prompt }, '*');
+  }
+
+  // Buttons inside the chat page (bridge → panel)
+  async handleInChatAction(data) {
+    if (data.action === 'YAVAR_TO_NOTES') {
+      this.appendToNotes({ ts: Date.now(), platform: this.getCurrentModel()?.name || data.platform || 'AI', prompt: data.prompt || '', answer: data.text || '' });
+      this.showNotification('📝 Added to notes');
+    } else if (data.action === 'YAVAR_DIAGRAM') {
+      this._lastDiagramCode = data.code;
+      this.renderMermaid(data.code);
+    } else if (data.action === 'YAVAR_COPY') {
+      try { await navigator.clipboard.writeText(data.text || ''); } catch (e) { /* ignore */ }
+    } else if (data.action === 'YAVAR_TEMPLATE') {
+      this.applyTemplateFromChat(data.id, data.inputText);
+    } else if (data.action === 'YAVAR_OPEN') {
+      if (data.what === 'reader') this.toggleFilesPanel(true);
+      else if (data.what === 'add_page') this._addPageIsVideo ? this.addVideoToChat() : this.addPageToChat();
+      else if (data.what === 'run') this.openRunPanel();
+      else if (data.what === 'carry_over') this.carryOverToNewChat();
+    }
+  }
+
   // Resolves once the chat iframe has loaded (or after a timeout), so messages
   // sent while the panel is still opening aren't posted to about:blank.
   whenFrameReady(timeoutMs = 15000) {
@@ -4186,6 +4254,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
   setupStorageListener() {
     // Listen for screenshot data that arrives after sidepanel loads
     chrome.storage.onChanged.addListener((changes, areaName) => {
+      if (areaName === 'sync' && changes.promptTemplates) this.sendTemplatesToFrame();
       if (areaName !== 'session') return;
 
       if (changes.pendingAction?.newValue) {
