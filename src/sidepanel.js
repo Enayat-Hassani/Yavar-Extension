@@ -4,11 +4,12 @@
 import { isPublicWebUrl } from './utils/net.js';
 import { loadTemplates, expandTemplate, varsInTemplate } from './utils/templates.js';
 import { renderMarkdown, runnableLang } from './utils/markdown.js';
+import { DEFAULT_MODELS, loadModels as loadStoredModels } from './utils/models.js';
 import { pickCoreFiles, planPrompt, hintPrompt, checkPrompt, parseRebuildPlan } from './utils/rebuild.js';
 import {
-  parseGitHubUrl, refCandidates, rawFileUrl, encodePath, isReadablePath, estimateTokens, formatCount, formatBytes,
+  parseGitHubUrl, refCandidates, rawFileUrl, encodePath, isReadablePath, estimateTokens, formatCount,
   sliceLines, extractImports, resolveImports, suggestStartFiles, buildPack, readingPrompt, READ_MODES,
-  fencedFile, parseCommitsAtom, commitsFromApi, timeAgo, folderReadme, readmeSnippet, LOCAL_SKIP_DIRS, isSecretPath
+  fencedFile, parseCommitsAtom, commitsFromApi, timeAgo, LOCAL_SKIP_DIRS, isSecretPath
 } from './utils/github.js';
 
 // Session-storage keys other parts of the extension use to hand work to the panel
@@ -17,17 +18,8 @@ const PENDING_KEYS = ['pendingAutoSubmit', 'pendingPromptLabel', 'lastSubmitTime
 
 class YavarSidePanel {
   constructor() {
-    // Default AI models
-    this.defaultModels = [
-      { id: 'gemini', name: 'Gemini', url: 'https://gemini.google.com', icon: '✨', enabled: true, custom: false },
-      { id: 'chatgpt', name: 'ChatGPT', url: 'https://chatgpt.com', icon: '🤖', enabled: true, custom: false },
-      { id: 'claude', name: 'Claude', url: 'https://claude.ai', icon: '🧠', enabled: true, custom: false }
-    ];
-
     this.models = [];
     this.currentModelId = 'chatgpt';   // same default as the background and Settings
-    this._frameReady = false;
-    this._frameWaiters = [];
 
     this.init();
   }
@@ -101,8 +93,9 @@ class YavarSidePanel {
     this.loadCurrentAI();
     this.setupIframeMessageListener();
     this.setupStorageListener();
+    this.loadPromptTemplates();
     this.initCodeMirror();
-    this.setupFilesRailVisibility();
+    this.setupTabContext();
     this.drainPending();
   }
 
@@ -133,80 +126,32 @@ class YavarSidePanel {
     // Research agent (see beginResearch)
     this.agent = null;
 
-    // Repo file browser (left rail + panel)
+    // Repo Reader
     this.repoTree = null;
-    this.filesRailGroup = document.getElementById('files-rail-group');
-    this.filesRail = document.getElementById('files-rail');
-    this.filesQuickAdd = document.getElementById('files-quick-add');
-    this.dockAddPage = document.getElementById('dock-add-page');
-    this.dockAddPageLabel = this.dockAddPage?.querySelector('.files-tab-label');
-    this.filesQuickName = this.filesQuickAdd?.querySelector('.files-quick-name');
-    this.filesPanel = document.getElementById('files-panel');
-    this.filesTree = document.getElementById('files-tree');
-    this.filesSearch = document.getElementById('files-search');
-    this.btnCloseFiles = document.getElementById('btn-close-files');
-    this.btnRefreshFiles = document.getElementById('btn-refresh-files');
-    this.filesRepoChip = document.getElementById('files-repo-chip');
-    this.filesActionBar = document.getElementById('files-actionbar');
-    this.filesSelCount = document.getElementById('files-sel-count');
-    this.filesSelTokens = document.getElementById('files-sel-tokens');
-    this.filesModes = document.getElementById('files-modes');
-    this.filesSend = document.getElementById('files-send');
-    this.filesClear = document.getElementById('files-clear');
-    this.dockExplainDiff = document.getElementById('dock-explain-diff');
-    this.filesSearchWrap = document.getElementById('files-search-wrap');
-    this.filesView = 'files';
-    this.selectedFiles = new Set();
     this.readMarks = new Set();
 
-    // Right sidebar buttons
-    this.sidebarBtnNotes = document.getElementById('sidebar-btn-notes');
-    this.sidebarBtnHistory = document.getElementById('sidebar-btn-history');
-    this.sidebarBtnAgents = document.getElementById('sidebar-btn-agents');
-    this.sidebarBtnCode = document.getElementById('sidebar-btn-code');
+    // Menus and the code runner
     this.toolMenu = document.getElementById('tool-menu');
-    this.sidebarBtnModelSwitcher = document.getElementById('sidebar-btn-model-switcher');
-    this.sidebarBtnScreenshot = document.getElementById('sidebar-btn-screenshot');
-    this.sidebarBtnNewChat = document.getElementById('sidebar-btn-new-chat');
     this.runPanel = document.getElementById('run-panel');
     this.runOutput = document.getElementById('run-output');
     this.runStatus = document.getElementById('run-status');
     this.runGo = document.getElementById('run-go');
     this.runStop = document.getElementById('run-stop');
     this.runFollowups = document.getElementById('run-followups');
-    this.sidebarBtnSettings = document.getElementById('sidebar-btn-settings');
 
     // Model switcher
     this.modelSwitcher = document.getElementById('model-switcher');
     this.modelList = document.getElementById('model-list');
-    this.btnManageModels = document.getElementById('btn-manage-models');
 
-    // Settings panel
-    this.settingsPanel = document.getElementById('settings-panel');
-    this.btnCloseSettings = document.getElementById('btn-close-settings');
-    this.modelsListContainer = document.getElementById('models-list-container');
-    this.btnAddModel = document.getElementById('btn-add-model');
-
-    // Add model modal
-    this.addModelModal = document.getElementById('add-model-modal');
-    this.btnCloseModal = document.getElementById('btn-close-modal');
-    this.btnCancelModel = document.getElementById('btn-cancel-model');
-    this.addModelForm = document.getElementById('add-model-form');
-    this.modelNameInput = document.getElementById('model-name');
-    this.modelUrlInput = document.getElementById('model-url');
-    this.modelEnabledCheckbox = document.getElementById('model-enabled');
   }
 
   async loadModels() {
     try {
-      const result = await chrome.storage.sync.get('aiModels');
-      if (result.aiModels && result.aiModels.length > 0) {
-        this.models = result.aiModels;
-      } else {
-        this.models = [...this.defaultModels];
-        await this.saveModels();
-      }
-      
+      const { aiModels } = await chrome.storage.sync.get('aiModels');
+      this.models = await loadStoredModels();
+      if (!aiModels?.length) await this.saveModels();   // the frame rules read the stored list
+
+
       // Current model: last used, else the Default AI from Settings
       const { currentModelId, settings } = await chrome.storage.sync.get(['currentModelId', 'settings']);
       const wanted = currentModelId || settings?.defaultAI;
@@ -215,8 +160,20 @@ class YavarSidePanel {
       }
     } catch (error) {
       console.error('[Yavar] Failed to load models:', error);
-      this.models = [...this.defaultModels];
+      this.models = DEFAULT_MODELS.map(m => ({ ...m }));
     }
+  }
+
+  // Models were added, removed or turned off in Settings
+  onModelsChanged(models) {
+    if (!Array.isArray(models) || !models.length) return;
+    this.models = models;
+    if (!this.models.some(m => m.id === this.currentModelId && m.enabled)) {
+      const next = this.models.find(m => m.enabled);
+      if (next) this.switchModel(next.id);
+    }
+    this.renderModelList();
+    this.updateModelPill();
   }
 
   async saveModels() {
@@ -242,23 +199,7 @@ class YavarSidePanel {
   }
 
   bindEvents() {
-    // Sidebar buttons
-    this.sidebarBtnModelSwitcher.addEventListener('click', (e) => {
-      e.stopPropagation();
-      this.toggleModelSwitcher();
-    });
-
-    this.sidebarBtnNotes.addEventListener('click', () => this.toggleNotes());
-    this.sidebarBtnHistory.addEventListener('click', () => this.toggleHistory());
     document.getElementById('btn-save-current')?.addEventListener('click', () => this.captureLastAnswer());
-    this.sidebarBtnAgents?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      this.toggleToolMenu('agents', this.sidebarBtnAgents, e.detail === 0);
-    });
-    this.sidebarBtnCode?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      this.toggleToolMenu('code', this.sidebarBtnCode, e.detail === 0);
-    });
     this.toolMenu?.addEventListener('click', (e) => {
       const item = e.target.closest('[data-tool]');
       if (!item) return;
@@ -270,61 +211,6 @@ class YavarSidePanel {
       if (e.key === 'Escape') this.toolMenu.classList.add('hidden');
     });
 
-    // Repo file browser
-    this.filesRail.addEventListener('click', () => this.toggleFilesPanel());
-    this.filesQuickAdd?.addEventListener('click', () => this.quickAddActiveFile());
-    // On YouTube watch pages the "Add page" tab becomes "Add video" and grabs
-    // the transcript instead of the page chrome (see updateFilesRailVisibility).
-    this.dockAddPage?.addEventListener('click', () => {
-      if (this._addPageIsVideo) this.addVideoToChat();
-      else this.addPageToChat();
-    });
-    this.btnCloseFiles.addEventListener('click', () => this.filesPanel.classList.add('hidden'));
-    this.btnRefreshFiles.addEventListener('click', () => this.refreshFiles());
-    this.filesSearch.addEventListener('input', () => {
-      clearTimeout(this._searchTimer);
-      this._searchTimer = setTimeout(() => this.filterFilesTree(), 90);
-    });
-    this.filesModes?.addEventListener('click', (e) => {
-      const mode = e.target.closest('[data-mode]')?.dataset.mode;
-      if (mode) this.setReadMode(mode);
-    });
-    this.filesSend?.addEventListener('click', () =>
-      this.sendRepoFiles([...this.selectedFiles], this.getReadMode()));
-    this.filesClear?.addEventListener('click', () => {
-      this.selectedFiles.clear();
-      this.refreshSelectionUi();
-    });
-    this.dockExplainDiff?.addEventListener('click', () => this.explainActiveDiff());
-    document.getElementById('files-add-imports')?.addEventListener('click', () => this.addImportsOfSelection());
-    this.filesPanel?.querySelector('.files-tabs')?.addEventListener('click', (e) => {
-      const view = e.target.closest('[data-view]')?.dataset.view;
-      if (view) this.setFilesView(view);
-    });
-    this.filesPanel?.querySelector('.files-links')?.addEventListener('click', (e) => {
-      const ext = e.target.closest('[data-ext]')?.dataset.ext;
-      if (!ext || !this.repoTree) return;
-      const { owner, repo } = this.repoTree;
-      const url = ext === 'deepwiki' ? `https://deepwiki.com/${owner}/${repo}` : `https://gitingest.com/${owner}/${repo}`;
-      chrome.tabs.create({ url });
-    });
-    // Keyboard: Esc closes the reader, "/" jumps to search
-    this.filesPanel?.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') {
-        if (this.filesSearch.value) { this.filesSearch.value = ''; this.filterFilesTree(); }
-        else this.filesPanel.classList.add('hidden');
-      } else if (e.key === '/' && document.activeElement !== this.filesSearch) {
-        e.preventDefault();
-        this.filesSearch.focus();
-      }
-    });
-
-    this.sidebarBtnScreenshot.addEventListener('click', () => this.captureScreenshot());
-    this.sidebarBtnNewChat.addEventListener('click', () => this.openNewChat());
-    document.getElementById('btn-carry-over')?.addEventListener('click', () => {
-      this.hideModelSwitcher();
-      this.carryOverToNewChat();
-    });
     this.rebuildPanel = document.getElementById('rebuild-panel');
     this.rebuildBody = document.getElementById('rebuild-body');
     document.getElementById('rebuild-close')?.addEventListener('click', () => this.rebuildPanel.classList.add('hidden'));
@@ -333,10 +219,6 @@ class YavarSidePanel {
       if (e.key === 'Escape') this.rebuildPanel.classList.add('hidden');
     });
     this.rebuildBody?.addEventListener('click', (e) => this.onRebuildClick(e));
-    document.getElementById('btn-open-folder')?.addEventListener('click', () => this.openLocalFolder());
-    this.filesTree?.addEventListener('click', (e) => {
-      if (e.target.closest('[data-open-folder]')) this.openLocalFolder({ reuse: true });
-    });
     document.getElementById('run-close')?.addEventListener('click', () => this.closeRunPanel());
     this.runGo?.addEventListener('click', () => this.runCode());
     this.runStop?.addEventListener('click', () => this.stopCode());
@@ -351,29 +233,19 @@ class YavarSidePanel {
     this.runPanel?.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') this.closeRunPanel();
     });
-    this.sidebarBtnSettings.addEventListener('click', () => this.showSettings());
 
     // Close popovers when clicking outside
     document.addEventListener('click', (e) => {
-      if (!this.modelSwitcher.contains(e.target) && !this.sidebarBtnModelSwitcher.contains(e.target)
-        && !document.getElementById('app-model')?.contains(e.target)) {
+      if (!this.modelSwitcher.contains(e.target) && !document.getElementById('app-model')?.contains(e.target)) {
         this.hideModelSwitcher();
       }
       if (!this.toolMenu?.contains(e.target)) this.toolMenu?.classList.add('hidden');
     });
 
-    // Close settings
-    this.btnCloseSettings.addEventListener('click', () => this.hideSettings());
-
-    // Add model button
-    this.btnAddModel.addEventListener('click', () => this.showAddModelModal());
-
-    // Modal buttons
-    this.btnCloseModal.addEventListener('click', () => this.hideAddModelModal());
-    this.btnCancelModel.addEventListener('click', () => this.hideAddModelModal());
-    
-    // Add model form
-    this.addModelForm.addEventListener('submit', (e) => this.handleAddModel(e));
+    document.getElementById('btn-manage-models')?.addEventListener('click', () => {
+      this.hideModelSwitcher();
+      chrome.runtime.openOptionsPage();
+    });
 
     // Notification dismiss
     this.notificationDismiss.addEventListener('click', () => this.hideNotification());
@@ -432,8 +304,6 @@ class YavarSidePanel {
   }
 
   handleFrameLoad() {
-    this._frameReady = true;
-    this._frameWaiters.splice(0).forEach(resolve => resolve());
     // In case the bridge announced itself before we were listening
     try { this.aiFrame.contentWindow.postMessage({ action: 'BRIDGE_PING' }, '*'); } catch (e) { /* ignore */ }
 
@@ -475,8 +345,6 @@ class YavarSidePanel {
     const queued = this._chatQueue || [];
     this._chatQueue = [];
     queued.forEach(p => this.aiFrame?.contentWindow?.postMessage(p, '*'));
-    this.sendTemplatesToFrame();
-    this.sendContextToFrame();
   }
 
   whenBridgeReady(timeoutMs = 15000) {
@@ -551,8 +419,6 @@ class YavarSidePanel {
   // drop requests that only made sense for the old page.
   chatNavigating() {
     this._bridgeReady = false;
-    if (this._inChatBarShown) { this._inChatBarShown = false; this.applyDockVisibility(); }
-    this._frameReady = false;
     this.cancelChatRequests();
     this._chatQueue = (this._chatQueue || [])
       .filter(p => !/^(WATCH_FOR_ANSWER|CAPTURE_LAST_ANSWER|STOP_WATCH)$/.test(p.action));
@@ -728,61 +594,55 @@ class YavarSidePanel {
   }
 
   // Long chats get slow and hit free-plan limits. Ask the AI for a compact
-  // handoff note, open a new chat, and paste the note so work continues there.
+  // handoff note, start a new conversation, and attach the note to your next
+  // message so the new chat picks up where this one left off.
   async carryOverToNewChat() {
-    if (this.agent?.active) {
-      this.showNotification('⚠️ Stop the running agent first');
+    if (this.agent?.active || this.threadBusy()) {
+      this.showNotification('Wait for the current answer, or press ■ to stop it');
       return;
     }
-    if (this._carrying) return;
-    this._carrying = true;
-    this.showNotification('🧳 Asking the AI to summarize this chat…');
+    this.setBusy(true);
+    this.showNotification('Asking the AI to summarize this chat…');
+    let summary;
     try {
-      const summary = (await this.askAndCapture(
+      summary = (await this.askAndCapture(
         'Write a handoff note so I can continue this conversation in a fresh chat. ' +
         'Include: my goal; what we covered and concluded; key facts, decisions, file names and code snippets that matter; ' +
         'open questions; and the next step. Use short headings and bullets, under 350 words. Output only the note.'
       )).trim();
       if (!summary) throw new Error('the summary came back empty');
-
-      const model = this.getCurrentModel();
-      await this.addHistoryEntry({
-        id: 'h_' + Date.now(), ts: Date.now(), platform: model?.name || 'AI',
-        url: '', prompt: 'Handoff summary (fresh chat)', answer: summary
-      });
-
-      this.openNewChat();
-      await this.whenFrameReady();
-      this.forwardToIframe({
-        prompt: `I'm continuing from an earlier conversation. Here is where we left off:\n\n${summary}\n\n` +
-          'Reply with one line confirming you have the context, then wait for my next question.',
-        autoSubmit: false
-      });
-      this.showNotification('🧳 Fresh chat ready with the summary (also saved to history)');
     } catch (e) {
-      this.showNotification('⚠️ Could not carry over: ' + e.message);
+      this.showNotification('Could not carry over: ' + e.message);
+      return;
     } finally {
-      this._carrying = false;
+      this.setBusy(false);
     }
+    await this.addHistoryEntry({
+      id: 'h_' + Date.now(), ts: Date.now(), platform: this.getCurrentModel()?.name || 'AI',
+      url: '', prompt: 'Handoff summary (fresh chat)', answer: summary
+    });
+    await this.newConversation();
+    this.addComposerItem({
+      kind: 'page', label: 'Where we left off', title: 'The handoff note from your last chat (also in Saved answers)',
+      filename: 'handoff-note.md', content: summary, mime: 'text/markdown',
+      what: 'a handoff note summarizing our earlier conversation, to continue from'
+    });
+    this.showNotification('New conversation: the handoff note goes with your next message');
+    this.threadInput?.focus();
   }
 
   // ========== Model Switcher ==========
 
-  toggleModelSwitcher(anchor = null) {
+  toggleModelSwitcher(anchor) {
     if (!this.modelSwitcher.classList.contains('hidden')) {
       this.hideModelSwitcher();
       return;
     }
     this.toolMenu?.classList.add('hidden');
     this.showModelSwitcher();
-    // Under the header's model pill, or the default spot by the sidebar
-    const st = this.modelSwitcher.style;
-    if (anchor) {
-      const r = anchor.getBoundingClientRect();
-      Object.assign(st, { top: (r.bottom + 6) + 'px', left: r.left + 'px', bottom: 'auto' });
-    } else {
-      Object.assign(st, { top: '', left: '', bottom: '' });
-    }
+    // Under the header's model pill
+    const r = anchor.getBoundingClientRect();
+    Object.assign(this.modelSwitcher.style, { top: (r.bottom + 6) + 'px', left: r.left + 'px', bottom: 'auto' });
   }
 
   // The header pill shows the current model; the composer is addressed to it
@@ -828,224 +688,6 @@ class YavarSidePanel {
   }
 
   // ========== Settings Panel ==========
-
-  async showSettings() {
-    await this.renderModelsList();
-    await this.loadAutoPasteSettings();
-    this.renderShortcuts();
-    await this.loadGithubToken();
-    this.settingsPanel.classList.remove('hidden');
-  }
-
-  async loadGithubToken() {
-    const input = document.getElementById('setting-github-token');
-    if (!input) return;
-    input.value = await this.getGithubToken();
-    if (!this._ghTokenListenerAdded) {
-      document.getElementById('btn-save-github-token')?.addEventListener('click', () => this.saveGithubToken());
-      this._ghTokenListenerAdded = true;
-    }
-  }
-
-  saveGithubToken() {
-    const input = document.getElementById('setting-github-token');
-    const token = (input?.value || '').trim();
-    chrome.storage.local.set({ githubToken: token }, () => {
-      this.showNotification(token ? '🔑 GitHub token saved' : '🔑 GitHub token cleared');
-    });
-  }
-
-  hideSettings() {
-    this.settingsPanel.classList.add('hidden');
-  }
-
-  async loadAutoPasteSettings() {
-    try {
-      const { settings } = await chrome.storage.sync.get('settings');
-      const autoPaste = settings?.autoPaste ?? true;
-      const autoSubmit = settings?.autoSubmit ?? false;
-      const showScreenshotPreview = settings?.showScreenshotPreview ?? false;
-      const deepResearch = settings?.deepResearch ?? false;
-
-      // Update toggle switches
-      const autoPasteToggle = document.getElementById('setting-auto-paste-toggle');
-      const autoSubmitToggle = document.getElementById('setting-auto-submit-toggle');
-      const screenshotPreviewToggle = document.getElementById('setting-screenshot-preview-toggle');
-      const deepResearchToggle = document.getElementById('setting-deep-research-toggle');
-      const inChatToggle = document.getElementById('setting-inchat-toggle');
-      if (inChatToggle) inChatToggle.checked = settings?.inChatButtons ?? true;
-      const tempChatsToggle = document.getElementById('setting-temp-chats-toggle');
-      if (tempChatsToggle) tempChatsToggle.checked = settings?.tempChats ?? true;
-
-      if (autoPasteToggle) autoPasteToggle.checked = autoPaste;
-      if (autoSubmitToggle) autoSubmitToggle.checked = autoSubmit;
-      if (screenshotPreviewToggle) screenshotPreviewToggle.checked = showScreenshotPreview;
-      if (deepResearchToggle) deepResearchToggle.checked = deepResearch;
-
-      // Add event listeners if not already added
-      if (!this.settingsListenersAdded) {
-        autoPasteToggle?.addEventListener('change', (e) => this.saveSetting('autoPaste', e.target.checked));
-        autoSubmitToggle?.addEventListener('change', (e) => this.saveSetting('autoSubmit', e.target.checked));
-        screenshotPreviewToggle?.addEventListener('change', (e) => this.saveSetting('showScreenshotPreview', e.target.checked));
-        deepResearchToggle?.addEventListener('change', (e) => this.saveSetting('deepResearch', e.target.checked));
-        inChatToggle?.addEventListener('change', (e) => this.saveSetting('inChatButtons', e.target.checked));
-        tempChatsToggle?.addEventListener('change', (e) => this.saveSetting('tempChats', e.target.checked));
-        this.settingsListenersAdded = true;
-      }
-    } catch (error) {
-      console.error('[Yavar] Failed to load auto-paste settings:', error);
-    }
-  }
-
-  // Merge one key into the shared settings object in sync storage
-  async saveSetting(key, value) {
-    try {
-      const { settings } = await chrome.storage.sync.get('settings');
-      await chrome.storage.sync.set({ settings: { ...settings, [key]: value } });
-    } catch (error) {
-      console.error(`[Yavar] Failed to save ${key}:`, error);
-    }
-  }
-
-  // Current bindings (users can rebind at chrome://extensions/shortcuts)
-  renderShortcuts() {
-    const list = document.getElementById('shortcuts-list');
-    if (!list || !chrome.commands?.getAll) return;
-    chrome.commands.getAll((commands) => {
-      const rows = (commands || [])
-        .filter(c => c.description)
-        .map(c => ({ label: c.description, keys: c.shortcut || 'Not set' }));
-      rows.push({ label: 'Save AI answer to history', keys: 'Ctrl+Shift+S' });
-      list.innerHTML = rows.map(r => `
-            <div class="shortcut-item">
-              <span>${this.escapeHtml(r.label)}</span>
-              <kbd>${this.escapeHtml(r.keys)}</kbd>
-            </div>`).join('');
-    });
-  }
-
-  async getAutoPasteSettings() {
-    try {
-      const { settings } = await chrome.storage.sync.get('settings');
-      return {
-        autoPaste: settings?.autoPaste ?? true,
-        autoSubmit: settings?.autoSubmit ?? false,
-        showScreenshotPreview: settings?.showScreenshotPreview ?? false
-      };
-    } catch (error) {
-      console.error('[Yavar] Failed to get auto-paste settings:', error);
-      return { autoPaste: true, autoSubmit: false, showScreenshotPreview: false };
-    }
-  }
-
-  renderModelsList() {
-    this.modelsListContainer.innerHTML = this.models.map(model => `
-      <div class="model-row">
-        <div class="model-row-icon">${this.escapeHtml(model.icon)}</div>
-        <div class="model-row-info">
-          <div class="model-row-name">${this.escapeHtml(model.name)}</div>
-          <div class="model-row-url">${this.escapeHtml(model.url)}</div>
-        </div>
-        <div class="model-row-actions">
-          <div class="toggle-switch ${model.enabled ? 'active' : ''}" 
-               data-model-id="${model.id}" 
-               title="Toggle visibility">
-          </div>
-          ${!model.custom ? '' : `
-            <button class="btn-delete" data-model-id="${model.id}" title="Delete model">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M3 6h18"></path>
-                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-              </svg>
-            </button>
-          `}
-        </div>
-      </div>
-    `).join('');
-    
-    // Add toggle handlers
-    this.modelsListContainer.querySelectorAll('.toggle-switch').forEach(toggle => {
-      toggle.addEventListener('click', () => {
-        const modelId = toggle.dataset.modelId;
-        this.toggleModelEnabled(modelId);
-      });
-    });
-    
-    // Add delete handlers
-    this.modelsListContainer.querySelectorAll('.btn-delete').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const modelId = btn.dataset.modelId;
-        this.deleteModel(modelId);
-      });
-    });
-  }
-
-  toggleModelEnabled(modelId) {
-    const model = this.models.find(m => m.id === modelId);
-    if (model) {
-      model.enabled = !model.enabled;
-      this.saveModels();
-      this.renderModelsList();
-    }
-  }
-
-  deleteModel(modelId) {
-    this.models = this.models.filter(m => m.id !== modelId);
-    this.saveModels();
-    this.renderModelsList();
-    
-    // If current model was deleted, switch to first enabled
-    if (this.currentModelId === modelId) {
-      const firstEnabled = this.models.find(m => m.enabled);
-      if (firstEnabled) {
-        this.switchModel(firstEnabled.id);
-      }
-    }
-  }
-
-  // ========== Add Model Modal ==========
-
-  showAddModelModal() {
-    this.addModelModal.classList.remove('hidden');
-    this.modelNameInput.focus();
-  }
-
-  hideAddModelModal() {
-    this.addModelModal.classList.add('hidden');
-    this.addModelForm.reset();
-  }
-
-  handleAddModel(e) {
-    e.preventDefault();
-
-    const name = this.modelNameInput.value.trim();
-    const url = this.modelUrlInput.value.trim();
-    const enabled = this.modelEnabledCheckbox.checked;
-
-    if (!name || !url) return;
-
-    // Only real web pages can be framed; reject javascript:, file:, typos, etc.
-    let parsed;
-    try { parsed = new URL(/^https?:\/\//i.test(url) ? url : 'https://' + url); } catch (err) { parsed = null; }
-    if (!parsed || !/^https?:$/.test(parsed.protocol)) {
-      this.showNotification('⚠️ Enter a valid http(s) URL');
-      return;
-    }
-
-    const newModel = {
-      id: 'custom_' + Date.now(),
-      name,
-      url: parsed.href,
-      icon: '🌐',
-      enabled,
-      custom: true
-    };
-
-    this.models.push(newModel);
-    this.saveModels();
-    this.hideAddModelModal();
-    this.renderModelsList();
-  }
 
   // ========== GitHub ==========
 
@@ -1471,13 +1113,12 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     document.getElementById('thread-private')?.classList.toggle('hidden', !this._chatIsTemp);
   }
 
-  // ========== Repo File Browser ==========
-  // A manual counterpart to the agent: browse the current GitHub repo's tree and
-  // click a file to drop its contents straight into the chat input.
+  // ========== Tab context ==========
+  // What the tab you're looking at is (a web page, a GitHub repo, a video)
+  // decides the start page's actions and what the + menu can add.
 
-  // Show the Files tab only when the active tab is a GitHub repo page
-  setupFilesRailVisibility() {
-    const update = () => this.updateFilesRailVisibility();
+  setupTabContext() {
+    const update = () => this.updateTabContext();
     update();
     try {
       chrome.tabs.onActivated.addListener(update);
@@ -1486,152 +1127,53 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       });
       chrome.windows?.onFocusChanged?.addListener(update);
     } catch (e) {
-      console.warn('[Yavar] Could not watch tab changes for Files rail:', e);
+      console.warn('[Yavar] Could not watch tab changes:', e);
     }
   }
 
-  async updateFilesRailVisibility() {
+  async updateTabContext() {
     let url = '';
     try {
       const [tab] = await this.getActiveTabs();
       url = tab?.url || '';
-    } catch (e) { /* default hidden */ }
+    } catch (e) { /* no tab: nothing to offer */ }
 
     // "Usable" = a real web page that isn't one of the AI chat sites themselves
     const isHttp = /^https?:\/\//i.test(url);
-    const isAIHost = /(chatgpt\.com|chat\.openai\.com|claude\.ai|gemini\.google\.com|bing\.com)/i.test(url);
+    const isAIHost = /(chatgpt\.com|chat\.openai\.com|claude\.ai|gemini\.google\.com)/i.test(url);
     const usable = isHttp && !isAIHost;
-
-    const gh = parseGitHubUrl(url);
-    const isRepo = !!gh;
-
-    this._tabCtx = { usable, gh, url };
-    // The whole dock shows on any usable page (unless the same buttons are
-    // already in the chat's own bar); individual tabs are contextual.
-    this.applyDockVisibility();
-    if (!usable && this.filesPanel) this.filesPanel.classList.add('hidden');
-
-    // Page-level tabs (any usable page)
-    this.dockAddPage?.classList.toggle('hidden', !usable);
-
-    // On a YouTube watch page, "Add page" becomes "Add video" (grab transcript)
-    const isYouTubeWatch = /:\/\/(www\.)?youtube\.com\/watch\?/i.test(url) || /:\/\/youtu\.be\//i.test(url);
-    this._addPageIsVideo = usable && isYouTubeWatch;
-    if (this.dockAddPage) {
-      this.dockAddPage.classList.toggle('is-video', this._addPageIsVideo);
-      if (this.dockAddPageLabel) this.dockAddPageLabel.textContent = this._addPageIsVideo ? 'Add video' : 'Add page';
-      this.dockAddPage.title = this._addPageIsVideo
-        ? "Add this video's transcript to the chat as context"
-        : "Add this page's text to the chat as context";
-    }
-
-    // Repo browse tab (GitHub repos only)
-    this.filesRail?.classList.toggle('hidden', !isRepo);
-
-    // Quick-read tab: only when the GitHub tab is viewing a specific file.
-    // The ref/path split is resolved when clicked; here the name is enough.
-    if (this.filesQuickAdd) {
-      const isFile = gh?.kind === 'blob' && gh.rest.length > 1;
-      if (isFile) {
-        const name = gh.rest[gh.rest.length - 1];
-        const range = gh.lines ? ` L${gh.lines.start}${gh.lines.end !== gh.lines.start ? '-' + gh.lines.end : ''}` : '';
-        if (this.filesQuickName) this.filesQuickName.textContent = name + range;
-        this.filesQuickAdd.title = `Read ${gh.lines ? 'the selected lines of ' : ''}“${name}” with the AI`;
-      }
-      this.filesQuickAdd.classList.toggle('hidden', !isFile);
-    }
-
-    // Explain-diff tab: on a pull request or commit page
-    if (this.dockExplainDiff) {
-      const isDiff = gh?.kind === 'pull' || gh?.kind === 'commit';
-      this.dockExplainDiff.classList.toggle('hidden', !isDiff);
-      const lbl = this.dockExplainDiff.querySelector('.files-tab-label');
-      if (lbl && isDiff) lbl.textContent = gh.kind === 'pull' ? 'Explain PR' : 'Explain commit';
-    }
-
-    this.markFirstDockTab();
-    this.sendContextToFrame();
+    const video = usable && (/:\/\/(www\.)?youtube\.com\/watch\?/i.test(url) || /:\/\/youtu\.be\//i.test(url));
+    this._tabCtx = { usable, gh: parseGitHubUrl(url), url, video };
     this.renderHome();
-    if (isRepo && this._view === 'chat') this.maybeShowReaderTip();
   }
 
-  // The left dock is the fallback for chats without Yavar's in-chat bar
-  // (custom models, in-chat buttons turned off, a site layout we can't read).
-  applyDockVisibility() {
-    const usable = !!this._tabCtx?.usable;
-    this.filesRailGroup?.classList.toggle('hidden', !usable || !!this._inChatBarShown || this._view === 'app');
-  }
-
-  // Buttons for the chat's own bar, matching the page open in the tab
-  chatContext() {
-    const { usable, gh } = this._tabCtx || {};
-    const video = !!this._addPageIsVideo;
-    const chips = [];
-    if (gh?.kind === 'blob' && gh.rest.length > 1) {
-      chips.push({ id: 'add_file', label: '+ ' + gh.rest[gh.rest.length - 1], title: 'Add the file open in your GitHub tab' });
-    }
-    if (gh?.kind === 'pull' || gh?.kind === 'commit') {
-      chips.push({ id: 'explain_diff', label: gh.kind === 'pull' ? '⇄ Explain PR' : '⇄ Explain commit', title: 'Explain the change open in your tab' });
-    }
-    if (gh) chips.push({ id: 'reader', label: '📚 Repo', title: 'Repo Reader: pick files to read with the AI' });
-    else if (usable) chips.push({ id: 'add_page', label: video ? '🎬 Video' : '📄 Page', title: video ? "Add this video's transcript" : "Add this page's text" });
-    if (usable) chips.push({ id: 'screenshot', label: '📷', title: 'Screenshot an area of the page into the chat' });
-
-    const more = [];
-    if (gh && usable) more.push({ id: 'add_page', label: '📄 Add this page' });
-    if (gh) more.push({ id: 'explain_repo', label: '🧭 Explain this repo' });
-    if (usable) more.push({ id: 'research_page', label: '🔎 Research this page' });
-    more.push(
-      { id: 'research_web', label: '🌐 Research the web' },
-      { id: 'videos', label: '🎬 Search videos' },
-      { id: 'local', label: '📁 Read a local folder' },
-      { id: 'run', label: '▶ Code playground' },
-      { id: 'carry_over', label: '🧳 Continue in a fresh chat' }
-    );
-    return { chips, more };
-  }
-
-  sendContextToFrame() {
-    this.postToChat({ action: 'YAVAR_CONTEXT', ...this.chatContext() });
-  }
-
-  // Sidebar menus: grouped tools instead of one button each
+  // Menus in the Yavar view: + (add to the message), its prompt templates, and ⋯
   toolMenuItems(kind) {
-    const { usable, gh } = this._tabCtx || {};
+    const { usable, gh, video } = this._tabCtx || {};
     const repo = gh ? `${gh.owner}/${gh.repo}` : '';
-    if (kind === 'agents') {
-      return [
-        { id: 'research_web', icon: '🌐', name: 'Research the web', desc: 'Searches, reads sources, cites them' },
-        { id: 'research_page', icon: '🔎', name: 'Research this page', desc: usable ? 'Dig deeper into the open page' : 'Open a web page in your tab', disabled: !usable },
-        { id: 'videos', icon: '🎬', name: 'Search videos', desc: 'Top YouTube videos on a topic, summarized' }
-      ];
-    }
     if (kind === 'add') {
       const file = gh?.kind === 'blob' && gh.rest.length > 1 ? gh.rest[gh.rest.length - 1] : '';
       return [
         ...(file ? [{ id: 'attach_file', icon: '📎', name: file, desc: 'Open in your tab' }] : []),
         { id: 'pick_repo', icon: '📚', name: 'Files from this repository', desc: repo || 'Open a GitHub repository in your tab', disabled: !gh },
         { id: 'pick_local', icon: '📁', name: 'Files from a folder', desc: 'A project on this computer' },
-        { id: 'attach_page', icon: '📄', name: 'This page', desc: usable ? 'The text of the page in your tab' : 'Open a web page in your tab', disabled: !usable },
-        { id: 'screenshot_attach', icon: '📷', name: 'Screenshot', desc: usable ? 'Select an area of the page' : 'Open a web page in your tab', disabled: !usable }
+        { id: 'attach_page', icon: video ? '🎬' : '📄', name: video ? "This video's transcript" : 'This page', desc: usable ? (video ? 'The captions of the video in your tab' : 'The text of the page in your tab') : 'Open a web page in your tab', disabled: !usable },
+        { id: 'screenshot_attach', icon: '📷', name: 'Screenshot', desc: usable ? 'Select an area of the page' : 'Open a web page in your tab', disabled: !usable },
+        { id: 'prompts', icon: '✨', name: 'Use a prompt', desc: 'Wrap your message in one of your templates' }
       ];
     }
-    if (kind === 'more') {
-      return [
-        { id: 'history', icon: '🕘', name: 'Saved answers', desc: 'Everything you saved, searchable' },
-        { id: 'notes', icon: '📝', name: 'Notes', desc: 'Your scratchpad' },
-        { id: 'research_web', icon: '🌐', name: 'Web research', desc: 'Searches, reads sources, cites them' },
-        { id: 'videos', icon: '🎬', name: 'Video research', desc: 'What the top YouTube videos say' },
-        { id: 'run', icon: '▶️', name: 'Code playground', desc: 'Run Python or JavaScript' },
-        { id: 'carry_over', icon: '🧳', name: 'Continue in a fresh chat', desc: 'Summarize this chat into a new one' },
-        { id: 'settings', icon: '⚙️', name: 'Settings' }
-      ];
+    if (kind === 'prompts') {
+      // A template that is only {{selection}} would leave your message as it is
+      return (this._templates || []).filter(t => t.body.trim() !== '{{selection}}').map(t => ({ id: 'tpl:' + t.id, icon: this.escapeHtml(t.icon || '•'), name: this.escapeHtml(t.name) }));
     }
     return [
-      { id: 'explain_repo', icon: '🧭', name: 'Explain this repo', desc: repo || 'Open a GitHub repo in your tab', disabled: !gh },
-      { id: 'reader', icon: '📚', name: 'Browse its files', desc: repo || 'Open a GitHub repo in your tab', disabled: !gh },
-      { id: 'local', icon: '📁', name: 'Read a local folder', desc: 'A project on this computer' },
-      { id: 'run', icon: '▶️', name: 'Code playground', desc: 'Run Python or JavaScript' }
+      { id: 'history', icon: '🕘', name: 'Saved answers', desc: 'Everything you saved, searchable' },
+      { id: 'notes', icon: '📝', name: 'Notes', desc: 'Your scratchpad' },
+      { id: 'research_web', icon: '🌐', name: 'Web research', desc: 'Searches, reads sources, cites them' },
+      { id: 'videos', icon: '🎬', name: 'Video research', desc: 'What the top YouTube videos say' },
+      { id: 'run', icon: '▶️', name: 'Code playground', desc: 'Run Python or JavaScript' },
+      { id: 'carry_over', icon: '🧳', name: 'Continue in a fresh chat', desc: 'Summarize this chat into a new one' },
+      { id: 'settings', icon: '⚙️', name: 'Settings' }
     ];
   }
 
@@ -1644,7 +1186,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     }
     this.hideModelSwitcher();
     menu.dataset.kind = kind;
-    const title = { agents: 'Agents', code: 'Code', add: 'Add to message', more: '' }[kind];
+    const title = { add: 'Add to message', prompts: 'Use a prompt', more: '' }[kind];
     const head = document.getElementById('tool-menu-title');
     head.textContent = title;
     head.hidden = !title;
@@ -1659,28 +1201,24 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       menu.style.left = 'auto';
       menu.style.right = Math.max(8, window.innerWidth - r.right) + 'px';
       menu.style.top = (r.bottom + 6) + 'px';
-    } else if (kind === 'add') {
+    } else {
       // Above the composer's + button
       menu.style.right = 'auto';
       menu.style.left = Math.max(8, r.left) + 'px';
       menu.style.top = Math.max(8, r.top - menu.offsetHeight - 8) + 'px';
-    } else {
-      // Beside the sidebar button, kept on screen
-      menu.style.left = 'auto';
-      menu.style.right = (window.innerWidth - r.left + 8) + 'px';
-      menu.style.top = Math.max(8, Math.min(r.top - 8, window.innerHeight - menu.offsetHeight - 8)) + 'px';
     }
     if (fromKeyboard) menu.querySelector('button:not([disabled])')?.focus();
   }
 
-  // One place for every tool, whether opened from the sidebar or the chat
+  // One place for every action: the start page, the menus, the context menu
+  // and shortcuts (queued as pendingAction) all come through here
   runTool(id) {
+    if (id.startsWith('tpl:')) { this.applyTemplate(id.slice(4)); return; }
     const tools = {
-      reader: () => this.toggleFilesPanel(true),
-      changes: async () => { await this.toggleFilesPanel(true); this.setFilesView('changes'); },
-      rebuild: async () => { await this.toggleFilesPanel(true); this.openRebuild(); },
-      add_page: () => (this._view === 'app' ? this.attachActivePage()
-        : this._addPageIsVideo ? this.addVideoToChat() : this.addPageToChat()),
+      reader: () => this.openPicker('repo'),
+      changes: () => this.showRecentChanges(),
+      rebuild: () => this.openRebuild(),
+      add_page: () => this.attachActivePage(),
       attach_page: () => this.attachActivePage(),
       attach_file: () => this.quickAddActiveFile('add'),
       summarize_page: () => this.summarizeActivePage(),
@@ -1689,46 +1227,20 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       explain_repo: () => this.explainRepo(),
       history: () => this.toggleHistory(),
       notes: () => this.toggleNotes(),
-      settings: () => this.showSettings(),
+      settings: () => chrome.runtime.openOptionsPage(),
       pick_repo: () => this.openPicker('repo'),
       pick_local: () => this.openPicker('local'),
       screenshot: () => this.captureScreenshot(),
       screenshot_attach: () => this.captureScreenshot(),
+      prompts: () => this.toggleToolMenu('prompts', document.getElementById('composer-add')),
       research_web: () => this.startResearchAgent(),
       research_page: () => this.researchThisPage(),
       videos: () => this.researchVideosOnTopic(),
-      local: () => this.openLocalFolder({ reuse: true }),
+      local: () => this.openPicker('local'),
       run: () => this.openRunPanel(),
       carry_over: () => this.carryOverToNewChat()
     };
     tools[id]?.();
-  }
-
-  // First visit to a repo: slide the dock out briefly and explain the reader
-  async maybeShowReaderTip() {
-    if (this._readerTipDone) return;   // skip the storage read on every tab change
-    this._readerTipDone = true;
-    try {
-      if ((await chrome.storage.local.get('readerTipShown')).readerTipShown) return;
-      await chrome.storage.local.set({ readerTipShown: true });
-    } catch (e) { return; }
-    const where = this._inChatBarShown ? '"📚 Repo" above the message box' : '"Read repo" on the left edge';
-    if (!this._inChatBarShown) this.filesRailGroup?.classList.add('peek');
-    this.showNotification(`📚 Tip: ${where} sends several files to the AI in one message`);
-    setTimeout(() => this.filesRailGroup?.classList.remove('peek'), 5000);
-  }
-
-  // Drop the top hairline on whichever tab is first visible, so the divider
-  // never sits at the very top of the dock.
-  markFirstDockTab() {
-    if (!this.filesRailGroup) return;
-    const tabs = [...this.filesRailGroup.querySelectorAll('.dock-tab')];
-    let seen = false;
-    for (const tab of tabs) {
-      const visible = !tab.classList.contains('hidden');
-      tab.classList.toggle('dock-first', visible && !seen);
-      if (visible) seen = true;
-    }
   }
 
   // Read the active tab's readable page text. Injects a reader on demand so it
@@ -1774,24 +1286,6 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
   }
 
   // Feature: add the current page's text to the chat as context.
-  async addPageToChat() {
-    this.showNotification('📄 Reading this page…');
-    try {
-      const { text, title } = await this.getActivePageText(60000);
-      const INLINE_MAX = 4000;
-      if (text.length <= INLINE_MAX) {
-        this.forwardToIframe({ prompt: `Here is the page "${title}":\n\n"""\n${text}\n"""\n`, autoSubmit: false });
-        this.showNotification('📄 Added page to the chat');
-      } else {
-        const fname = (title.replace(/[^\w.-]+/g, '-').slice(0, 40) || 'page') + '.txt';
-        this.forwardAttachToIframe(fname, text);
-        this.showNotification(`📎 Attached page (${Math.round(text.length / 1000)}k chars)`);
-      }
-    } catch (e) {
-      this.showNotification('⚠️ ' + e.message);
-    }
-  }
-
   // Extract a YouTube video id from a watch / youtu.be URL.
   parseYouTubeId(url) {
     try {
@@ -1858,46 +1352,23 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
   // Feature: add the current YouTube video's transcript to the chat as context.
   // Prefers the ytx server (robust, timestamped, cached) and falls back to the
   // in-page extractor when the server isn't running.
-  async addVideoToChat() {
-    this.showNotification('🎬 Reading this video…');
+  // The transcript of the video in the tab: from ytx when it's running (far
+  // more reliable), otherwise from the captions on the page
+  async readActiveVideo() {
     try {
-      let text, title;
-
-      // Try ytx first (if reachable) — it's far more reliable than page scraping.
-      try {
-        const [tab] = await this.getActiveTabs();
-        const vid = this.parseYouTubeId(tab?.url || '');
-        if (vid) {
-          const { base } = await this.getYtxSettings();
-          const h = await fetch(`${base}/health`, { signal: AbortSignal.timeout(1200) }).catch(() => null);
-          if (h?.ok) {
-            const r = await fetch(`${base}/api/v1/transcripts/${vid}?format=md`);
-            if (r.ok) {
-              const t = (await r.text()).trim();
-              if (t) { text = t; title = tab?.title?.replace(/ - YouTube$/, '') || 'video'; }
-            }
-          }
+      const [tab] = await this.getActiveTabs();
+      const vid = this.parseYouTubeId(tab?.url || '');
+      if (vid) {
+        const { base } = await this.getYtxSettings();
+        const h = await fetch(`${base}/health`, { signal: AbortSignal.timeout(1200) }).catch(() => null);
+        if (h?.ok) {
+          const r = await fetch(`${base}/api/v1/transcripts/${vid}?format=md`);
+          const text = r.ok ? (await r.text()).trim() : '';
+          if (text) return { text, title: tab?.title?.replace(/ - YouTube$/, '') || 'video' };
         }
-      } catch (e) { /* fall back to in-page extraction */ }
-
-      // Fallback: read captions directly from the page.
-      if (!text) {
-        const res = await this.getVideoTranscript(100000);
-        text = res.text; title = res.title;
       }
-
-      const INLINE_MAX = 4000;
-      if (text.length <= INLINE_MAX) {
-        this.forwardToIframe({ prompt: `Here is the transcript of the video "${title}":\n\n"""\n${text}\n"""\n`, autoSubmit: false });
-        this.showNotification('🎬 Added transcript to the chat');
-      } else {
-        const fname = (title.replace(/[^\w.-]+/g, '-').slice(0, 40) || 'video') + '-transcript.txt';
-        this.forwardAttachToIframe(fname, text);
-        this.showNotification(`📎 Attached transcript (${Math.round(text.length / 1000)}k chars)`);
-      }
-    } catch (e) {
-      this.showNotification('⚠️ ' + e.message);
-    }
+    } catch (e) { /* fall back to the page's captions */ }
+    return this.getVideoTranscript(100000);
   }
 
   // Read ytx server config from settings (with sane defaults).
@@ -2155,7 +1626,6 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     if (!tree) tree = await this.loadRepoTree(gh.owner, gh.repo, 'HEAD');
 
     const sameRepo = this.repoTree && this.repoTree.owner === gh.owner && this.repoTree.repo === gh.repo;
-    if (!sameRepo) this.selectedFiles = new Set();
     this.repoTree = { ...tree, ...this.deriveTree(tree) };
     this.activeRepoFile = gh.kind === 'blob' && activePath && this.repoTree.fileSet.has(activePath)
       ? { path: activePath, lines: gh.lines }
@@ -2254,63 +1724,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       return;
     }
     const { path, lines } = this.activeRepoFile;
-    await this.sendRepoFiles([path], mode || (this._view === 'app' ? 'explain' : this.getReadMode()), lines);
-  }
-
-  getReadMode() {
-    return this.readMode || 'explain';
-  }
-
-  setReadMode(mode) {
-    this.readMode = mode;
-    try { chrome.storage.local.set({ yavarReadMode: mode }); } catch (e) { /* ignore */ }
-    this.renderFilesActionBar();
-  }
-
-  async loadReadMode() {
-    if (this.readMode != null) return;
-    try { this.readMode = (await chrome.storage.local.get('yavarReadMode')).yavarReadMode || 'explain'; }
-    catch (e) { this.readMode = 'explain'; }
-  }
-
-  async toggleFilesPanel(forceOpen = false) {
-    if (!forceOpen && !this.filesPanel.classList.contains('hidden')) {
-      this.filesPanel.classList.add('hidden');
-      return;
-    }
-    await this.loadReadMode();
-    this.filesPanel.classList.remove('hidden');
-    this.filesPanel.classList.remove('is-local');
-    this.filesSearch.value = '';
-    this.setFilesView('files', false);
-    this.filesTree.innerHTML = '<div class="files-empty"><span class="files-spinner"></span>Loading the repo…</div>';
-    try {
-      const ok = await this.ensureRepoTree();
-      if (!ok) {
-        this.filesTree.innerHTML = '<div class="files-empty">Open a GitHub repository in this tab, then reopen the reader.<br><br>' +
-          '<button type="button" class="files-chip-btn primary" data-open-folder="1">Or read a folder on this computer</button></div>';
-        return;
-      }
-      this.renderFilesTree();
-      this.filesSearch.focus();
-    } catch (e) {
-      this.filesTree.innerHTML = `<div class="files-empty">Couldn't load the repo: ${this.escapeHtml(e.message)}</div>`;
-    }
-  }
-
-  async refreshFiles() {
-    if (this.repoTree?.source === 'local') {
-      await this.openLocalFolder({ reuse: true });
-      return;
-    }
-    this.clearFileCache();
-    if (this.repoTree) {
-      const key = `tree:${this.repoTree.owner}/${this.repoTree.repo}@${this.repoTree.ref}`;
-      this._treeCache?.delete(key);
-      try { await chrome.storage.session.remove(key); } catch (e) { /* ignore */ }
-    }
-    this.repoTree = null;
-    await this.toggleFilesPanel(true);
+    await this.sendRepoFiles([path], mode || 'explain', lines);
   }
 
   buildFileTree(items) {
@@ -2335,212 +1749,6 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     return root;
   }
 
-  renderFilesTree() {
-    this.filesTree.innerHTML = '';
-    if (!this.repoTree) {
-      this.filesTree.innerHTML = '<div class="files-empty">No repo loaded.</div>';
-      return;
-    }
-    const { owner, repo, ref, truncated } = this.repoTree;
-    if (this.filesRepoChip) {
-      const local = this.repoTree.source === 'local';
-      this.filesRepoChip.textContent = local ? `${repo} · folder on this computer` : `${owner}/${repo} · ${this.refLabel(ref)}`;
-      this.filesRepoChip.title = local ? repo : `${owner}/${repo} @ ${ref}`;
-    }
-
-    // The file open in the GitHub tab: one-click read in the current mode
-    if (this.activeRepoFile) {
-      const { path, lines } = this.activeRepoFile;
-      const range = lines ? `Lines ${lines.start}-${lines.end} · ` : '';
-      const card = document.createElement('div');
-      card.className = 'files-active';
-      card.innerHTML =
-        `<div class="files-active-top"><span class="files-active-label">Open in your tab</span>` +
-        `<span class="files-active-path" title="${this.escapeHtml(path)}">${range}${this.escapeHtml(path)}</span></div>` +
-        `<div class="files-active-actions">` +
-          `<button class="files-chip-btn primary" data-act="read">Read it (${this.escapeHtml(this.modeLabel())})</button>` +
-          `<button class="files-chip-btn" data-act="select">${this.selectedFiles.has(path) ? '✓ Selected' : '+ Select'}</button>` +
-          `<button class="files-chip-btn" data-act="imports" title="Also select the repo files it imports">+ Imports</button>` +
-        `</div>`;
-      card.addEventListener('click', (e) => {
-        const act = e.target.closest('[data-act]')?.dataset.act;
-        if (act === 'read') this.sendRepoFiles([path], this.getReadMode(), lines);
-        else if (act === 'select') this.toggleFileSelected(path);
-        else if (act === 'imports') this.selectWithImports(path);
-      });
-      this.filesTree.appendChild(card);
-    }
-
-    // What the repo is, from its README
-    const rootReadme = folderReadme('', this.repoTree.fileSet);
-    if (rootReadme) this.filesTree.appendChild(this.readmeBox(rootReadme, this.repoTree.source === 'local' ? 'About this project' : 'About this repo'));
-    this.filesTree.appendChild(this.rebuildEntryCard());
-
-    // Suggested reading order for newcomers
-    const starts = suggestStartFiles([...this.repoTree.fileSet]);
-    if (starts.length) {
-      const box = document.createElement('div');
-      box.className = 'files-start';
-      box.innerHTML = `<div class="files-section-label">Start here</div><div class="files-start-list"></div>`;
-      const list = box.querySelector('.files-start-list');
-      for (const p of starts) {
-        const b = document.createElement('button');
-        b.type = 'button';
-        b.className = 'files-start-chip' + (this.selectedFiles.has(p) ? ' selected' : '') + (this.readMarks.has(p) ? ' read' : '');
-        b.dataset.path = p;
-        b.title = p;
-        b.textContent = p.split('/').pop();
-        b.addEventListener('click', () => this.toggleFileSelected(p));
-        list.appendChild(b);
-      }
-      this.filesTree.appendChild(box);
-    }
-
-    const label = document.createElement('div');
-    label.className = 'files-section-label';
-    label.textContent = 'All files';
-    this.filesTree.appendChild(label);
-    this.filesTree.appendChild(this.renderTreeChildren(this.repoTree.root));
-
-    if (truncated) {
-      const note = document.createElement('div');
-      note.className = 'files-empty';
-      note.textContent = 'This repo is very large, so GitHub returned only part of the tree. Use search, or open a subfolder on GitHub.';
-      this.filesTree.appendChild(note);
-    }
-    this.renderFilesActionBar();
-  }
-
-  renderTreeChildren(node) {
-    const container = document.createElement('div');
-    container.className = 'files-children';
-    const entries = Object.values(node.children).sort((a, b) => {
-      if (a.type !== b.type) return a.type === 'tree' ? -1 : 1; // folders first
-      return a.name.localeCompare(b.name);
-    });
-    for (const child of entries) container.appendChild(this.renderTreeNode(child));
-    return container;
-  }
-
-  fileRowHtml(path, label) {
-    const readable = isReadablePath(path);
-    const size = this.repoTree.sizes.get(path);
-    const sel = this.selectedFiles.has(path);
-    const read = this.readMarks.has(path);
-    return `<span class="files-check${sel ? ' on' : ''}" aria-hidden="true"></span>` +
-      `<span class="files-icon files-ext-${this.escapeHtml((path.split('.').pop() || '').toLowerCase().slice(0, 6))}">${readable ? '' : '·'}</span>` +
-      `<span class="files-name">${this.escapeHtml(label)}</span>` +
-      (read ? '<span class="files-read" title="Already sent to the AI">✓</span>' : '') +
-      `<span class="files-size">${formatBytes(size)}</span>` +
-      (readable ? `<button class="files-quick" data-quick="1" title="Read just this file now">${this.escapeHtml(this.modeLabel())}</button>` : '');
-  }
-
-  bindFileRow(row, path) {
-    const readable = isReadablePath(path);
-    row.dataset.path = path;
-    row.classList.toggle('selected', this.selectedFiles.has(path));
-    row.classList.toggle('unreadable', !readable);
-    row.setAttribute('role', 'checkbox');
-    row.setAttribute('aria-checked', String(this.selectedFiles.has(path)));
-    row.tabIndex = readable ? 0 : -1;
-    row.title = readable ? path : `${path} (binary or generated, skipped)`;
-    row.addEventListener('click', (e) => {
-      if (!readable) return;
-      if (e.target.closest('[data-quick]')) {
-        e.stopPropagation();
-        this.sendRepoFiles([path], this.getReadMode());
-        return;
-      }
-      this.toggleFileSelected(path);
-    });
-    row.addEventListener('keydown', (e) => {
-      if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); row.click(); }
-    });
-  }
-
-  renderTreeNode(node) {
-    const wrap = document.createElement('div');
-    wrap.className = 'files-node';
-    const row = document.createElement('div');
-    row.className = 'files-row';
-
-    if (node.type === 'tree') {
-      row.classList.add('files-dir');
-      row.innerHTML =
-        `<span class="files-caret">▸</span><span class="files-icon files-folder"></span>` +
-        `<span class="files-name">${this.escapeHtml(node.name)}</span>` +
-        `<span class="files-dir-count" hidden></span>` +
-        `<button class="files-quick" data-all="1" title="Select the readable files in this folder">Select all</button>`;
-      let childBox = null;
-      row.dataset.dir = node.path;
-      row.tabIndex = 0;
-      this.updateDirCount(row);
-      row.addEventListener('click', (e) => {
-        if (e.target.closest('[data-all]')) {
-          e.stopPropagation();
-          this.selectFolder(node.path);
-          return;
-        }
-        const caret = row.querySelector('.files-caret');
-        if (childBox) {
-          const open = childBox.style.display !== 'none';
-          childBox.style.display = open ? 'none' : 'block';
-          caret.textContent = open ? '▸' : '▾';
-        } else {
-          childBox = this.renderTreeChildren(node); // lazy render
-          const readme = folderReadme(node.path, this.repoTree.fileSet);
-          if (readme) childBox.prepend(this.readmeBox(readme, 'About this folder'));
-          wrap.appendChild(childBox);
-          caret.textContent = '▾';
-        }
-      });
-      row.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
-          const open = childBox && childBox.style.display !== 'none';
-          if ((e.key === 'ArrowRight' && open) || (e.key === 'ArrowLeft' && !open)) return;
-          e.preventDefault();
-          row.click();
-        }
-      });
-    } else {
-      row.innerHTML = `<span class="files-caret"></span>` + this.fileRowHtml(node.path, node.name);
-      this.bindFileRow(row, node.path);
-    }
-
-    wrap.appendChild(row);
-    return wrap;
-  }
-
-  filterFilesTree() {
-    const q = (this.filesSearch.value || '').toLowerCase().trim();
-    if (!q) { this.renderFilesTree(); return; }
-    if (!this.repoTree) return;
-
-    // Every space-separated term must appear; shorter paths and name hits rank first
-    const terms = q.split(/\s+/);
-    const matches = this.repoTree.searchIndex
-      .filter(([, lower]) => terms.every(t => lower.includes(t)))
-      .map(([p, , name]) => ({ p, score: (terms.every(t => name.includes(t)) ? 0 : 1000) + p.length }))
-      .sort((a, b) => a.score - b.score)
-      .slice(0, 200);
-
-    this.filesTree.innerHTML = '';
-    if (!matches.length) {
-      this.filesTree.innerHTML = '<div class="files-empty">No matching files.</div>';
-      return;
-    }
-    for (const { p } of matches) {
-      const row = document.createElement('div');
-      row.className = 'files-row files-flat';
-      row.innerHTML = this.fileRowHtml(p, p);
-      this.bindFileRow(row, p);
-      this.filesTree.appendChild(row);
-    }
-  }
-
-  // ----- Rebuild it yourself -----
-
-  // The runner language for a plan ('python' | 'javascript' | null)
   rebuildLang(plan) {
     const l = plan?.language || '';
     return /python/i.test(l) ? 'python' : /javascript|node|^js$/i.test(l) ? 'javascript' : null;
@@ -2564,27 +1772,18 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     try { await chrome.storage.local.set({ [key]: state }); } catch (e) { /* ignore */ }
   }
 
-  rebuildEntryCard() {
-    const card = document.createElement('button');
-    card.type = 'button';
-    card.className = 'rebuild-entry';
-    card.innerHTML = `<span class="rebuild-entry-icon" aria-hidden="true">🛠</span>` +
-      `<span class="rebuild-entry-text"><strong>Rebuild it yourself</strong>` +
-      `<span class="rebuild-entry-sub">Get a step-by-step plan to rebuild this project, with hints and code checks</span></span>`;
-    this.loadRebuild().then(state => {
-      if (state?.plan) {
-        const n = state.plan.steps.length;
-        const done = (state.done || []).length;
-        card.querySelector('strong').textContent = done >= n ? 'Rebuild complete 🎉' : `Continue rebuild · step ${Math.min(state.current + 1, n)} of ${n}`;
-        card.querySelector('.rebuild-entry-sub').textContent = state.plan.summary || state.plan.project || '';
-      }
-    });
-    card.addEventListener('click', () => this.openRebuild());
-    return card;
-  }
-
+  // For the repo in the tab, or else the local folder you last opened
   async openRebuild() {
-    if (!this.repoTree) return;
+    try {
+      if (this._tabCtx?.gh) await this.ensureRepoTree();
+    } catch (e) {
+      this.showNotification(e.message);
+      return;
+    }
+    if (!this.repoTree) {
+      this.showNotification('Open a GitHub repository, or add files from a folder first');
+      return;
+    }
     this.rebuild = await this.loadRebuild();
     document.getElementById('rebuild-sub').textContent = this.repoDisplayName();
     this.rebuildPanel.classList.remove('hidden');
@@ -2602,7 +1801,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     const st = this.rebuild;
     const esc = (t) => this.escapeHtml(t || '');
     if (!st?.plan) {
-      const core = this.selectedFiles.size ? [...this.selectedFiles] : pickCoreFiles(this.repoTree.items);
+      const core = pickCoreFiles(this.repoTree.items);
       const bytes = core.reduce((n, p) => n + (this.repoTree.sizes.get(p) || 0), 0);
       this.rebuildBody.innerHTML =
         `<div class="rebuild-intro">` +
@@ -2610,7 +1809,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
           `Yavar sends the project's core files to the AI, which writes a plan of small steps. ` +
           `For each step you study the original, write your own version, and get hints or a review.</p>` +
           `<div class="rebuild-files"><strong>${core.length} file${core.length === 1 ? '' : 's'}</strong> ` +
-          `<span>(~${formatCount(estimateTokens(bytes))} tokens${this.selectedFiles.size ? ', your selection' : ', picked automatically'})</span>` +
+          `<span>(~${formatCount(estimateTokens(bytes))} tokens, picked automatically)</span>` +
           `<div class="rebuild-file-list">${core.map(p => `<code>${esc(p)}</code>`).join(' ')}</div></div>` +
           (this._planPending
             ? `<div class="rebuild-wait"><span class="files-spinner"></span>The AI is writing your plan…<div class="rebuild-live"></div></div>`
@@ -2770,7 +1969,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       this.showNotification('⚠️ Stop the running agent first');
       return;
     }
-    const paths = this.selectedFiles.size ? [...this.selectedFiles] : pickCoreFiles(this.repoTree.items);
+    const paths = pickCoreFiles(this.repoTree.items);
     if (!paths.length) return;
     this._planPending = true;
     this.renderRebuild();
@@ -2825,7 +2024,8 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
   // modes, imports, READMEs. Nothing is uploaded except what you send.
 
   // show: false loads the folder without opening the reader (the picker uses it)
-  async openLocalFolder({ reuse = false, show = true } = {}) {
+  // Choose a folder (or reopen the last one) as the file source; true if loaded
+  async openLocalFolder({ reuse = false } = {}) {
     let tree;
     try {
       if (window.showDirectoryPicker) {
@@ -2836,51 +2036,33 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
         }
         if (!handle) handle = await window.showDirectoryPicker({ id: 'yavar-reader', mode: 'read' });
         this.idbSet('lastFolder', handle);
-        await this.loadReadMode();
-        if (show) this.showLocalLoading(handle.name);
+        this.showNotification(`Reading ${handle.name}…`);
         tree = await this.scanDirectoryHandle(handle);
       } else {
         const files = await this.pickFolderViaInput();
-        if (!files) return;
-        await this.loadReadMode();
+        if (!files) return false;
         tree = this.treeFromFileList(files);
       }
     } catch (e) {
-      if (e?.name === 'AbortError') return; // picker cancelled
-      this.showNotification('⚠️ Could not open the folder: ' + e.message);
-      return;
+      if (e?.name === 'AbortError') return false; // picker cancelled
+      this.showNotification('Could not open the folder: ' + e.message);
+      return false;
     }
     if (!tree.items.length) {
-      this.showNotification('⚠️ No readable files found in that folder');
-      return;
+      this.showNotification('No readable files found in that folder');
+      return false;
     }
 
     this.repoTree = {
       source: 'local', owner: '', repo: tree.name, ref: '', truncated: tree.truncated,
       items: tree.items, ...this.deriveTree(tree)
     };
-    const blobs = this.repoTree.fileSet;
     this.localFiles = tree.files;
     this.activeRepoFile = null;
-    this.selectedFiles = new Set();
-    this._readmeCache?.clear();
     this.clearFileCache('local:');
     await this.loadReadMarks();
-    if (!show) return true;
-
-    this.filesPanel.classList.remove('hidden');
-    this.filesPanel.classList.add('is-local');
-    this.filesSearch.value = '';
-    this.setFilesView('files', false);
-    this.renderFilesTree();
-    this.filesSearch.focus();
-    this.showNotification(`📂 Opened ${tree.name} (${blobs.size} files${tree.truncated ? ', list trimmed' : ''})`);
-  }
-
-  showLocalLoading(name) {
-    this.filesPanel.classList.remove('hidden');
-    this.filesPanel.classList.add('is-local');
-    this.filesTree.innerHTML = `<div class="files-empty"><span class="files-spinner"></span>Reading ${this.escapeHtml(name)}…</div>`;
+    this.hideNotification();
+    return true;
   }
 
   // Walk a directory handle, skipping heavy/generated folders and secrets
@@ -2996,61 +2178,6 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
   }
 
   // A small preview card for a README: first paragraph, plus one-click actions.
-  readmeBox(path, label) {
-    const box = document.createElement('div');
-    box.className = 'files-readme';
-    box.innerHTML =
-      `<div class="files-readme-label">${this.escapeHtml(label)}</div>` +
-      `<div class="files-readme-text"><span class="files-spinner"></span></div>` +
-      `<div class="files-readme-actions">` +
-        `<button type="button" class="files-link-btn" data-act="select">+ Select ${this.escapeHtml(path.split('/').pop())}</button>` +
-        `<button type="button" class="files-link-btn" data-act="read">Explain it</button>` +
-      `</div>`;
-    box.addEventListener('click', (e) => {
-      const act = e.target.closest('[data-act]')?.dataset.act;
-      if (act === 'select') this.toggleFileSelected(path);
-      else if (act === 'read') this.sendRepoFiles([path], 'explain');
-    });
-    this.readmeSnippetFor(path).then(text => {
-      const el = box.querySelector('.files-readme-text');
-      if (text) el.textContent = text;
-      else box.remove();
-    });
-    return box;
-  }
-
-  async readmeSnippetFor(path) {
-    const { owner, repo, ref, source } = this.repoTree;
-    const key = `${source || 'github'}:${owner}/${repo}@${ref}:${path}`;
-    this._readmeCache = this._readmeCache || new Map();
-    if (!this._readmeCache.has(key)) {
-      this._readmeCache.set(key, this.readRepoFile(path, 20000)
-        .then(md => readmeSnippet(md))
-        .catch(() => ''));
-    }
-    return this._readmeCache.get(key);
-  }
-
-  // ----- Views: Files | Recent changes -----
-
-  setFilesView(view, render = true) {
-    this.filesView = view;
-    this.filesPanel.querySelectorAll('.files-tab').forEach(t => {
-      const on = t.dataset.view === view;
-      t.classList.toggle('active', on);
-      t.setAttribute('aria-selected', String(on));
-    });
-    this.filesSearchWrap?.classList.toggle('hidden', view !== 'files');
-    if (!render || !this.repoTree) return;
-    if (view === 'files') {
-      this.filesSearch.value = '';
-      this.renderFilesTree();
-    } else {
-      this.filesActionBar?.classList.add('hidden');
-      this.renderRecentChanges();
-    }
-  }
-
   // Latest commits on this branch. The public Atom feed costs no API quota;
   // the REST API is the fallback (e.g. private repos with a token).
   async fetchRecentCommits() {
@@ -3074,167 +2201,54 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     return list;
   }
 
-  async renderRecentChanges() {
-    this.filesTree.innerHTML = '<div class="files-empty"><span class="files-spinner"></span>Loading recent commits…</div>';
+  // Recent changes: the latest commits as a list in the thread. Each one can
+  // be explained; "What's been happening?" summarizes them all.
+  async showRecentChanges() {
+    try {
+      if (!(await this.ensureRepoTree())) { this.showNotification('Open a GitHub repository first'); return; }
+    } catch (e) {
+      this.showNotification(e.message);
+      return;
+    }
+    const { owner, repo, ref } = this.repoTree;
     let commits;
     try {
       commits = await this.fetchRecentCommits();
     } catch (e) {
-      if (this.filesView === 'changes') this.filesTree.innerHTML = `<div class="files-empty">Couldn't load commits: ${this.escapeHtml(e.message)}</div>`;
+      this.showNotification("Couldn't load the commits: " + e.message);
       return;
     }
-    if (this.filesView !== 'changes') return;
-    if (!commits.length) {
-      this.filesTree.innerHTML = '<div class="files-empty">No commits found.</div>';
-      return;
-    }
-    const { owner, repo, ref } = this.repoTree;
-    this.filesTree.innerHTML =
-      `<div class="files-changes-head">` +
-        `<div class="files-section-label">Latest on ${this.escapeHtml(this.refLabel(ref))}</div>` +
-        `<button type="button" class="files-chip-btn primary" data-act="summarize">What's been happening?</button>` +
-      `</div>` +
+    if (!commits.length) { this.showNotification(`No commits found on ${this.refLabel(ref)}`); return; }
+    this.openThread({ title: `${owner}/${repo}` });
+    this.addThreadQuestion(`Recent changes on ${this.refLabel(ref)}`);
+    const list = document.createElement('div');
+    list.className = 'commit-list';
+    list.innerHTML =
+      `<button type="button" class="commit-summary" data-act="summarize">What's been happening?</button>` +
       commits.map(c =>
-        `<div class="files-commit" data-sha="${this.escapeHtml(c.sha)}">` +
-          `<div class="files-commit-title" title="${this.escapeHtml(c.title)}">${this.escapeHtml(c.title)}</div>` +
-          `<div class="files-commit-meta">` +
-            `<code>${this.escapeHtml(c.sha.slice(0, 7))}</code>` +
-            `<span>${this.escapeHtml(c.author)}${c.date ? ' · ' + this.escapeHtml(timeAgo(c.date)) : ''}</span>` +
-            `<button type="button" class="files-quick" data-act="explain">Explain</button>` +
-          `</div>` +
-        `</div>`).join('');
-
-    this.filesTree.onclick = (e) => {
-      if (this.filesView !== 'changes') return;
-      const act = e.target.closest('[data-act]')?.dataset.act;
-      if (act === 'summarize') {
+        `<button type="button" class="commit-row" data-sha="${this.escapeHtml(c.sha)}" title="Explain this commit">` +
+          `<span class="commit-title">${this.escapeHtml(c.title)}</span>` +
+          `<span class="commit-meta"><code>${this.escapeHtml(c.sha.slice(0, 7))}</code> ` +
+          `${this.escapeHtml(c.author)}${c.date ? ' · ' + this.escapeHtml(timeAgo(c.date)) : ''}</span>` +
+        `</button>`).join('');
+    list.addEventListener('click', (e) => {
+      if (e.target.closest('[data-act="summarize"]')) {
         const lines = commits.map(c => `- ${c.sha.slice(0, 7)} ${c.date ? c.date.slice(0, 10) : ''} ${c.author}: ${c.title}`).join('\n');
         this._readingContext = { label: `${owner}/${repo}`, ts: Date.now() };
         this.askInThread({
-          title: 'Recent changes', sub: `${owner}/${repo}`, label: `What changed lately (${commits.length} commits)`,
+          title: `${owner}/${repo}`, sub: 'Recent changes', label: `What's been happening? (${commits.length} commits)`,
           prompt: `Here are the latest ${commits.length} commits on ${this.refLabel(ref)} of ${owner}/${repo}:\n\n${lines}\n\n` +
             'Explain what the project has been working on lately: group related commits into themes, say what each theme ' +
             'means for the code or users, and point out any commit worth reading closely to learn from (and why).'
         });
         return;
       }
-      const row = e.target.closest('.files-commit');
-      if (row && (act === 'explain' || !e.target.closest('button'))) {
-        this.explainDiff({ owner, repo, kind: 'commit', sha: row.dataset.sha,
-          title: commits.find(c => c.sha === row.dataset.sha)?.title || '' });
-      }
-    };
-  }
-
-  // ----- Selection -----
-
-  toggleFileSelected(path) {
-    if (!isReadablePath(path)) return;
-    if (this.selectedFiles.has(path)) this.selectedFiles.delete(path);
-    else this.selectedFiles.add(path);
-    this.refreshSelectionUi();
-  }
-
-  selectFolder(dir) {
-    const prefix = dir + '/';
-    const files = [...this.repoTree.fileSet].filter(p => p.startsWith(prefix) && isReadablePath(p));
-    const LIMIT = 40;
-    files.slice(0, LIMIT).forEach(p => this.selectedFiles.add(p));
-    if (files.length > LIMIT) this.showNotification(`Selected the first ${LIMIT} of ${files.length} files`);
-    this.refreshSelectionUi();
-  }
-
-  async selectWithImports(path) {
-    this.showNotification('🔗 Finding the files it imports…');
-    try {
-      const content = await this.readRepoFile(path, 400000);
-      const found = resolveImports(extractImports(content, path), path, this.repoTree.fileSet).filter(isReadablePath);
-      this.selectedFiles.add(path);
-      found.forEach(p => this.selectedFiles.add(p));
-      this.refreshSelectionUi();
-      this.showNotification(found.length
-        ? `🔗 Selected ${path.split('/').pop()} + ${found.length} imported file${found.length === 1 ? '' : 's'}`
-        : '🔗 No in-repo imports found (only external packages)');
-    } catch (e) {
-      this.showNotification('⚠️ ' + e.message);
-    }
-  }
-
-  // Add the in-repo imports of every selected file (one level deep)
-  async addImportsOfSelection() {
-    const sources = [...this.selectedFiles];
-    if (!sources.length) return;
-    this.showNotification('🔗 Finding imports…');
-    const before = this.selectedFiles.size;
-    const files = await this.fetchRepoFilesMany(sources);
-    for (const f of files) {
-      if (f.error) continue;
-      resolveImports(extractImports(f.content, f.path), f.path, this.repoTree.fileSet)
-        .filter(isReadablePath)
-        .forEach(p => this.selectedFiles.add(p));
-    }
-    const added = this.selectedFiles.size - before;
-    this.refreshSelectionUi();
-    this.showNotification(added ? `🔗 Added ${added} imported file${added === 1 ? '' : 's'}` : '🔗 No more in-repo imports found');
-  }
-
-  // Update checkmarks in place (keeps folders expanded and scroll position)
-  refreshSelectionUi() {
-    this.filesTree.querySelectorAll('.files-row[data-path]').forEach(row => {
-      const on = this.selectedFiles.has(row.dataset.path);
-      row.classList.toggle('selected', on);
-      row.setAttribute('aria-checked', String(on));
-      row.querySelector('.files-check')?.classList.toggle('on', on);
+      const sha = e.target.closest('[data-sha]')?.dataset.sha;
+      if (sha) this.explainDiff({ owner, repo, kind: 'commit', sha, title: commits.find(c => c.sha === sha)?.title || '' });
     });
-    this.filesTree.querySelectorAll('.files-start-chip').forEach(chip =>
-      chip.classList.toggle('selected', this.selectedFiles.has(chip.dataset.path)));
-    this.filesTree.querySelectorAll('.files-row[data-dir]').forEach(row => this.updateDirCount(row));
-    const selBtn = this.filesTree.querySelector('.files-active [data-act="select"]');
-    if (selBtn && this.activeRepoFile) selBtn.textContent = this.selectedFiles.has(this.activeRepoFile.path) ? '✓ Selected' : '+ Select';
-    this.renderFilesActionBar();
+    this.threadBody.appendChild(list);
   }
 
-  // Badge on a folder showing how many selected files are inside it
-  updateDirCount(row) {
-    const badge = row.querySelector('.files-dir-count');
-    if (!badge) return;
-    const prefix = row.dataset.dir + '/';
-    let n = 0;
-    for (const p of this.selectedFiles) if (p.startsWith(prefix)) n++;
-    badge.hidden = n === 0;
-    badge.textContent = n;
-  }
-
-  modeLabel(mode = this.getReadMode()) {
-    return (READ_MODES.find(m => m.id === mode) || READ_MODES[0]).label;
-  }
-
-  renderFilesActionBar() {
-    if (!this.filesActionBar) return;
-    const n = this.selectedFiles?.size || 0;
-    this.filesActionBar.classList.toggle('hidden', n === 0);
-    if (!n) return;
-
-    const bytes = [...this.selectedFiles].reduce((sum, p) => sum + (this.repoTree?.sizes.get(p) || 0), 0);
-    const tokens = estimateTokens(bytes);
-    this.filesSelCount.textContent = `${n} file${n === 1 ? '' : 's'}`;
-    this.filesSelTokens.textContent = `~${formatCount(tokens)} tokens`;
-    // Rough guide: free chat plans get unreliable past ~100k tokens of context
-    this.filesSelTokens.classList.toggle('warn', tokens > 60000);
-    this.filesSelTokens.title = tokens > 60000
-      ? 'Large: free plans may cut this off. Try fewer files.'
-      : 'Estimated size of the selected files';
-
-    const mode = this.getReadMode();
-    this.filesModes.innerHTML = READ_MODES.map(m =>
-      `<button type="button" role="radio" aria-checked="${m.id === mode}" class="files-mode${m.id === mode ? ' active' : ''}" data-mode="${m.id}" title="${this.escapeHtml(m.hint)}">${this.escapeHtml(m.label)}</button>`
-    ).join('');
-    this.filesSend.textContent = mode === 'add' ? `Add ${n === 1 ? 'file' : 'pack'} to chat` : `${this.modeLabel(mode)} ${n === 1 ? 'file' : `${n} files`}`;
-  }
-
-  // ----- Sending -----
-
-  // Fetch with a small concurrency limit (be gentle to GitHub and the browser)
   async fetchRepoFilesMany(paths) {
     const out = new Array(paths.length);
     let next = 0;
@@ -3256,7 +2270,6 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     if (!this.repoTree || !paths.length) return;
     if (this._sendingFiles) return;
     this._sendingFiles = true;
-    if (this.filesSend) this.filesSend.disabled = true;
     const { repo } = this.repoTree;
     const repoName = this.repoDisplayName();
     this.showNotification(`📄 Reading ${paths.length === 1 ? paths[0].split('/').pop() : paths.length + ' files'}…`);
@@ -3281,9 +2294,8 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       const modeLabel = READ_MODES.find(m => m.id === mode)?.label || 'Explain';
       const names = files.map(f => f.path.split('/').pop());
       const label = `${modeLabel}: ${names.length > 3 ? names.slice(0, 3).join(', ') + ` +${names.length - 3}` : names.join(', ')}`;
-      let answered = false;
-      if (!question && this._view !== 'chat') {
-        // "Just add" in the Yavar view: attach to the message you're writing
+      if (!question) {
+        // "Just add": attach to the message you're writing
         const fname = single ? single.path.split('/').pop() + '.md' : `${repo}-${files.length}-files.md`.replace(/[^\w.-]+/g, '-');
         this.addComposerItem({
           kind: 'files',
@@ -3298,46 +2310,29 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
         // Small single file: inline, so the code is visible in the chat
         const block = `\`${single.path}\`${single.lines ? ` (lines ${single.lines.start}-${single.lines.end})` : ''} from ${repoName}:\n\n` +
           fencedFile(single);
-        if (question) {
-          this.askInThread({ title: modeLabel, sub: repoName, label, prompt: `${block}\n\n${question}` });
-          answered = true;
-        } else {
-          this.forwardToIframe({ prompt: block, autoSubmit: false });
-        }
+        this.askInThread({ title: modeLabel, sub: repoName, label, prompt: `${block}\n\n${question}` });
       } else {
         // Several (or big) files: ONE attachment with a repo map, then the question
         const fname = single
           ? single.path.split('/').pop() + '.md'
           : `${repo}-${files.length}-files.md`.replace(/[^\w.-]+/g, '-');
-        if (question) {
-          question = `The attached "${fname}" contains ${single ? what : `${files.length} files from ${repoName}`}` +
-            `${single ? '' : ` (${files.map(f => f.path).join(', ')})`}, starting with a map of the repository.\n\n${question}`;
-        }
-        if (question) {
-          this.askInThread({ title: modeLabel, sub: repoName, label, prompt: question,
-            attachments: [{ filename: fname, content: this.packFor(files) }] });
-          answered = true;
-        } else {
-          this.attachThenPrompt(fname, this.packFor(files), question);
-        }
+        question = `The attached "${fname}" contains ${single ? what : `${files.length} files from ${repoName}`}` +
+          `${single ? '' : ` (${files.map(f => f.path).join(', ')})`}, starting with a map of the repository.\n\n${question}`;
+        this.askInThread({ title: modeLabel, sub: repoName, label, prompt: question,
+          attachments: [{ filename: fname, content: this.packFor(files) }] });
       }
 
       await this.markRead(files.map(f => f.path));
       this._readingContext = { label: repoName, ts: Date.now() };
-      this.selectedFiles.clear();
-      // "Just add" leaves the files in the chat for your own question;
-      // everything else is answered in Yavar's answer sheet
-      if (!answered) this.filesPanel.classList.add('hidden');
       const size = `~${formatCount(estimateTokens(totalChars))} tokens`;
       this.showNotification(failed.length
         ? `⚠️ Sent ${files.length}, skipped ${failed.length} (${failed[0].error})`
-        : `📎 ${!question && this._view !== 'chat' ? 'Attached' : 'Sent'} ${files.length === 1 ? files[0].path.split('/').pop() : files.length + ' files'} (${size})`);
+        : `📎 ${question ? 'Sent' : 'Attached'} ${files.length === 1 ? files[0].path.split('/').pop() : files.length + ' files'} (${size})`);
     } catch (e) {
       this.showNotification('⚠️ Could not read: ' + e.message);
     } finally {
       this._sendingFiles = false;
-      if (this.filesSend) this.filesSend.disabled = false;
-    }
+      }
   }
 
   // The reader's files as one Markdown pack (with the repository map)
@@ -3345,15 +2340,6 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     const { owner, repo, ref, source } = this.repoTree;
     return buildPack({ owner, repo, ref: source === 'local' ? '' : this.refLabel(ref), files, treePaths: [...this.repoTree.fileSet] });
   }
-
-  // Attach a file, then put the prompt in the chat input once the upload has
-  // had a moment to land
-  attachThenPrompt(filename, content, prompt, { mime = 'text/markdown', settleMs = 1500 } = {}) {
-    this.forwardAttachToIframe(filename, content, mime);
-    if (prompt) setTimeout(() => this.forwardToIframe({ prompt, autoSubmit: false }), settleMs);
-  }
-
-  // ----- Pull requests & commits -----
 
   async explainActiveDiff() {
     const gh = await this.getActiveGitHub();
@@ -3518,7 +2504,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
         this.showNotification('⚠️ ' + msg);
       }
 
-      if (/^(YAVAR_(TO_NOTES|COPY|TEMPLATE|OPEN)|INCHAT_BAR)$/.test(data.action || '')) {
+      if (/^YAVAR_(TO_NOTES|COPY)$/.test(data.action || '')) {
         this.handleInChatAction(data);
         return;
       }
@@ -3793,13 +2779,11 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     this.notesOpen = !this.notesOpen;
     if (this.notesOpen) {
       this.notesPanel.classList.remove('hidden');
-      this.sidebarBtnNotes.classList.add('sidebar-btn-active');
       this.loadNotes();
       this.cmEditor.refresh();
       this.cmEditor.focus();
     } else {
       this.notesPanel.classList.add('hidden');
-      this.sidebarBtnNotes.classList.remove('sidebar-btn-active');
       this.saveNotes();
     }
   }
@@ -4121,6 +3105,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     this.threadInput?.addEventListener('input', () => {
       this.threadInput.style.height = 'auto';
       this.threadInput.style.height = Math.min(this.threadInput.scrollHeight, 140) + 'px';
+      this.updateSendState();
     });
     document.getElementById('composer-add')?.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -4148,10 +3133,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     this._view = view;
     this.appView?.classList.toggle('hidden', view !== 'app');
     document.getElementById('back-to-yavar')?.classList.toggle('hidden', view !== 'chat');
-    // The Yavar view has its own header; the edge sidebar is for the chat view
-    document.getElementById('right-sidebar')?.classList.toggle('in-app', view === 'app');
     if (view !== 'app') this.closePicker();
-    this.applyDockVisibility();
     if (view === 'app') setTimeout(() => this.threadInput?.focus({ preventScroll: true }), 0);
   }
 
@@ -4197,12 +3179,6 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       `<div class="home">` +
         `<div class="home-hero"><span class="home-kicker">${this.escapeHtml(hero.kicker)}</span><h2>${this.escapeHtml(hero.title)}</h2></div>` +
         ctx +
-        `<div class="home-group"><div class="home-label">More</div>` +
-          row('research_web', '🌐', 'Web research', 'Searches, reads the sources, cites them') +
-          row('local', '📁', 'Open a local project', 'Read code from a folder on this computer') +
-          row('run', '▶', 'Code playground', 'Run Python or JavaScript') +
-          row('history', '🕘', 'Saved answers') +
-        `</div>` +
       `</div>`;
     document.getElementById('thread-title').textContent = '';
     document.getElementById('thread-sub').textContent = '';
@@ -4247,7 +3223,6 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
 
   openThread({ title, sub = '' } = {}) {
     // The answer shows in the main view: put away sheets that would cover it
-    this.filesPanel?.classList.add('hidden');
     this.historyPanel?.classList.add('hidden');
     if (!this.hasMessages()) {
       this.threadBody.innerHTML = '';
@@ -4289,20 +3264,18 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     }
   }
 
-  // An answer we already have (an agent's final report)
-  showInThread({ title, sub = '', label, text }) {
-    if (!this.appView || !text) return;
-    this.openThread({ title, sub });
-    this.addThreadQuestion(label);
-    this.answerCard(this.threadBody, { title: this.getCurrentModel()?.name || 'Answer', saveAs: { prompt: label } }).done(text);
-  }
-
   // ----- Composer: attachments + question -----
 
   addComposerItem(item) {
     this.composerItems.push(item);
     this.renderComposer();
     this.setView('app');
+  }
+
+  // The send button is only prominent when there is something to send
+  updateSendState() {
+    const ready = !!this.threadInput?.value.trim() || !!this.composerItems?.length;
+    this.appView?.classList.toggle('can-send', ready);
   }
 
   renderComposer() {
@@ -4323,6 +3296,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       ? READ_MODES.filter(m => m.id !== 'add').map(m =>
         `<button type="button" class="composer-mode" data-mode="${m.id}" title="${this.escapeHtml(m.hint)}">${this.escapeHtml(m.label)}</button>`).join('')
       : '';
+    this.updateSendState();
     if (this.threadInput) this.threadInput.placeholder = items.length
       ? 'Ask about ' + (items.length === 1 ? items[0].label : `these ${items.length}`) + '…'
       : `Message ${this.getCurrentModel()?.name || 'the AI'}…`;
@@ -4360,12 +3334,17 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
   }
 
   // The page in the tab, as an attachment
+  // The page in the tab (on YouTube, the video's transcript) as an attachment
   async attachActivePage() {
-    this.showNotification('📄 Reading this page…');
+    const video = !!this._tabCtx?.video;
+    this.showNotification(video ? 'Reading the transcript…' : 'Reading this page…');
     try {
-      const { text, title } = await this.getActivePageText(60000);
-      const fname = (title.replace(/[^\w.-]+/g, '-').slice(0, 40) || 'page') + '.txt';
-      this.addComposerItem({ kind: 'page', label: title.slice(0, 40) || 'This page', title, filename: fname, content: text, mime: 'text/plain', what: `the web page "${title}"` });
+      const { text, title } = video ? await this.readActiveVideo() : await this.getActivePageText(60000);
+      const fname = (title.replace(/[^\w.-]+/g, '-').slice(0, 40) || (video ? 'video' : 'page')) + (video ? '-transcript.txt' : '.txt');
+      this.addComposerItem({
+        kind: 'page', label: title.slice(0, 40) || (video ? 'This video' : 'This page'), title, filename: fname, content: text, mime: 'text/plain',
+        what: video ? `the transcript of the video "${title}"` : `the web page "${title}"`
+      });
       this.hideNotification();
       this.threadInput?.focus();
     } catch (e) {
@@ -4428,6 +3407,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     this.pickerSearch = document.getElementById('picker-search');
     document.getElementById('picker-close')?.addEventListener('click', () => this.closePicker());
     document.getElementById('picker-add')?.addEventListener('click', () => this.addPickedFiles());
+    document.getElementById('picker-imports')?.addEventListener('click', () => this.addPickedImports());
     this.pickerSearch.addEventListener('input', () => {
       clearTimeout(this._pkTimer);
       this._pkTimer = setTimeout(() => { this._pk.q = this.pickerSearch.value.trim().toLowerCase(); this.renderPicker(); }, 80);
@@ -4455,9 +3435,10 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
         this.updatePickerFoot();
       }
     });
-    // Clicking elsewhere in the Yavar view closes it
+    // Clicking elsewhere in the Yavar view closes it (not the click that
+    // opened it: + or a start-page row)
     this.appView.addEventListener('click', (e) => {
-      if (!this.picker.classList.contains('hidden') && !e.target.closest('#composer-add')) this.closePicker();
+      if (!this.picker.classList.contains('hidden') && !e.target.closest('#composer-add, [data-home]')) this.closePicker();
     });
   }
 
@@ -4474,7 +3455,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     pk.classList.remove('hidden');
     try {
       const ok = source === 'local'
-        ? await this.openLocalFolder({ reuse: true, show: false })
+        ? await this.openLocalFolder({ reuse: true })
         : await this.ensureRepoTree();
       if (!ok) {
         if (source === 'local') { this.closePicker(); return; }
@@ -4504,7 +3485,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     const fileRow = (p, sub = '') =>
       `<button type="button" class="pk-row pk-file" role="option" aria-selected="${sel.has(p)}" data-pk-file="${this.escapeHtml(p)}">` +
       `<span class="pk-check" aria-hidden="true"></span><span class="pk-main"><span class="pk-name">${this.escapeHtml(p.split('/').pop())}</span>` +
-      (sub ? `<span class="pk-path">${this.escapeHtml(sub)}</span>` : '') + `</span><span class="pk-meta">${tok(p)}</span></button>`;
+      (sub ? `<span class="pk-path">${this.escapeHtml(sub)}</span>` : '') + `</span><span class="pk-meta">${this.readMarks.has(p) ? '<span class="pk-read" title="Sent before">✓</span>' : ''}${tok(p)}</span></button>`;
     const crumbs = document.getElementById('picker-crumbs');
     let html = '';
 
@@ -4559,9 +3540,31 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     const count = document.getElementById('picker-count');
     count.textContent = n ? `${n} file${n === 1 ? '' : 's'} · ~${formatCount(tokens)} tokens` : 'No files selected';
     count.classList.toggle('warn', tokens > 60000);
+    document.getElementById('picker-imports').hidden = !n;
     const add = document.getElementById('picker-add');
     add.disabled = !n;
     add.textContent = n ? `Add ${n === 1 ? 'file' : n + ' files'}` : 'Add';
+  }
+
+  // Also select the files in this repo that the selected ones import (one level)
+  async addPickedImports() {
+    const sel = this._pk?.sel;
+    if (!sel?.size) return;
+    const btn = document.getElementById('picker-imports');
+    btn.disabled = true;
+    const before = sel.size;
+    try {
+      for (const f of await this.fetchRepoFilesMany([...sel])) {
+        if (f.error) continue;
+        resolveImports(extractImports(f.content, f.path), f.path, this.repoTree.fileSet)
+          .filter(isReadablePath).forEach(p => sel.add(p));
+      }
+    } finally {
+      btn.disabled = false;
+    }
+    const added = sel.size - before;
+    this.showNotification(added ? `Selected ${added} imported file${added === 1 ? '' : 's'}` : 'No more imports inside this repository');
+    this.renderPicker();
   }
 
   async addPickedFiles() {
@@ -4621,19 +3624,16 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
   // ========== Message Listener ==========
 
   // The in-chat "Prompts" menu lists the user's templates
-  async sendTemplatesToFrame() {
-    try {
-      const templates = (await loadTemplates()).map(t => ({ id: t.id, name: t.name, icon: t.icon }));
-      this.postToChat({ action: 'YAVAR_TEMPLATES', templates });
-    } catch (e) { /* ignore */ }
+  async loadPromptTemplates() {
+    try { this._templates = await loadTemplates(); } catch (e) { this._templates = []; }
   }
 
-  // "✨ Prompts" in the chat: expand a template around what the user typed
-  async applyTemplateFromChat(id, inputText) {
-    const tpl = (await loadTemplates()).find(t => t.id === id);
+  // "Use a prompt": expand a template around what you typed in the message box
+  async applyTemplate(id) {
+    const tpl = (this._templates || []).find(t => t.id === id);
     if (!tpl) return;
     const vars = varsInTemplate(tpl.body);
-    const ctx = { selection: inputText || '' };
+    const ctx = { selection: this.threadInput.value.trim() };
     try {
       const [tab] = await this.getActiveTabs();
       ctx.url = tab?.url || '';
@@ -4641,16 +3641,17 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       const gh = parseGitHubUrl(ctx.url);
       if (gh) ctx.repo = `${gh.owner}/${gh.repo}`;
     } catch (e) { /* no tab info */ }
-    if (vars.includes('page')) {
-      try { ctx.page = (await this.getActivePageText(12000)).text; }
-      catch (e) { this.showNotification('⚠️ Could not read the page: ' + e.message); return; }
-    }
     if (vars.includes('selection') && !ctx.selection) {
-      this.showNotification('✨ Type or paste something in the chat first, then pick the prompt');
+      this.showNotification(`Type or paste something first, then choose “${tpl.name}”`);
+      this.threadInput.focus();
       return;
     }
-    const prompt = await expandTemplate(tpl.body, ctx);
-    this.postToChat({ action: 'AUTO_REPLACE_PROMPT', prompt });
+    if (vars.includes('page')) {
+      try { ctx.page = (await this.getActivePageText(12000)).text; }
+      catch (e) { this.showNotification('Could not read the page: ' + e.message); return; }
+    }
+    this.threadInput.value = '';
+    this.fillComposer(await expandTemplate(tpl.body, ctx));
   }
 
   // Buttons inside the chat page (bridge → panel)
@@ -4660,24 +3661,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       this.showNotification('📝 Added to notes');
     } else if (data.action === 'YAVAR_COPY') {
       try { await navigator.clipboard.writeText(data.text || ''); } catch (e) { /* ignore */ }
-    } else if (data.action === 'YAVAR_TEMPLATE') {
-      this.applyTemplateFromChat(data.id, data.inputText);
-    } else if (data.action === 'YAVAR_OPEN') {
-      this.runTool(String(data.what || ''));
-    } else if (data.action === 'INCHAT_BAR') {
-      this._inChatBarShown = !!data.visible;
-      this.applyDockVisibility();
     }
-  }
-
-  // Resolves once the chat iframe has loaded (or after a timeout), so messages
-  // sent while the panel is still opening aren't posted to about:blank.
-  whenFrameReady(timeoutMs = 15000) {
-    if (this._frameReady) return Promise.resolve();
-    return new Promise((resolve) => {
-      this._frameWaiters.push(resolve);
-      setTimeout(resolve, timeoutMs);
-    });
   }
 
   // A request queued by the context menu or a shortcut before the panel was open
@@ -4704,7 +3688,8 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
 
   setupStorageListener() {
     chrome.storage.onChanged.addListener((changes, areaName) => {
-      if (areaName === 'sync' && changes.promptTemplates) this.sendTemplatesToFrame();
+      if (areaName === 'sync' && changes.promptTemplates) this.loadPromptTemplates();
+      if (areaName === 'sync' && changes.aiModels) this.onModelsChanged(changes.aiModels.newValue);
       if (areaName === 'local' && changes.yavarHistory && this._history) {
         this._history = changes.yavarHistory.newValue || [];
       }
@@ -4743,7 +3728,8 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
   // A floating-menu prompt: asked in the thread, or left in the message box
   // to review when "send right away" is off (or an answer is still coming)
   async handlePendingPrompt(prompt, label) {
-    const { autoSubmit } = await this.getAutoPasteSettings();
+    let autoSubmit = false;
+    try { autoSubmit = !!(await chrome.storage.sync.get('settings')).settings?.autoSubmit; } catch (e) { /* review first */ }
     if (!autoSubmit || this.threadBusy() || this.agent?.active) {
       this.fillComposer(prompt);
       return;
@@ -4758,6 +3744,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
   }
 
   forwardToIframe({ prompt, autoSubmit }) {
+    this.rememberPrompt(prompt);
     this.postToChat({ action: autoSubmit ? 'AUTO_SUBMIT_PROMPT' : 'AUTO_PASTE_PROMPT', prompt });
   }
 

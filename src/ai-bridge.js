@@ -570,10 +570,10 @@
   }
 
   // ---- Yavar controls inside the chat ----
-  // An action row under each finished answer, and a chip bar above the
-  // message box. Rendered in shadow roots so the site's CSS can't touch
-  // them (and ours can't leak), re-attached when the site re-renders.
-  // Only in the Yavar side panel; can be turned off in Settings.
+  // An action row under each finished answer. Rendered in a shadow root so
+  // the site's CSS can't touch it (and ours can't leak), re-attached when
+  // the site re-renders. Only in the Yavar side panel; can be turned off in
+  // Settings. Everything else lives in the Yavar view.
 
   const USER_SELECTORS = {
     chatgpt: 'div[data-message-author-role="user"]',
@@ -582,21 +582,10 @@
   };
 
   let inChatEnabled = true;
-  let yavarTemplates = [];
-  // Buttons for the page open in the user's tab, sent by the panel
-  // (YAVAR_CONTEXT). Until then: the basics.
-  let yavarContext = {
-    chips: [{ id: 'add_page', label: '📄 Page', title: "Add the page open in your tab" }],
-    more: [
-      { id: 'reader', label: '📚 Repo Reader' },
-      { id: 'run', label: '▶ Code playground' },
-      { id: 'carry_over', label: '🧳 Continue in a fresh chat' }
-    ]
-  };
 
   const UI_CSS = `
-    :host { all: initial; --fg:#1d1d1f; --muted:#6e6e73; --bg:#ffffff; --line:rgba(0,0,0,.12); --hover:rgba(0,113,227,.09); --accent:#0071e3; }
-    :host([dark]) { --fg:#f5f5f7; --muted:#a1a1a6; --bg:#2c2c2e; --line:rgba(255,255,255,.14); --hover:rgba(10,132,255,.18); --accent:#4aa3ff; }
+    :host { all: initial; --fg:#1d1d1f; --muted:#6e6e73; --line:rgba(0,0,0,.12); --hover:rgba(0,113,227,.09); --accent:#0071e3; }
+    :host([dark]) { --fg:#f5f5f7; --muted:#a1a1a6; --line:rgba(255,255,255,.14); --hover:rgba(10,132,255,.18); --accent:#4aa3ff; }
     * { box-sizing: border-box; font: 500 12px/1.2 system-ui, -apple-system, 'Segoe UI', sans-serif; }
     .row { display:flex; flex-wrap:wrap; align-items:center; gap:4px; margin:8px 0 2px; opacity:.72; transition:opacity .15s; }
     .row:hover, .row:focus-within { opacity:1; }
@@ -606,15 +595,6 @@
     button:hover { background:var(--hover); border-color:var(--accent); color:var(--accent); }
     button:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
     button.ok { color:#1f9d55; border-color:#1f9d55; }
-    .bar { position:fixed; z-index:2147483000; display:flex; gap:4px; align-items:center; padding:3px; max-width:calc(100vw - 16px);
-      overflow-x:auto; scrollbar-width:none; background:var(--bg); border:1px solid var(--line); border-radius:999px;
-      box-shadow:0 2px 10px rgba(0,0,0,.1); }
-    .bar::-webkit-scrollbar { display:none; }
-    .bar button { border-color:transparent; padding:4px 8px; }
-    .menu { position:fixed; z-index:2147483001; min-width:200px; max-height:260px; overflow:auto; padding:4px; background:var(--bg);
-      border:1px solid var(--line); border-radius:12px; box-shadow:0 8px 24px rgba(0,0,0,.18); }
-    .menu button { display:flex; width:100%; border:none; border-radius:8px; padding:7px 10px; text-align:left; }
-    .menu .hint { padding:6px 10px 8px; color:var(--muted); font-size:11px; font-weight:400; line-height:1.4; }
     [hidden] { display:none !important; }
   `;
 
@@ -714,130 +694,8 @@
     });
   }
 
-  // ---- Chip bar above the message box ----
-  let composer = null;
-
-  function currentComposerText() {
-    const el = document.querySelector(SELECTORS[detectPlatform()]?.input);
-    if (!el) return '';
-    return (el.value !== undefined ? el.value : el.innerText || '').trim();
-  }
-
-  const escAttr = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
-
-  // Context buttons, then Prompts and a ⋯ menu with everything else
-  function renderBar(bar) {
-    bar.innerHTML = yavarContext.chips.map(c =>
-      `<button data-c="${escAttr(c.id)}" title="${escAttr(c.title || c.label)}">${escAttr(c.label)}</button>`).join('') +
-      '<button data-c="prompts" title="Apply a prompt template to what you typed">✨ Prompts</button>' +
-      '<button data-c="more" title="More Yavar tools" aria-label="More Yavar tools">⋯</button>';
-  }
-
-  function openMenu(menu, btn, html) {
-    menu.innerHTML = html;
-    const r = btn.getBoundingClientRect();
-    menu.hidden = false;
-    menu.style.left = Math.max(8, Math.min(r.left, innerWidth - 216)) + 'px';
-    menu.style.top = Math.max(8, r.top - menu.offsetHeight - 6) + 'px';
-  }
-
-  function buildComposer() {
-    const { host, root } = makeHost('yavar-composer-bar');
-    const bar = document.createElement('div');
-    bar.className = 'bar';
-    renderBar(bar);
-    const menu = document.createElement('div');
-    menu.className = 'menu';
-    menu.hidden = true;
-    root.append(bar, menu);
-
-    bar.addEventListener('click', (e) => {
-      const btn = e.target.closest('button');
-      if (!btn) return;
-      e.stopPropagation();
-      const c = btn.dataset.c;
-      if (c === 'prompts' || c === 'more') {
-        if (!menu.hidden && menu.dataset.kind === c) { menu.hidden = true; return; }
-        menu.dataset.kind = c;
-        if (c === 'more') {
-          openMenu(menu, btn, yavarContext.more.map(m => `<button data-o="${escAttr(m.id)}">${escAttr(m.label)}</button>`).join(''));
-          return;
-        }
-        const typed = currentComposerText();
-        openMenu(menu, btn, (typed
-          ? '<div class="hint">Wraps what you typed in the chosen prompt.</div>'
-          : '<div class="hint">Type or paste something first; the prompt wraps it. Prompts using the page work either way.</div>') +
-          (yavarTemplates.length ? yavarTemplates : [{ id: '', name: '(no templates)' }])
-            .map(t => `<button data-t="${escAttr(t.id)}">${escAttr(t.icon || '•')}&nbsp; ${escAttr(t.name)}</button>`).join(''));
-        return;
-      }
-      menu.hidden = true;
-      postToYavar({ action: 'YAVAR_OPEN', what: c });
-    });
-    menu.addEventListener('click', (e) => {
-      const o = e.target.closest('[data-o]');
-      const t = e.target.closest('[data-t]');
-      if (!o && !(t && t.dataset.t)) return;
-      e.stopPropagation();
-      menu.hidden = true;
-      if (o) postToYavar({ action: 'YAVAR_OPEN', what: o.dataset.o });
-      else postToYavar({ action: 'YAVAR_TEMPLATE', id: t.dataset.t, inputText: currentComposerText() });
-    });
-    document.documentElement.appendChild(host);
-    return { host, bar, menu };
-  }
-
-  // Tell the panel whether the bar is on screen, so it can hide its own
-  // copy of these buttons (the left dock) while it is
-  let barShown = null;
-  function reportBar(shown) {
-    if (shown === barShown) return;
-    barShown = shown;
-    postToYavar({ action: 'INCHAT_BAR', visible: shown });
-  }
-
-  function placeComposer() {
-    const input = inChatEnabled && document.querySelector(SELECTORS[detectPlatform()]?.input);
-    if (!input) { if (composer) composer.host.hidden = true; reportBar(false); return; }
-    composer = composer && composer.host.isConnected ? composer : buildComposer();
-    const anchor = input.closest('form') || input.parentElement?.parentElement || input;
-    watchAnchor(anchor);
-    const r = anchor.getBoundingClientRect();
-    const barH = composer.bar.offsetHeight || 30;
-    const top = r.top - barH - 6;
-    composer.host.hidden = r.width === 0 || top < 4;
-    reportBar(!composer.host.hidden);
-    composer.bar.style.left = Math.max(8, r.left) + 'px';
-    composer.bar.style.top = top + 'px';
-  }
-
-  // Re-place the bar when the message box moves or resizes (it grows as you
-  // type, the sidebar is resized…) instead of polling on a timer.
-  let anchorObserver = null;
-  let observedAnchor = null;
-  function watchAnchor(anchor) {
-    if (anchor === observedAnchor || typeof ResizeObserver === 'undefined') return;
-    anchorObserver?.disconnect();
-    anchorObserver = new ResizeObserver(() => schedulePlace());
-    anchorObserver.observe(anchor);
-    observedAnchor = anchor;
-  }
-
-  // At most one placement per animation frame (scroll fires very often)
-  let placeQueued = false;
-  function schedulePlace() {
-    if (placeQueued) return;
-    placeQueued = true;
-    requestAnimationFrame(() => { placeQueued = false; placeComposer(); });
-  }
-
   function removeInChatUi() {
     document.querySelectorAll('yavar-answer-bar').forEach(el => el.remove());
-    if (composer) { composer.host.remove(); composer = null; }
-    reportBar(false);
-    anchorObserver?.disconnect();
-    anchorObserver = null;
-    observedAnchor = null;
   }
 
   function applyInChat(enabled) {
@@ -852,8 +710,6 @@
     const generating = !!document.querySelector(STOP_SELECTORS);
     decorateCodeBlocks(generating);
     decorateAnswers(generating);
-    placeComposer();
-    composer?.host.toggleAttribute('dark', isDark);
   }
 
   // Mutations caused only by our own buttons/bars don't need another pass
@@ -871,7 +727,7 @@
       });
     } catch (e) { /* storage unavailable: keep defaults */ }
 
-    // One observer drives everything (code-block buttons, answer bars, chip bar)
+    // One observer drives everything (code-block buttons, answer bars)
     let queued = null;
     const schedule = (records) => {
       if (queued || (records && onlyOwnChanges(records))) return;
@@ -880,10 +736,6 @@
     const start = () => {
       refreshInChatUi();
       new MutationObserver(schedule).observe(document.body, { childList: true, subtree: true });
-      // One listener closes the Prompts menu on outside clicks
-      document.addEventListener('click', () => { if (composer) composer.menu.hidden = true; });
-      addEventListener('resize', schedulePlace);
-      addEventListener('scroll', schedulePlace, { capture: true, passive: true });
     };
     if (document.body) start();
     else document.addEventListener('DOMContentLoaded', start);
@@ -954,24 +806,6 @@
     return true;
   }
 
-  function replaceComposerText(text) {
-    const platform = detectPlatform();
-    if (!platform) return;
-    waitForElement(SELECTORS[platform].input, 10000).then((el) => {
-      el.focus();
-      if (el.value !== undefined) {
-        el.select();
-      } else {
-        const range = document.createRange();
-        range.selectNodeContents(el);
-        const sel = window.getSelection();
-        sel.removeAllRanges();
-        sel.addRange(range);
-      }
-      insertTextIntoInput(el, text);
-    }).catch(() => {});
-  }
-
   // Listen for postMessage from sidepanel
   window.addEventListener('message', (event) => {
     if (!isFromYavar(event)) return;
@@ -1031,23 +865,6 @@
     if (event.data?.action === 'WATCH_FOR_ANSWER') {
       console.log('[Yavar Bridge] Received WATCH_FOR_ANSWER');
       startAnswerWatch(event.data.requestId);
-    }
-
-    if (event.data?.action === 'YAVAR_TEMPLATES' && Array.isArray(event.data.templates)) {
-      yavarTemplates = event.data.templates;
-    }
-
-    if (event.data?.action === 'YAVAR_CONTEXT' && Array.isArray(event.data.chips) && Array.isArray(event.data.more)) {
-      yavarContext = { chips: event.data.chips, more: event.data.more };
-      if (composer) {
-        renderBar(composer.bar);
-        composer.menu.hidden = true;
-        schedulePlace();
-      }
-    }
-
-    if (event.data?.action === 'AUTO_REPLACE_PROMPT' && typeof event.data.prompt === 'string') {
-      replaceComposerText(event.data.prompt);
     }
 
     if (event.data?.action === 'CHAT_STATE') {
