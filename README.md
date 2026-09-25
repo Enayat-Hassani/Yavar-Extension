@@ -49,7 +49,7 @@ Add, edit, or remove your own templates in Settings using `{{selection}}`, `{{pa
 
 **Private chats for Yavar's work** (on by default): these requests, the rebuild hints and reviews, and the agents run in a temporary chat, so they don't fill your chat history: `chatgpt.com/?temporary-chat=true`, Claude's incognito chat, or Gemini's *Temporary chat* button. Follow-ups continue in the same temporary chat. Save the answers you want to keep. Turn it off under *Settings → Asking the AI* to keep everything in your normal history.
 
-**Sheets**: the runner, rebuild, notes and saved-answers panels open as sheets from the bottom. Drag the handle to resize (double-click for full height).
+**Sheets**: the runner, Build it yourself, notes and saved answers each fill the panel. ✕ or Esc goes back to the Yavar view.
 
 **Run code** — every Python or JavaScript block in an answer gets a **▶ Run** button. It runs locally in a sandbox (Python via bundled [Pyodide](https://pyodide.org), standard library only), shows the output, and offers *Ask AI to fix it*, *Explain the output* and *What should I try next?*. The answers appear under your code, not in the chat. *Code playground* in **⋯** opens the same runner.
 

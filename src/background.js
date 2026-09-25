@@ -187,7 +187,7 @@ function injectAreaSelector() {
   overlay.appendChild(selection);
 
   const hint = document.createElement('div');
-  hint.textContent = 'Drag to select area — press Esc to cancel';
+  hint.textContent = 'Drag to select an area · Esc to cancel';
   hint.style.cssText = `
     position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
     padding: 8px 16px; background: rgba(0, 0, 0, 0.7); color: white;
@@ -196,21 +196,60 @@ function injectAreaSelector() {
   `;
   overlay.appendChild(hint);
 
-  let startX, startY, dragging = false;
+  // After a drag: ✓ takes the screenshot, ✕ cancels, dragging again redraws
+  const bar = document.createElement('div');
+  bar.style.cssText = `
+    position: absolute; display: none; gap: 4px; padding: 4px;
+    background: rgba(28, 28, 30, 0.92); border-radius: 10px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3); cursor: default;
+  `;
+  const barBtn = (label, title, bg) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = label;
+    b.title = title;
+    b.style.cssText = `
+      all: unset; box-sizing: border-box; width: 30px; height: 28px; border-radius: 7px;
+      display: flex; align-items: center; justify-content: center; cursor: pointer;
+      font: 600 15px -apple-system, BlinkMacSystemFont, sans-serif; color: #fff; background: ${bg};
+    `;
+    bar.appendChild(b);
+    return b;
+  };
+  const cancelBtn = barBtn('✕', 'Cancel (Esc)', 'transparent');
+  const okBtn = barBtn('✓', 'Use this area (Enter)', '#0071e3');
+  overlay.appendChild(bar);
+
+  let startX, startY, dragging = false, rect = null;
 
   function cleanup() {
     overlay.remove();
-    document.removeEventListener('keydown', escHandler, true);
+    document.removeEventListener('keydown', keyHandler, true);
   }
 
-  function escHandler(e) {
-    if (e.key === 'Escape') cleanup();
+  function confirm() {
+    if (!rect) return;
+    const picked = rect;
+    cleanup();
+    // Tell background we have our selection
+    chrome.runtime.sendMessage({ action: 'area_selected', rect: picked });
   }
+
+  function keyHandler(e) {
+    if (e.key === 'Escape') { e.preventDefault(); cleanup(); }
+    if (e.key === 'Enter' && rect) { e.preventDefault(); confirm(); }
+  }
+
+  bar.addEventListener('mousedown', (e) => e.stopPropagation());
+  okBtn.addEventListener('click', confirm);
+  cancelBtn.addEventListener('click', cleanup);
 
   overlay.addEventListener('mousedown', (e) => {
     startX = e.clientX;
     startY = e.clientY;
     dragging = true;
+    rect = null;
+    bar.style.display = 'none';
     selection.style.display = 'block';
     selection.style.left = startX + 'px';
     selection.style.top = startY + 'px';
@@ -241,18 +280,22 @@ function injectAreaSelector() {
 
     // Ignore tiny selections (accidental clicks)
     if (w < 10 || h < 10) {
-      cleanup();
+      selection.style.display = 'none';
+      hint.style.display = '';
       return;
     }
 
-    const rect = { x, y, width: w, height: h, dpr: window.devicePixelRatio || 1 };
-    cleanup();
-
-    // Tell background we have our selection
-    chrome.runtime.sendMessage({ action: 'area_selected', rect });
+    rect = { x, y, width: w, height: h, dpr: window.devicePixelRatio || 1 };
+    // The ✓ ✕ bar sits under the selection's right edge, or inside it when there's no room
+    bar.style.display = 'flex';
+    const bw = bar.offsetWidth, bh = bar.offsetHeight;
+    const below = y + h + 8 + bh <= window.innerHeight;
+    bar.style.left = Math.max(8, Math.min(x + w - bw, window.innerWidth - bw - 8)) + 'px';
+    bar.style.top = (below ? y + h + 8 : Math.max(8, y + h - bh - 8)) + 'px';
+    okBtn.focus();
   });
 
-  document.addEventListener('keydown', escHandler, true);
+  document.addEventListener('keydown', keyHandler, true);
 
   document.body.appendChild(overlay);
 }
