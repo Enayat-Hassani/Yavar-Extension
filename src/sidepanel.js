@@ -2,6 +2,7 @@
 // Full viewport chat with bottom navigation and model management
 
 import { isPublicWebUrl } from './utils/net.js';
+import { pickCoreFiles, planPrompt, hintPrompt, checkPrompt, parseRebuildPlan } from './utils/rebuild.js';
 import {
   parseGitHubUrl, refCandidates, rawFileUrl, isReadablePath, estimateTokens, formatCount, formatBytes,
   langFromPath, sliceLines, extractImports, resolveImports, suggestStartFiles, buildPack, readingPrompt, READ_MODES,
@@ -290,6 +291,14 @@ class YavarSidePanel {
     this.sidebarBtnNewChat.addEventListener('click', () => this.openNewChat());
     this.sidebarBtnCarryOver?.addEventListener('click', () => this.carryOverToNewChat());
     document.getElementById('sidebar-btn-run')?.addEventListener('click', () => this.openRunPanel());
+    this.rebuildPanel = document.getElementById('rebuild-panel');
+    this.rebuildBody = document.getElementById('rebuild-body');
+    document.getElementById('rebuild-close')?.addEventListener('click', () => this.rebuildPanel.classList.add('hidden'));
+    document.getElementById('rebuild-reset')?.addEventListener('click', () => this.resetRebuild());
+    this.rebuildPanel?.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') this.rebuildPanel.classList.add('hidden');
+    });
+    this.rebuildBody?.addEventListener('click', (e) => this.onRebuildClick(e));
     document.getElementById('sidebar-btn-local')?.addEventListener('click', () => this.openLocalFolder({ reuse: true }));
     document.getElementById('btn-open-folder')?.addEventListener('click', () => this.openLocalFolder());
     this.filesTree?.addEventListener('click', (e) => {
@@ -2319,6 +2328,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
     // What the repo is, from its README
     const rootReadme = folderReadme('', this.repoTree.fileSet);
     if (rootReadme) this.filesTree.appendChild(this.readmeBox(rootReadme, this.repoTree.source === 'local' ? 'About this project' : 'About this repo'));
+    this.filesTree.appendChild(this.rebuildEntryCard());
 
     // Suggested reading order for newcomers
     const starts = suggestStartFiles([...this.repoTree.fileSet]);
@@ -2479,6 +2489,249 @@ Begin: state a one-line plan, then issue your first tool call.`;
       row.innerHTML = this.fileRowHtml(p, p);
       this.bindFileRow(row, p);
       this.filesTree.appendChild(row);
+    }
+  }
+
+  // ----- Rebuild it yourself -----
+
+  rebuildKey() {
+    const k = this.readMarksKey();
+    return k ? k.replace(/^readMarks:/, 'rebuild:') : null;
+  }
+
+  async loadRebuild() {
+    const key = this.rebuildKey();
+    if (!key) return null;
+    try { return (await chrome.storage.local.get(key))[key] || null; } catch (e) { return null; }
+  }
+
+  async saveRebuild(state) {
+    const key = this.rebuildKey();
+    if (!key) return;
+    this.rebuild = state;
+    try { await chrome.storage.local.set({ [key]: state }); } catch (e) { /* ignore */ }
+  }
+
+  rebuildEntryCard() {
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'rebuild-entry';
+    card.innerHTML = `<span class="rebuild-entry-icon" aria-hidden="true">🛠</span>` +
+      `<span class="rebuild-entry-text"><strong>Rebuild it yourself</strong>` +
+      `<span class="rebuild-entry-sub">Get a step-by-step plan to rebuild this project, with hints and code checks</span></span>`;
+    this.loadRebuild().then(state => {
+      if (state?.plan) {
+        const n = state.plan.steps.length;
+        const done = (state.done || []).length;
+        card.querySelector('strong').textContent = done >= n ? 'Rebuild complete 🎉' : `Continue rebuild · step ${Math.min(state.current + 1, n)} of ${n}`;
+        card.querySelector('.rebuild-entry-sub').textContent = state.plan.summary || state.plan.project || '';
+      }
+    });
+    card.addEventListener('click', () => this.openRebuild());
+    return card;
+  }
+
+  async openRebuild() {
+    if (!this.repoTree) return;
+    this.rebuild = await this.loadRebuild();
+    document.getElementById('rebuild-sub').textContent = this.repoDisplayName();
+    this.rebuildPanel.classList.remove('hidden');
+    this.renderRebuild();
+  }
+
+  async resetRebuild() {
+    if (!this.rebuild?.plan) return;
+    if (!this._resetArmed) {
+      this._resetArmed = true;
+      this.showNotification('Click ↺ again to discard this plan and start over');
+      setTimeout(() => { this._resetArmed = false; }, 3000);
+      return;
+    }
+    this._resetArmed = false;
+    await this.saveRebuild(null);
+    this.renderRebuild();
+  }
+
+  renderRebuild() {
+    const st = this.rebuild;
+    const esc = (t) => this.escapeHtml(t || '');
+    if (!st?.plan) {
+      const core = this.selectedFiles.size ? [...this.selectedFiles] : pickCoreFiles(this.repoTree.items);
+      const bytes = core.reduce((n, p) => n + (this.repoTree.sizes.get(p) || 0), 0);
+      this.rebuildBody.innerHTML =
+        `<div class="rebuild-intro">` +
+          `<p>The best way to understand a codebase is to build a small version of it yourself. ` +
+          `Yavar sends the project's core files to the AI, which writes a plan of small steps. ` +
+          `For each step you study the original, write your own version, and get hints or a review.</p>` +
+          `<div class="rebuild-files"><strong>${core.length} file${core.length === 1 ? '' : 's'}</strong> ` +
+          `<span>(~${formatCount(estimateTokens(bytes))} tokens${this.selectedFiles.size ? ', your selection' : ', picked automatically'})</span>` +
+          `<div class="rebuild-file-list">${core.map(p => `<code>${esc(p)}</code>`).join(' ')}</div></div>` +
+          (this._planPending
+            ? `<div class="rebuild-wait"><span class="files-spinner"></span>The AI is writing your plan in the chat…</div>`
+            : `<button type="button" class="files-send" data-rb="create"${core.length ? '' : ' disabled'}>Create my plan</button>`) +
+          `<button type="button" class="files-link-btn rebuild-load" data-rb="load">Already have a plan in the chat? Load it</button>` +
+        `</div>`;
+      return;
+    }
+
+    const { plan, current = 0, done = [], code = {} } = st;
+    const n = plan.steps.length;
+    const i = Math.min(current, n - 1);
+    const s = plan.steps[i];
+    const pct = Math.round((done.length / n) * 100);
+    const lang = /python/i.test(plan.language) ? 'python' : /javascript|node|^js$/i.test(plan.language) ? 'javascript' : null;
+    const studyChips = (s.study || []).map(p => {
+      const ok = this.repoTree.fileSet.has(p);
+      return `<button type="button" class="files-start-chip${ok ? '' : ' missing'}" data-rb="study" data-path="${esc(p)}"${ok ? '' : ' disabled title="Not found in this repo"'}>${esc(p.split('/').pop())}</button>`;
+    }).join('');
+
+    this.rebuildBody.innerHTML =
+      (plan.summary ? `<p class="rebuild-summary">${esc(plan.summary)}</p>` : '') +
+      `<div class="rebuild-progress" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100">` +
+        `<div class="rebuild-progress-bar" style="width:${pct}%"></div></div>` +
+      `<div class="rebuild-progress-label">${done.length} of ${n} steps done</div>` +
+      `<ol class="rebuild-steps">${plan.steps.map((x, k) =>
+        `<li class="${k === i ? 'current' : ''}${done.includes(k) ? ' done' : ''}" data-rb="goto" data-i="${k}">` +
+        `<span class="rebuild-step-dot">${done.includes(k) ? '✓' : k + 1}</span><span>${esc(x.title)}</span></li>`).join('')}</ol>` +
+      `<div class="rebuild-card">` +
+        `<div class="rebuild-card-kicker">Step ${i + 1} of ${n}</div>` +
+        `<h3>${esc(s.title)}</h3>` +
+        (s.goal ? `<p class="rebuild-goal">${esc(s.goal)}</p>` : '') +
+        (studyChips ? `<div class="rebuild-label">Study first</div><div class="files-start-list">${studyChips}</div>` : '') +
+        `<div class="rebuild-label">Your task</div><p class="rebuild-text">${esc(s.task)}</p>` +
+        (s.done_when ? `<div class="rebuild-label">Done when</div><p class="rebuild-text">${esc(s.done_when)}</p>` : '') +
+        `<div class="rebuild-label">Your code</div>` +
+        `<textarea class="rebuild-code" spellcheck="false" placeholder="Write or paste your version for this step…" data-i="${i}">${esc(code[i] || '')}</textarea>` +
+        `<div class="rebuild-actions">` +
+          `<button type="button" class="files-chip-btn" data-rb="hint">💡 Hint</button>` +
+          `<button type="button" class="files-chip-btn" data-rb="check">Check my code</button>` +
+          (lang ? `<button type="button" class="files-chip-btn" data-rb="try">▶ Try it</button>` : '') +
+        `</div>` +
+        `<div class="rebuild-nav">` +
+          `<button type="button" class="files-link-btn" data-rb="prev"${i === 0 ? ' disabled' : ''}>← Previous</button>` +
+          `<button type="button" class="files-send" data-rb="next">${done.includes(i) ? (i === n - 1 ? 'All done' : 'Next step →') : (i === n - 1 ? 'Mark done 🎉' : 'Mark done & next →')}</button>` +
+        `</div>` +
+      `</div>`;
+
+    const ta = this.rebuildBody.querySelector('.rebuild-code');
+    ta?.addEventListener('input', () => {
+      clearTimeout(this._rbSave);
+      this._rbSave = setTimeout(() => {
+        const c = { ...(this.rebuild.code || {}) };
+        c[i] = ta.value;
+        this.saveRebuild({ ...this.rebuild, code: c });
+      }, 400);
+    });
+    ta?.addEventListener('keydown', (e) => {
+      if (e.key === 'Tab') { e.preventDefault(); ta.setRangeText('    ', ta.selectionStart, ta.selectionEnd, 'end'); }
+    });
+  }
+
+  async onRebuildClick(e) {
+    const el = e.target.closest('[data-rb]');
+    if (!el || el.disabled) return;
+    const act = el.dataset.rb;
+    const st = this.rebuild;
+    if (act === 'create') return this.createRebuildPlan();
+    if (act === 'load') return this.loadPlanFromChat();
+    if (!st?.plan) return;
+    const i = Math.min(st.current || 0, st.plan.steps.length - 1);
+    const code = this.rebuildBody.querySelector('.rebuild-code')?.value || '';
+
+    if (act === 'goto') {
+      await this.saveRebuild({ ...st, current: Number(el.dataset.i) });
+      this.renderRebuild();
+    } else if (act === 'prev') {
+      await this.saveRebuild({ ...st, current: Math.max(0, i - 1) });
+      this.renderRebuild();
+    } else if (act === 'next') {
+      const done = [...new Set([...(st.done || []), i])];
+      const next = Math.min(i + 1, st.plan.steps.length - 1);
+      await this.saveRebuild({ ...st, done, current: next, code: { ...(st.code || {}), [i]: code } });
+      this.renderRebuild();
+      if (done.length === st.plan.steps.length && i === st.plan.steps.length - 1) {
+        this.showNotification('🎉 You rebuilt the whole plan. Try extending it with a feature of your own!');
+      }
+    } else if (act === 'study') {
+      this.rebuildPanel.classList.add('hidden');
+      this.sendRepoFiles([el.dataset.path], 'explain');
+    } else if (act === 'hint') {
+      this.forwardToIframe({ prompt: hintPrompt(st.plan, i), autoSubmit: false });
+      this.rebuildPanel.classList.add('hidden');
+      this.showNotification('💡 Hint request added to the chat input');
+    } else if (act === 'check') {
+      if (!code.trim()) { this.showNotification('Write your code for this step first'); return; }
+      const study = (st.plan.steps[i].study || []).filter(p => this.repoTree.fileSet.has(p));
+      let attached = false;
+      if (study.length) {
+        const files = (await this.fetchRepoFilesMany(study)).filter(f => !f.error);
+        if (files.length) {
+          const pack = buildPack({ owner: this.repoTree.owner, repo: this.repoTree.repo, files });
+          this.forwardAttachToIframe(`step-${i + 1}-original.md`, pack, 'text/markdown');
+          attached = true;
+        }
+      }
+      setTimeout(() => this.forwardToIframe({ prompt: checkPrompt(st.plan, i, code, attached), autoSubmit: false }), attached ? 1500 : 0);
+      this.rebuildPanel.classList.add('hidden');
+      this.showNotification('🧑‍🏫 Your code is in the chat input, press send for a review');
+    } else if (act === 'try') {
+      const lang = /python/i.test(st.plan.language) ? 'python' : 'javascript';
+      this.openRunPanel({ lang, code, autoRun: !!code.trim() });
+    }
+  }
+
+  async createRebuildPlan() {
+    if (this._planPending) return;
+    const paths = this.selectedFiles.size ? [...this.selectedFiles] : pickCoreFiles(this.repoTree.items);
+    if (!paths.length) return;
+    this._planPending = true;
+    this.renderRebuild();
+    try {
+      const files = (await this.fetchRepoFilesMany(paths)).filter(f => !f.error);
+      if (!files.length) throw new Error('could not read the project files');
+      const { owner, repo, ref, source } = this.repoTree;
+      const pack = buildPack({ owner, repo, ref: source === 'local' ? '' : this.refLabel(ref), files, treePaths: [...this.repoTree.fileSet] });
+      this.forwardAttachToIframe(`${repo}-core-files.md`.replace(/[^\w.-]+/g, '-'), pack, 'text/markdown');
+      this.rebuildPanel.classList.add('hidden');
+      this.showNotification('🛠 Sent the core files, the AI is writing your plan…');
+      await new Promise(r => setTimeout(r, 2500)); // let the attachment upload
+      const reply = await this.askAndCapture(planPrompt(this.repoDisplayName()));
+      await this.adoptPlan(reply);
+    } catch (e) {
+      this.showNotification('⚠️ ' + e.message + '. When the plan is in the chat, use "Load it".');
+    } finally {
+      this._planPending = false;
+      if (!this.rebuildPanel.classList.contains('hidden') || !this.rebuild?.plan) this.renderRebuild();
+    }
+  }
+
+  async adoptPlan(text) {
+    const plan = parseRebuildPlan(text);
+    if (!plan) throw new Error("couldn't find a plan in the AI's reply");
+    if (!plan.project) plan.project = this.repoDisplayName();
+    await this.saveRebuild({ plan, current: 0, done: [], code: {}, created: Date.now() });
+    this.rebuildPanel.classList.remove('hidden');
+    this.renderRebuild();
+    this.showNotification(`🛠 Plan ready: ${plan.steps.length} steps`);
+  }
+
+  // Read the chat's latest answer and resolve with its text
+  captureLastAnswerText() {
+    if (!this.aiFrame?.contentWindow) return Promise.reject(new Error('no AI chat loaded'));
+    const id = 'capw_' + Date.now();
+    return new Promise((resolve, reject) => {
+      this._captureWaiter = { id, resolve, reject, timer: setTimeout(() => {
+        if (this._captureWaiter?.id === id) { this._captureWaiter = null; reject(new Error('the chat did not respond')); }
+      }, 5000) };
+      this.aiFrame.contentWindow.postMessage({ action: 'CAPTURE_LAST_ANSWER', requestId: id }, '*');
+    });
+  }
+
+  async loadPlanFromChat() {
+    try {
+      await this.adoptPlan(await this.captureLastAnswerText());
+    } catch (e) {
+      this.showNotification('⚠️ ' + e.message);
     }
   }
 
@@ -3200,6 +3453,17 @@ Begin: state a one-line plan, then issue your first tool call.`;
       if (!this.aiFrame || event.source !== this.aiFrame.contentWindow) return;
       const data = event.data;
       if (!data || typeof data !== 'object') return;
+
+      // Programmatic capture (e.g. "Load plan from chat")
+      if (this._captureWaiter && data.requestId === this._captureWaiter.id &&
+          (data.action === 'ANSWER_CAPTURED' || data.action === 'ANSWER_CAPTURE_FAILED')) {
+        const w = this._captureWaiter;
+        this._captureWaiter = null;
+        clearTimeout(w.timer);
+        if (data.action === 'ANSWER_CAPTURED') w.resolve(data.text || '');
+        else w.reject(new Error(data.reason === 'no-messages' ? 'no answer in the chat yet' : 'could not read the answer'));
+        return;
+      }
 
       if (data.action === 'ANSWER_CAPTURED') {
         if (this._pendingCaptureId && data.requestId && data.requestId !== this._pendingCaptureId) return;
