@@ -1812,6 +1812,13 @@ html, body {
   max-height: 120px;
   overflow: hidden;
   margin-bottom: 10px;
+  cursor: pointer;
+}
+
+.history-answer.expanded {
+  max-height: none;
+  cursor: text;
+  user-select: text;
 }
 
 .history-item-actions {

@@ -48,6 +48,7 @@ class YavarSidePanel {
     this.notesEditorContainer = document.getElementById('notes-editor');
     this.btnClearNotes = document.getElementById('btn-clear-notes');
     this.btnCopyNotes = document.getElementById('btn-copy-notes');
+    this.btnDownloadNotes = document.getElementById('btn-download-notes');
     this.notesOpen = false;
 
     // History panel (captured AI answers)
@@ -55,6 +56,7 @@ class YavarSidePanel {
     this.historyList = document.getElementById('history-list');
     this.historySearch = document.getElementById('history-search');
     this.btnClearHistory = document.getElementById('btn-clear-history');
+    this.btnExportHistory = document.getElementById('btn-export-history');
     this.btnCloseHistory = document.getElementById('btn-close-history');
 
     // Deep-dive agent
@@ -251,7 +253,8 @@ class YavarSidePanel {
     this.notificationDismiss.addEventListener('click', () => this.hideNotification());
 
     // Notes panel buttons
-    this.btnClearNotes.addEventListener('click', () => this.clearNotes());
+    this.btnClearNotes.addEventListener('click', () => this.handleClearNotesClick());
+    this.btnDownloadNotes.addEventListener('click', () => this.downloadNotes());
     this.btnCopyNotes.addEventListener('click', () => this.copyNotes());
 
     // Screenshot panel buttons
@@ -261,6 +264,7 @@ class YavarSidePanel {
     // History panel buttons
     this.btnCloseHistory.addEventListener('click', () => this.historyPanel.classList.add('hidden'));
     this.btnClearHistory.addEventListener('click', () => this.handleClearHistoryClick());
+    this.btnExportHistory.addEventListener('click', () => this.exportHistory());
     this.historySearch.addEventListener('input', () => this.renderHistory());
     this.historyList.addEventListener('click', (e) => this.handleHistoryListClick(e));
 
@@ -2488,7 +2492,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
             <span class="history-date">${date}</span>
           </div>
           ${promptLine}
-          <div class="history-answer">${preview}</div>
+          <div class="history-answer" data-act="expand" data-id="${e.id}" title="Click to expand">${preview}</div>
           <div class="history-item-actions">
             <button class="history-btn" data-act="copy" data-id="${e.id}">Copy</button>
             <button class="history-btn" data-act="notes" data-id="${e.id}">→ Notes</button>
@@ -2499,12 +2503,27 @@ Begin: state a one-line plan, then issue your first tool call.`;
   }
 
   handleHistoryListClick(e) {
+    const answerEl = e.target.closest('.history-answer[data-act="expand"]');
+    if (answerEl) {
+      this.toggleHistoryAnswer(answerEl);
+      return;
+    }
     const btn = e.target.closest('.history-btn');
     if (!btn) return;
     const { act, id } = btn.dataset;
     if (act === 'copy') this.copyHistoryEntry(id);
     else if (act === 'notes') this.insertHistoryToNotes(id);
     else if (act === 'delete') this.deleteHistoryEntry(id);
+  }
+
+  // Swap the short preview for the full answer (and back). Full text is only
+  // read on demand so the list stays light with 200 long entries.
+  async toggleHistoryAnswer(el) {
+    if (window.getSelection()?.toString()) return; // don't collapse while selecting text
+    const expanded = el.classList.toggle('expanded');
+    const answer = (await this.getHistory()).find(x => x.id === el.dataset.id)?.answer || '';
+    el.textContent = expanded ? answer : answer.slice(0, 240) + (answer.length > 240 ? '…' : '');
+    el.title = expanded ? 'Click to collapse' : 'Click to expand';
   }
 
   async copyHistoryEntry(id) {
@@ -2585,6 +2604,63 @@ Begin: state a one-line plan, then issue your first tool call.`;
 
   saveNotes() {
     chrome.storage.local.set({ yavarNotes: this.cmEditor.getValue() });
+  }
+
+  // Two-click confirm, same as history: one stray click shouldn't wipe notes
+  handleClearNotesClick() {
+    if (!this.cmEditor.getValue()) return;
+    if (this._clearNotesArmed) {
+      clearTimeout(this._clearNotesTimer);
+      this._clearNotesArmed = false;
+      this.clearNotes();
+      this.showNotification('🗑️ Notes cleared');
+      return;
+    }
+    this._clearNotesArmed = true;
+    this.showNotification('Click clear again to confirm');
+    this._clearNotesTimer = setTimeout(() => { this._clearNotesArmed = false; }, 3000);
+  }
+
+  downloadNotes() {
+    const text = this.cmEditor.getValue();
+    if (!text.trim()) {
+      this.showNotification('Notes are empty');
+      return;
+    }
+    this.downloadText(`yavar-notes-${this.fileDateStamp()}.md`, text);
+  }
+
+  async exportHistory() {
+    const history = await this.getHistory();
+    if (!history.length) {
+      this.showNotification('No saved answers to export');
+      return;
+    }
+    const blocks = history.map(e => {
+      const head = `## ${e.platform || 'AI'} · ${new Date(e.ts).toLocaleString()}`;
+      const src = e.url ? `\n\n<${e.url}>` : '';
+      const prompt = e.prompt ? `\n\n**Prompt:**\n\n${e.prompt}` : '';
+      return `${head}${src}${prompt}\n\n**Answer:**\n\n${e.answer || ''}`;
+    });
+    const md = `# Yavar saved answers\n\nExported ${new Date().toLocaleString()} · ${history.length} answer(s)\n\n---\n\n` +
+      blocks.join('\n\n---\n\n') + '\n';
+    this.downloadText(`yavar-answers-${this.fileDateStamp()}.md`, md);
+    this.showNotification(`⬇️ Exported ${history.length} answer(s)`);
+  }
+
+  fileDateStamp() {
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  downloadText(filename, text, mime = 'text/markdown') {
+    const url = URL.createObjectURL(new Blob([text], { type: mime + ';charset=utf-8' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   clearNotes() {
