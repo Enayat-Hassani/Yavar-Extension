@@ -384,6 +384,13 @@ class YavarContentHandler {
         return;
       }
 
+      // "Send" (just the selection): it joins Yavar's message as a chip
+      if (tpl.body.trim() === '{{selection}}') {
+        chrome.runtime.sendMessage({ action: 'send_selection', text: this.currentText });
+        this.forceHide();
+        return;
+      }
+
       // Only gather the context the template actually references
       const vars = varsInTemplate(tpl.body);
       const ctx = { selection: this.currentText };
@@ -396,7 +403,10 @@ class YavarContentHandler {
       // reason about it (and you can find it again).
       const source = vars.includes('selection') ? this.githubSourceNote() : '';
       if (source) prompt += '\n\n' + source;
-      chrome.runtime.sendMessage({ action: 'trigger_auto_submit', prompt });
+      // The label is what the panel shows as your question in the thread
+      const snippet = this.currentText.replace(/\s+/g, ' ').trim();
+      const label = `${tpl.name}: “${snippet.length > 90 ? snippet.slice(0, 90) + '…' : snippet}”`;
+      chrome.runtime.sendMessage({ action: 'trigger_auto_submit', prompt, label });
       this.forceHide();
     } catch (err) {
       console.error('[Yavar Content] Template failed:', err);

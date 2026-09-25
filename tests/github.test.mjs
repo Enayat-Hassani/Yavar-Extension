@@ -85,7 +85,7 @@ test('every mode except "add" produces a prompt naming the target', () => {
   }
 });
 
-import { parseCommitsAtom, commitsFromApi, timeAgo, folderReadme, readmeSnippet } from '../src/utils/github.js';
+import { parseCommitsAtom, commitsFromApi, timeAgo } from '../src/utils/github.js';
 
 test('parses the commits Atom feed', () => {
   const xml = `<?xml version="1.0"?><feed><entry>
@@ -111,16 +111,6 @@ test('normalises API commits and formats age', () => {
   assert.equal(timeAgo('2026-01-01T00:00:00Z', now), '2d ago');
   assert.equal(timeAgo('2026-01-02T23:30:00Z', now), '30m ago');
   assert.equal(timeAgo('nope', now), '');
-});
-
-test('finds folder READMEs and extracts a clean snippet', () => {
-  const files = new Set(['README.md', 'src/lib/README.md', 'src/a.js']);
-  assert.equal(folderReadme('', files), 'README.md');
-  assert.equal(folderReadme('src/lib', files), 'src/lib/README.md');
-  assert.equal(folderReadme('src', files), null);
-  const md = '# Title\n[![ci](x)](y)\n<p align="center"><img src="x"></p>\n\nA **fast** [parser](http://x) for `toml`.\n\n```js\ncode\n```\n| a | b |';
-  assert.equal(readmeSnippet(md), 'A fast parser for toml.');
-  assert.ok(readmeSnippet('word '.repeat(100), 50).endsWith('…'));
 });
 
 import { isSecretPath } from '../src/utils/github.js';

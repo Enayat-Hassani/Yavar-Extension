@@ -76,17 +76,17 @@
   "commands": {
     "toggle-sidebar": {
       "suggested_key": {
-        "default": "Ctrl+Space",
-        "mac": "Command+Space"
+        "default": "Alt+Shift+Y",
+        "mac": "Command+Shift+Y"
       },
-      "description": "Toggle AI Sidebar"
+      "description": "Open Yavar"
     },
     "capture-screenshot": {
       "suggested_key": {
-        "default": "Ctrl+Shift+I",
+        "default": "Alt+Shift+S",
         "mac": "Command+Shift+I"
       },
-      "description": "Capture screenshot for sidebar"
+      "description": "Pick an element or area of the page"
     },
     "trigger-learn": {
       "suggested_key": {
@@ -97,10 +97,10 @@
     },
     "toggle-notes": {
       "suggested_key": {
-        "default": "Ctrl+Shift+N",
+        "default": "Alt+Shift+N",
         "mac": "Command+Shift+O"
       },
-      "description": "Toggle Notes Panel"
+      "description": "Open or close Notes"
     }
   },
   "options_page": "options.html",

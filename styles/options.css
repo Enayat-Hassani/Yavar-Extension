@@ -80,11 +80,6 @@ body {
   letter-spacing: -0.3px;
 }
 
-.subtitle {
-  color: var(--text-secondary);
-  font-size: 14px;
-}
-
 /* Settings Sections */
 .settings-container {
   display: flex;
@@ -127,7 +122,7 @@ body {
 .setting-item select,
 .setting-item input[type="text"],
 .setting-item input[type="number"],
-.disabled-sites-input input {
+.input-row input {
   width: 100%;
   padding: 10px 14px;
   background: var(--bg-tertiary);
@@ -147,7 +142,7 @@ body {
 .setting-item select:focus,
 .setting-item input[type="text"]:focus,
 .setting-item input[type="number"]:focus,
-.disabled-sites-input input:focus {
+.input-row input:focus {
   border-color: var(--accent);
 }
 
@@ -266,13 +261,13 @@ body {
 }
 
 /* Disabled Sites */
-.disabled-sites-input {
+.input-row {
   display: flex;
   gap: 8px;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
-.disabled-sites-input input {
+.input-row input {
   flex: 1;
 }
 
@@ -480,3 +475,92 @@ kbd {
   font-size: 12px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
+
+/* Models: one row each, the switch shows it in the model menu */
+.models-list {
+  margin: 20px 0 12px;
+  border-top: 1px solid var(--border);
+}
+
+.model-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.model-row-icon {
+  width: 24px;
+  text-align: center;
+  font-size: 16px;
+}
+
+.model-row-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.model-row-name { font-size: 14px; }
+
+.model-row-url {
+  font-size: 12px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.add-model-form {
+  display: flex;
+  gap: 8px;
+}
+
+.add-model-form input {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 14px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 14px;
+  outline: none;
+}
+
+.add-model-form input:focus { border-color: var(--accent); }
+
+.disabled-sites-list[hidden] { display: none; }
+
+@media (max-width: 520px) {
+  body { padding: 16px; }
+  .add-model-form, .input-row { flex-wrap: wrap; }
+  .add-model-form input { flex-basis: 100%; }
+}
+
+/* Model APIs: the free-model checklist */
+.free-models {
+  max-height: 260px;
+  overflow-y: auto;
+  margin: 6px 0 10px;
+  border: 1px solid var(--border, #d2d2d7);
+  border-radius: 10px;
+}
+.free-models:has(> .help-text) { border: none; max-height: none; }
+.setting-item .free-model {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.free-model + .free-model { border-top: 1px solid var(--border, #d2d2d7); }
+.free-model-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.free-model-meta { color: var(--text-secondary, #6e6e73); font-size: 12px; }
+.setting-item .free-model input { margin: 0; flex-shrink: 0; }
+.free-model-name b { color: var(--accent, #0071e3); }
