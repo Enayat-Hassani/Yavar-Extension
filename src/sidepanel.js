@@ -372,6 +372,7 @@ class YavarSidePanel {
   async showSettings() {
     await this.renderModelsList();
     await this.loadAutoPasteSettings();
+    this.renderShortcuts();
     await this.loadGithubToken();
     this.settingsPanel.classList.remove('hidden');
   }
@@ -419,10 +420,10 @@ class YavarSidePanel {
 
       // Add event listeners if not already added
       if (!this.settingsListenersAdded) {
-        autoPasteToggle?.addEventListener('change', (e) => this.saveAutoPasteSetting(e.target.checked));
-        autoSubmitToggle?.addEventListener('change', (e) => this.saveAutoSubmitSetting(e.target.checked));
-        screenshotPreviewToggle?.addEventListener('change', (e) => this.saveScreenshotPreviewSetting(e.target.checked));
-        deepResearchToggle?.addEventListener('change', (e) => this.saveDeepResearchSetting(e.target.checked));
+        autoPasteToggle?.addEventListener('change', (e) => this.saveSetting('autoPaste', e.target.checked));
+        autoSubmitToggle?.addEventListener('change', (e) => this.saveSetting('autoSubmit', e.target.checked));
+        screenshotPreviewToggle?.addEventListener('change', (e) => this.saveSetting('showScreenshotPreview', e.target.checked));
+        deepResearchToggle?.addEventListener('change', (e) => this.saveSetting('deepResearch', e.target.checked));
         this.settingsListenersAdded = true;
       }
     } catch (error) {
@@ -430,48 +431,31 @@ class YavarSidePanel {
     }
   }
 
-  async saveAutoPasteSetting(enabled) {
+  // Merge one key into the shared settings object in sync storage
+  async saveSetting(key, value) {
     try {
-      const { settings } = await chrome.storage.sync.get('settings') || {};
-      const newSettings = { ...settings, autoPaste: enabled };
-      await chrome.storage.sync.set({ settings: newSettings });
-      console.log('[Yavar] Auto-paste setting saved:', enabled);
+      const { settings } = await chrome.storage.sync.get('settings');
+      await chrome.storage.sync.set({ settings: { ...settings, [key]: value } });
     } catch (error) {
-      console.error('[Yavar] Failed to save auto-paste setting:', error);
+      console.error(`[Yavar] Failed to save ${key}:`, error);
     }
   }
 
-  async saveAutoSubmitSetting(enabled) {
-    try {
-      const { settings } = await chrome.storage.sync.get('settings') || {};
-      const newSettings = { ...settings, autoSubmit: enabled };
-      await chrome.storage.sync.set({ settings: newSettings });
-      console.log('[Yavar] Auto-submit setting saved:', enabled);
-    } catch (error) {
-      console.error('[Yavar] Failed to save auto-submit setting:', error);
-    }
-  }
-
-  async saveScreenshotPreviewSetting(enabled) {
-    try {
-      const { settings } = await chrome.storage.sync.get('settings') || {};
-      const newSettings = { ...settings, showScreenshotPreview: enabled };
-      await chrome.storage.sync.set({ settings: newSettings });
-      console.log('[Yavar] Screenshot preview setting saved:', enabled);
-    } catch (error) {
-      console.error('[Yavar] Failed to save screenshot preview setting:', error);
-    }
-  }
-
-  async saveDeepResearchSetting(enabled) {
-    try {
-      const { settings } = await chrome.storage.sync.get('settings') || {};
-      const newSettings = { ...settings, deepResearch: enabled };
-      await chrome.storage.sync.set({ settings: newSettings });
-      console.log('[Yavar] Deep research setting saved:', enabled);
-    } catch (error) {
-      console.error('[Yavar] Failed to save deep research setting:', error);
-    }
+  // Current bindings (users can rebind at chrome://extensions/shortcuts)
+  renderShortcuts() {
+    const list = document.getElementById('shortcuts-list');
+    if (!list || !chrome.commands?.getAll) return;
+    chrome.commands.getAll((commands) => {
+      const rows = (commands || [])
+        .filter(c => c.description)
+        .map(c => ({ label: c.description, keys: c.shortcut || 'Not set' }));
+      rows.push({ label: 'Save AI answer to history', keys: 'Ctrl+Shift+S' });
+      list.innerHTML = rows.map(r => `
+            <div class="shortcut-item">
+              <span>${this.escapeHtml(r.label)}</span>
+              <kbd>${this.escapeHtml(r.keys)}</kbd>
+            </div>`).join('');
+    });
   }
 
   async getAutoPasteSettings() {
@@ -1275,7 +1259,8 @@ Begin: state a one-line plan, then issue your first tool call.`;
   initMermaid() {
     try {
       if (window.mermaid) {
-        window.mermaid.initialize({ startOnLoad: false, theme: 'default', securityLevel: 'strict' });
+        const dark = window.matchMedia?.('(prefers-color-scheme: dark)').matches;
+        window.mermaid.initialize({ startOnLoad: false, theme: dark ? 'dark' : 'default', securityLevel: 'strict' });
       }
     } catch (e) {
       console.warn('[Yavar] mermaid init failed:', e);

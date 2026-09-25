@@ -20,6 +20,31 @@
   --danger: #ff3b30;            /* Apple red */
   --glass-bg: rgba(232, 232, 237, 0.85);
   --glass-blur: blur(12px);
+  --surface: #ffffff;                       /* cards, panels, iframe backdrop */
+  --surface-soft: rgba(255, 255, 255, 0.55);
+  --surface-glass: rgba(255, 255, 255, 0.92);
+  color-scheme: light;
+}
+
+/* Dark theme follows the OS, matching the embedded chat sites */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-primary: #1c1c1e;
+    --bg-secondary: #2c2c2e;
+    --bg-tertiary: #3a3a3c;
+    --text-primary: #f5f5f7;
+    --text-secondary: #a1a1a6;
+    --accent: #0a84ff;
+    --accent-hover: #409cff;
+    --border: rgba(255, 255, 255, 0.1);
+    --success: #30d158;
+    --danger: #ff453a;
+    --glass-bg: rgba(44, 44, 46, 0.85);
+    --surface: #2c2c2e;
+    --surface-soft: rgba(255, 255, 255, 0.06);
+    --surface-glass: rgba(44, 44, 46, 0.94);
+    color-scheme: dark;
+  }
 }
 
 html, body {
@@ -55,7 +80,7 @@ html, body {
   width: 100%;
   height: 100%;
   border: none;
-  background: white;
+  background: var(--surface);
   display: block;
 }
 
@@ -215,7 +240,7 @@ html, body {
   max-height: 200px;
   overflow: hidden;
   border-radius: 8px;
-  background: white;
+  background: var(--surface);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -306,10 +331,10 @@ html, body {
   justify-content: center;
   width: 44px;
   height: 44px;
-  background: rgba(255, 255, 255, 0.85);
-  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: var(--surface-glass);
+  border: 1px solid var(--border);
   border-radius: 12px;
-  color: #1d1d1f;
+  color: var(--text-primary);
   cursor: pointer;
   transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
   flex-shrink: 0;
@@ -318,7 +343,7 @@ html, body {
 }
 
 .sidebar-icon-btn:hover {
-  background: rgba(255, 255, 255, 0.95);
+  background: var(--surface-glass);
   border-color: var(--accent);
   color: var(--accent);
   transform: scale(1.05);
@@ -396,7 +421,7 @@ html, body {
 }
 
 .model-item:hover {
-  background: rgba(255, 255, 255, 0.4);
+  background: var(--surface-soft);
 }
 
 .model-item.active {
@@ -464,7 +489,7 @@ html, body {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(232, 230, 225, 0.95);
+  background: color-mix(in srgb, var(--bg-primary) 96%, transparent);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   z-index: 300;
@@ -544,7 +569,7 @@ html, body {
   align-items: center;
   gap: 12px;
   padding: 12px;
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--surface-soft);
   border-radius: 10px;
   border: 1px solid var(--border);
 }
@@ -584,21 +609,24 @@ html, body {
   gap: 8px;
 }
 
-.toggle-switch {
+/* Model-row switch (a div toggled via .active); the settings switches below
+   wrap a real checkbox, so scope this to divs to keep the two from mixing */
+div.toggle-switch {
   position: relative;
   width: 44px;
   height: 24px;
+  flex-shrink: 0;
   background: var(--bg-tertiary);
   border-radius: 12px;
   cursor: pointer;
   transition: background 0.2s;
 }
 
-.toggle-switch.active {
+div.toggle-switch.active {
   background: var(--accent);
 }
 
-.toggle-switch::after {
+div.toggle-switch::after {
   content: '';
   position: absolute;
   top: 3px;
@@ -610,7 +638,7 @@ html, body {
   transition: transform 0.2s;
 }
 
-.toggle-switch.active::after {
+div.toggle-switch.active::after {
   transform: translateX(20px);
 }
 
@@ -647,7 +675,7 @@ html, body {
 
 .btn-secondary {
   padding: 10px 20px;
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--surface-soft);
   border: 1px solid var(--border);
   border-radius: 8px;
   color: var(--text-primary);
@@ -657,7 +685,7 @@ html, body {
 }
 
 .btn-secondary:hover {
-  background: rgba(255, 255, 255, 0.7);
+  background: var(--surface-soft);
 }
 
 /* Shortcuts List */
@@ -672,7 +700,7 @@ html, body {
   justify-content: space-between;
   align-items: center;
   padding: 10px 12px;
-  background: rgba(255, 255, 255, 0.4);
+  background: var(--surface-soft);
   border-radius: 8px;
   font-size: 13px;
 }
@@ -751,7 +779,7 @@ html, body {
 .form-group input[type="password"] {
   width: 100%;
   padding: 10px 12px;
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--surface-soft);
   border: 1px solid var(--border);
   border-radius: 8px;
   color: var(--text-primary);
@@ -884,17 +912,16 @@ html, body {
 }
 
 .toggle-switch input:checked + .toggle-slider {
-  background-color: rgba(0, 113, 227, 0.2);
-  border-color: #0071e3;
+  background-color: var(--accent);
+  border-color: var(--accent);
 }
 
 .toggle-switch input:checked + .toggle-slider:before {
   transform: translateX(20px);
-  background-color: #0071e3;
 }
 
-.toggle-switch input:focus + .toggle-slider {
-  box-shadow: 0 0 0 2px rgba(0, 113, 227, 0.2);
+.toggle-switch input:focus-visible + .toggle-slider {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
 .settings-tip {
@@ -1087,7 +1114,7 @@ html, body {
   width: 100%;
   max-height: 62vh;
   overflow: auto;
-  background: #ffffff;
+  background: var(--surface);
   border-radius: 10px;
   padding: 14px;
   margin-bottom: 16px;
@@ -1416,7 +1443,7 @@ html, body {
 .files-search {
   width: 100%;
   padding: 10px 12px;
-  background: rgba(255, 255, 255, 0.6);
+  background: var(--surface-soft);
   border: 1px solid var(--border);
   border-radius: 8px;
   color: var(--text-primary);
@@ -1622,7 +1649,7 @@ html, body {
   width: 100%;
   height: 100%;
   z-index: 70;
-  background: #ffffff;
+  background: var(--surface);
   display: flex;
   flex-direction: column;
   animation: fadeIn 0.2s ease;
@@ -1654,7 +1681,7 @@ html, body {
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  background: #ffffff;
+  background: var(--surface);
 }
 
 .diagram-content svg {
@@ -1738,7 +1765,7 @@ html, body {
 .history-search {
   width: 100%;
   padding: 10px 12px;
-  background: rgba(255, 255, 255, 0.6);
+  background: var(--surface-soft);
   border: 1px solid var(--border);
   border-radius: 8px;
   color: var(--text-primary);
@@ -1769,7 +1796,7 @@ html, body {
 }
 
 .history-item {
-  background: rgba(255, 255, 255, 0.6);
+  background: var(--surface-soft);
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 12px;
