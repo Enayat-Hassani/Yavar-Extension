@@ -312,7 +312,9 @@ class YavarSidePanel {
     const model = this.getCurrentModel();
     if (model) {
       this.loadingState.classList.remove('hidden');
-      this.aiFrame.src = model.url + '?' + Date.now();
+      const url = new URL(model.url);
+      url.searchParams.set('_yavar', Date.now());
+      this.aiFrame.src = url.href;
     }
   }
 
@@ -341,10 +343,10 @@ class YavarSidePanel {
     this.modelList.innerHTML = enabledModels.map(model => `
       <div class="model-item ${model.id === this.currentModelId ? 'active' : ''}" 
            data-model-id="${model.id}">
-        <div class="model-icon">${model.icon}</div>
+        <div class="model-icon">${this.escapeHtml(model.icon)}</div>
         <div class="model-info">
-          <div class="model-name">${model.name}</div>
-          ${model.custom ? `<div class="model-url">${model.url}</div>` : ''}
+          <div class="model-name">${this.escapeHtml(model.name)}</div>
+          ${model.custom ? `<div class="model-url">${this.escapeHtml(model.url)}</div>` : ''}
         </div>
       </div>
     `).join('');
@@ -482,10 +484,10 @@ class YavarSidePanel {
   renderModelsList() {
     this.modelsListContainer.innerHTML = this.models.map(model => `
       <div class="model-row">
-        <div class="model-row-icon">${model.icon}</div>
+        <div class="model-row-icon">${this.escapeHtml(model.icon)}</div>
         <div class="model-row-info">
-          <div class="model-row-name">${model.name}</div>
-          <div class="model-row-url">${model.url}</div>
+          <div class="model-row-name">${this.escapeHtml(model.name)}</div>
+          <div class="model-row-url">${this.escapeHtml(model.url)}</div>
         </div>
         <div class="model-row-actions">
           <div class="toggle-switch ${model.enabled ? 'active' : ''}" 
@@ -565,10 +567,18 @@ class YavarSidePanel {
 
     if (!name || !url) return;
 
+    // Only real web pages can be framed; reject javascript:, file:, typos, etc.
+    let parsed;
+    try { parsed = new URL(/^https?:\/\//i.test(url) ? url : 'https://' + url); } catch (err) { parsed = null; }
+    if (!parsed || !/^https?:$/.test(parsed.protocol)) {
+      this.showNotification('⚠️ Enter a valid http(s) URL');
+      return;
+    }
+
     const newModel = {
       id: 'custom_' + Date.now(),
       name,
-      url,
+      url: parsed.href,
       icon: '🌐',
       enabled,
       custom: true
@@ -1109,9 +1119,27 @@ Begin: state a one-line plan, then issue your first tool call.`;
 
   // ---- Research tool implementations ----
 
+  // The AI picks these URLs and may be steered by text on pages it read, so
+  // never let it reach local/intranet hosts or send the user's cookies.
+  isPublicWebUrl(url) {
+    let u;
+    try { u = new URL(url); } catch (e) { return false; }
+    if (!/^https?:$/.test(u.protocol)) return false;
+    const h = u.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+    if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.local') || h.endsWith('.internal')) return false;
+    if (!h.includes('.') && !h.includes(':')) return false;          // bare intranet names
+    if (/^(127\.|10\.|0\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(h)) return false;
+    if (h.includes(':') && (h === '::1' || /^(fc|fd|fe80)/.test(h))) return false; // IPv6 loopback/private
+    return true;
+  }
+
   async readUrl(url) {
     if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
-    const res = await fetch(url, { headers: { 'Accept': 'text/html,application/json,*/*' } });
+    if (!this.isPublicWebUrl(url)) throw new Error('blocked: only public http(s) pages can be read');
+    const res = await fetch(url, {
+      headers: { 'Accept': 'text/html,application/json,*/*' },
+      credentials: 'omit'
+    });
     if (!res.ok) throw new Error('HTTP ' + res.status);
 
     const ct = res.headers.get('content-type') || '';
@@ -2288,6 +2316,8 @@ Begin: state a one-line plan, then issue your first tool call.`;
   // Receive answers posted back from the iframe (ai-bridge → window.parent).
   setupIframeMessageListener() {
     window.addEventListener('message', (event) => {
+      // Only trust replies from the chat we loaded, not other frames/windows
+      if (!this.aiFrame || event.source !== this.aiFrame.contentWindow) return;
       const data = event.data;
       if (!data || typeof data !== 'object') return;
 
@@ -2613,9 +2643,9 @@ Begin: state a one-line plan, then issue your first tool call.`;
     this.notificationText.textContent = text;
     this.notificationBar.classList.remove('hidden');
 
-    setTimeout(() => {
-      this.hideNotification();
-    }, 4000);
+    // Restart the timer so a newer message isn't hidden by an older one's timeout
+    clearTimeout(this._notificationTimer);
+    this._notificationTimer = setTimeout(() => this.hideNotification(), 4000);
   }
 
   hideNotification() {
@@ -2661,7 +2691,12 @@ Begin: state a one-line plan, then issue your first tool call.`;
           console.log('[Yavar Sidepanel] Received AUTO_SUBMIT_PROMPT, forwarding to iframe');
           this._lastForwardedPrompt = message.prompt;
           this._lastForwardedTime = Date.now();
-          this.forwardToIframe(message);
+          this.getAutoPasteSettings().then(({ autoPaste, autoSubmit }) => {
+            if (autoPaste) this.forwardToIframe({ prompt: message.prompt, autoSubmit });
+            else navigator.clipboard.writeText(message.prompt)
+              .then(() => this.showNotification('📋 Prompt copied - paste it into the chat'))
+              .catch(() => {});
+          });
         } else {
           console.log('[Yavar Sidepanel] Ignoring duplicate AUTO_SUBMIT_PROMPT from staggered retry');
         }

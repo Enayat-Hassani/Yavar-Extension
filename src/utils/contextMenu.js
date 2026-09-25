@@ -79,10 +79,8 @@ ${selectionText}
 
   async sendSelectionToYavar(text, tab) {
     try {
-      // Copy to clipboard
-      await navigator.clipboard.writeText(text);
-
-      // Store for Yavar
+      // The service worker has no clipboard access; the side panel copies
+      // pendingText to the clipboard when it picks it up.
       await chrome.storage.session.set({ pendingText: text });
 
       // Open Yavar sidebar
