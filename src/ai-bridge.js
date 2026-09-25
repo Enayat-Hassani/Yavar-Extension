@@ -578,6 +578,16 @@
 
   let inChatEnabled = true;
   let yavarTemplates = [];
+  // Buttons for the page open in the user's tab, sent by the panel
+  // (YAVAR_CONTEXT). Until then: the basics.
+  let yavarContext = {
+    chips: [{ id: 'add_page', label: '📄 Page', title: "Add the page open in your tab" }],
+    more: [
+      { id: 'reader', label: '📚 Repo Reader' },
+      { id: 'run', label: '▶ Code playground' },
+      { id: 'carry_over', label: '🧳 Continue in a fresh chat' }
+    ]
+  };
 
   const UI_CSS = `
     :host { all: initial; --fg:#1d1d1f; --muted:#6e6e73; --bg:#ffffff; --line:rgba(0,0,0,.12); --hover:rgba(0,113,227,.09); --accent:#0071e3; }
@@ -708,16 +718,29 @@
     return (el.value !== undefined ? el.value : el.innerText || '').trim();
   }
 
+  const escAttr = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+
+  // Context buttons, then Prompts and a ⋯ menu with everything else
+  function renderBar(bar) {
+    bar.innerHTML = yavarContext.chips.map(c =>
+      `<button data-c="${escAttr(c.id)}" title="${escAttr(c.title || c.label)}">${escAttr(c.label)}</button>`).join('') +
+      '<button data-c="prompts" title="Apply a prompt template to what you typed">✨ Prompts</button>' +
+      '<button data-c="more" title="More Yavar tools" aria-label="More Yavar tools">⋯</button>';
+  }
+
+  function openMenu(menu, btn, html) {
+    menu.innerHTML = html;
+    const r = btn.getBoundingClientRect();
+    menu.hidden = false;
+    menu.style.left = Math.max(8, Math.min(r.left, innerWidth - 216)) + 'px';
+    menu.style.top = Math.max(8, r.top - menu.offsetHeight - 6) + 'px';
+  }
+
   function buildComposer() {
     const { host, root } = makeHost('yavar-composer-bar');
     const bar = document.createElement('div');
     bar.className = 'bar';
-    bar.innerHTML =
-      '<button data-c="reader" title="Repo Reader: pick repo or folder files to read with the AI">📚 Repo</button>' +
-      '<button data-c="add_page" title="Add the page open in your tab">📄 Page</button>' +
-      '<button data-c="prompts" title="Apply a prompt template to what you typed">✨ Prompts</button>' +
-      '<button data-c="run" title="Open the code playground">▶ Code</button>' +
-      '<button data-c="carry_over" title="Summarize this chat and continue in a fresh one">🧳 Fresh</button>';
+    renderBar(bar);
     const menu = document.createElement('div');
     menu.className = 'menu';
     menu.hidden = true;
@@ -728,37 +751,49 @@
       if (!btn) return;
       e.stopPropagation();
       const c = btn.dataset.c;
-      if (c === 'prompts') {
-        if (!menu.hidden) { menu.hidden = true; return; }
+      if (c === 'prompts' || c === 'more') {
+        if (!menu.hidden && menu.dataset.kind === c) { menu.hidden = true; return; }
+        menu.dataset.kind = c;
+        if (c === 'more') {
+          openMenu(menu, btn, yavarContext.more.map(m => `<button data-o="${escAttr(m.id)}">${escAttr(m.label)}</button>`).join(''));
+          return;
+        }
         const typed = currentComposerText();
-        menu.innerHTML = (typed
+        openMenu(menu, btn, (typed
           ? '<div class="hint">Wraps what you typed in the chosen prompt.</div>'
           : '<div class="hint">Type or paste something first; the prompt wraps it. Prompts using the page work either way.</div>') +
           (yavarTemplates.length ? yavarTemplates : [{ id: '', name: '(no templates)' }])
-            .map(t => `<button data-t="${String(t.id).replace(/"/g, '&quot;')}">${String(t.icon || '•').replace(/</g, '&lt;')}&nbsp; ${String(t.name).replace(/</g, '&lt;')}</button>`).join('');
-        const r = btn.getBoundingClientRect();
-        menu.hidden = false;
-        menu.style.left = Math.max(8, Math.min(r.left, innerWidth - 216)) + 'px';
-        menu.style.top = Math.max(8, r.top - menu.offsetHeight - 6) + 'px';
+            .map(t => `<button data-t="${escAttr(t.id)}">${escAttr(t.icon || '•')}&nbsp; ${escAttr(t.name)}</button>`).join(''));
         return;
       }
       menu.hidden = true;
       postToYavar({ action: 'YAVAR_OPEN', what: c });
     });
     menu.addEventListener('click', (e) => {
+      const o = e.target.closest('[data-o]');
       const t = e.target.closest('[data-t]');
-      if (!t || !t.dataset.t) return;
+      if (!o && !(t && t.dataset.t)) return;
       e.stopPropagation();
       menu.hidden = true;
-      postToYavar({ action: 'YAVAR_TEMPLATE', id: t.dataset.t, inputText: currentComposerText() });
+      if (o) postToYavar({ action: 'YAVAR_OPEN', what: o.dataset.o });
+      else postToYavar({ action: 'YAVAR_TEMPLATE', id: t.dataset.t, inputText: currentComposerText() });
     });
     document.documentElement.appendChild(host);
     return { host, bar, menu };
   }
 
+  // Tell the panel whether the bar is on screen, so it can hide its own
+  // copy of these buttons (the left dock) while it is
+  let barShown = null;
+  function reportBar(shown) {
+    if (shown === barShown) return;
+    barShown = shown;
+    postToYavar({ action: 'INCHAT_BAR', visible: shown });
+  }
+
   function placeComposer() {
     const input = inChatEnabled && document.querySelector(SELECTORS[detectPlatform()]?.input);
-    if (!input) { if (composer) composer.host.hidden = true; return; }
+    if (!input) { if (composer) composer.host.hidden = true; reportBar(false); return; }
     composer = composer && composer.host.isConnected ? composer : buildComposer();
     const anchor = input.closest('form') || input.parentElement?.parentElement || input;
     watchAnchor(anchor);
@@ -766,6 +801,7 @@
     const barH = composer.bar.offsetHeight || 30;
     const top = r.top - barH - 6;
     composer.host.hidden = r.width === 0 || top < 4;
+    reportBar(!composer.host.hidden);
     composer.bar.style.left = Math.max(8, r.left) + 'px';
     composer.bar.style.top = top + 'px';
   }
@@ -793,6 +829,7 @@
   function removeInChatUi() {
     document.querySelectorAll('yavar-answer-bar').forEach(el => el.remove());
     if (composer) { composer.host.remove(); composer = null; }
+    reportBar(false);
     anchorObserver?.disconnect();
     anchorObserver = null;
     observedAnchor = null;
@@ -928,6 +965,15 @@
 
     if (event.data?.action === 'YAVAR_TEMPLATES' && Array.isArray(event.data.templates)) {
       yavarTemplates = event.data.templates;
+    }
+
+    if (event.data?.action === 'YAVAR_CONTEXT' && Array.isArray(event.data.chips) && Array.isArray(event.data.more)) {
+      yavarContext = { chips: event.data.chips, more: event.data.more };
+      if (composer) {
+        renderBar(composer.bar);
+        composer.menu.hidden = true;
+        schedulePlace();
+      }
     }
 
     if (event.data?.action === 'AUTO_REPLACE_PROMPT' && typeof event.data.prompt === 'string') {

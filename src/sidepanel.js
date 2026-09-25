@@ -86,7 +86,8 @@ class YavarSidePanel {
 
   // Hide every sheet to show the chat
   closeSheets() {
-    document.querySelectorAll('.sheet').forEach(el => el.classList.add('hidden'));
+    // Not the agent sheet: that one minimizes to its pill instead
+    document.querySelectorAll('.sheet:not(.work-cover)').forEach(el => el.classList.add('hidden'));
   }
 
   async init() {
@@ -148,8 +149,6 @@ class YavarSidePanel {
     this.filesQuickAdd = document.getElementById('files-quick-add');
     this.dockAddPage = document.getElementById('dock-add-page');
     this.dockAddPageLabel = this.dockAddPage?.querySelector('.files-tab-label');
-    this.dockResearchPage = document.getElementById('dock-research-page');
-    this.dockVideoResearch = document.getElementById('dock-video-research');
     this.filesQuickName = this.filesQuickAdd?.querySelector('.files-quick-name');
     this.filesPanel = document.getElementById('files-panel');
     this.filesTree = document.getElementById('files-tree');
@@ -183,14 +182,13 @@ class YavarSidePanel {
 
     // Right sidebar buttons
     this.sidebarBtnNotes = document.getElementById('sidebar-btn-notes');
-    this.sidebarBtnSaveAnswer = document.getElementById('sidebar-btn-save-answer');
     this.sidebarBtnHistory = document.getElementById('sidebar-btn-history');
-    this.sidebarBtnRepoAgent = document.getElementById('sidebar-btn-repo-agent');
-    this.sidebarBtnResearch = document.getElementById('sidebar-btn-research');
+    this.sidebarBtnAgents = document.getElementById('sidebar-btn-agents');
+    this.sidebarBtnCode = document.getElementById('sidebar-btn-code');
+    this.toolMenu = document.getElementById('tool-menu');
     this.sidebarBtnModelSwitcher = document.getElementById('sidebar-btn-model-switcher');
     this.sidebarBtnScreenshot = document.getElementById('sidebar-btn-screenshot');
     this.sidebarBtnNewChat = document.getElementById('sidebar-btn-new-chat');
-    this.sidebarBtnCarryOver = document.getElementById('sidebar-btn-carry-over');
     this.runPanel = document.getElementById('run-panel');
     this.runOutput = document.getElementById('run-output');
     this.runStatus = document.getElementById('run-status');
@@ -272,11 +270,25 @@ class YavarSidePanel {
     });
 
     this.sidebarBtnNotes.addEventListener('click', () => this.toggleNotes());
-    this.sidebarBtnSaveAnswer.addEventListener('click', () => this.captureLastAnswer());
     this.sidebarBtnHistory.addEventListener('click', () => this.toggleHistory());
-    this.sidebarBtnRepoAgent.addEventListener('click', (e) => {
+    document.getElementById('btn-save-current')?.addEventListener('click', () => this.captureLastAnswer());
+    this.sidebarBtnAgents?.addEventListener('click', (e) => {
       e.stopPropagation();
-      this.toggleLensPicker();
+      this.toggleToolMenu('agents', this.sidebarBtnAgents);
+    });
+    this.sidebarBtnCode?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.toggleToolMenu('code', this.sidebarBtnCode);
+    });
+    this.toolMenu?.addEventListener('click', (e) => {
+      const item = e.target.closest('[data-tool]');
+      if (!item) return;
+      e.stopPropagation();   // the document handler would close a lens picker this opens
+      this.toolMenu.classList.add('hidden');
+      if (!item.disabled) this.runTool(item.dataset.tool);
+    });
+    this.toolMenu?.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') this.toolMenu.classList.add('hidden');
     });
     this.lensPicker.addEventListener('click', (e) => {
       const item = e.target.closest('[data-lens]');
@@ -284,7 +296,6 @@ class YavarSidePanel {
       this.lensPicker.classList.add('hidden');
       this.startRepoAgent(item.dataset.lens);
     });
-    this.sidebarBtnResearch.addEventListener('click', () => this.startResearchAgent());
     this.btnStopAgent.addEventListener('click', () => this.stopRepoAgent());
 
     // Repo file browser
@@ -296,8 +307,6 @@ class YavarSidePanel {
       if (this._addPageIsVideo) this.addVideoToChat();
       else this.addPageToChat();
     });
-    this.dockResearchPage?.addEventListener('click', () => this.researchThisPage());
-    this.dockVideoResearch?.addEventListener('click', () => this.researchVideosOnTopic());
     this.btnCloseFiles.addEventListener('click', () => this.filesPanel.classList.add('hidden'));
     this.btnRefreshFiles.addEventListener('click', () => this.refreshFiles());
     this.filesSearch.addEventListener('input', () => {
@@ -345,8 +354,10 @@ class YavarSidePanel {
     this.btnWorkStopPill.addEventListener('click', () => this.stopRepoAgent());
     this.sidebarBtnScreenshot.addEventListener('click', () => this.captureScreenshot());
     this.sidebarBtnNewChat.addEventListener('click', () => this.openNewChat());
-    this.sidebarBtnCarryOver?.addEventListener('click', () => this.carryOverToNewChat());
-    document.getElementById('sidebar-btn-run')?.addEventListener('click', () => this.openRunPanel());
+    document.getElementById('btn-carry-over')?.addEventListener('click', () => {
+      this.hideModelSwitcher();
+      this.carryOverToNewChat();
+    });
     this.rebuildPanel = document.getElementById('rebuild-panel');
     this.rebuildBody = document.getElementById('rebuild-body');
     document.getElementById('rebuild-close')?.addEventListener('click', () => this.rebuildPanel.classList.add('hidden'));
@@ -355,7 +366,6 @@ class YavarSidePanel {
       if (e.key === 'Escape') this.rebuildPanel.classList.add('hidden');
     });
     this.rebuildBody?.addEventListener('click', (e) => this.onRebuildClick(e));
-    document.getElementById('sidebar-btn-local')?.addEventListener('click', () => this.openLocalFolder({ reuse: true }));
     document.getElementById('btn-open-folder')?.addEventListener('click', () => this.openLocalFolder());
     this.filesTree?.addEventListener('click', (e) => {
       if (e.target.closest('[data-open-folder]')) this.openLocalFolder({ reuse: true });
@@ -381,9 +391,8 @@ class YavarSidePanel {
       if (!this.modelSwitcher.contains(e.target) && !this.sidebarBtnModelSwitcher.contains(e.target)) {
         this.hideModelSwitcher();
       }
-      if (!this.lensPicker.contains(e.target) && !this.sidebarBtnRepoAgent.contains(e.target)) {
-        this.lensPicker.classList.add('hidden');
-      }
+      if (!this.lensPicker.contains(e.target)) this.lensPicker.classList.add('hidden');
+      if (!this.toolMenu?.contains(e.target)) this.toolMenu?.classList.add('hidden');
     });
 
     // Close settings
@@ -496,12 +505,14 @@ class YavarSidePanel {
     this._chatQueue = [];
     queued.forEach(p => this.aiFrame?.contentWindow?.postMessage(p, '*'));
     this.sendTemplatesToFrame();
+    this.sendContextToFrame();
   }
 
   // The chat frame is (re)loading: queue until its new bridge is ready, and
   // drop requests that only made sense for the old page.
   chatNavigating() {
     this._bridgeReady = false;
+    if (this._inChatBarShown) { this._inChatBarShown = false; this.applyDockVisibility(); }
     this._frameReady = false;
     this.cancelChatRequests();
     this._chatQueue = (this._chatQueue || [])
@@ -1763,14 +1774,14 @@ Begin: state a one-line plan, then issue your first tool call.`;
     const gh = parseGitHubUrl(url);
     const isRepo = !!gh;
 
-    // The whole dock shows on any usable page; individual tabs are contextual.
-    if (this.filesRailGroup) this.filesRailGroup.classList.toggle('hidden', !usable);
+    this._tabCtx = { usable, gh, url };
+    // The whole dock shows on any usable page (unless the same buttons are
+    // already in the chat's own bar); individual tabs are contextual.
+    this.applyDockVisibility();
     if (!usable && this.filesPanel) this.filesPanel.classList.add('hidden');
 
     // Page-level tabs (any usable page)
     this.dockAddPage?.classList.toggle('hidden', !usable);
-    this.dockResearchPage?.classList.toggle('hidden', !usable);
-    this.dockVideoResearch?.classList.toggle('hidden', !usable);
 
     // On a YouTube watch page, "Add page" becomes "Add video" (grab transcript)
     const isYouTubeWatch = /:\/\/(www\.)?youtube\.com\/watch\?/i.test(url) || /:\/\/youtu\.be\//i.test(url);
@@ -1808,7 +1819,107 @@ Begin: state a one-line plan, then issue your first tool call.`;
     }
 
     this.markFirstDockTab();
+    this.sendContextToFrame();
     if (isRepo) this.maybeShowReaderTip();
+  }
+
+  // The left dock is the fallback for chats without Yavar's in-chat bar
+  // (custom models, in-chat buttons turned off, a site layout we can't read).
+  applyDockVisibility() {
+    const usable = !!this._tabCtx?.usable;
+    this.filesRailGroup?.classList.toggle('hidden', !usable || !!this._inChatBarShown);
+  }
+
+  // Buttons for the chat's own bar, matching the page open in the tab
+  chatContext() {
+    const { usable, gh } = this._tabCtx || {};
+    const video = !!this._addPageIsVideo;
+    const chips = [];
+    if (gh?.kind === 'blob' && gh.rest.length > 1) {
+      chips.push({ id: 'add_file', label: '+ ' + gh.rest[gh.rest.length - 1], title: 'Add the file open in your GitHub tab' });
+    }
+    if (gh?.kind === 'pull' || gh?.kind === 'commit') {
+      chips.push({ id: 'explain_diff', label: gh.kind === 'pull' ? '⇄ Explain PR' : '⇄ Explain commit', title: 'Explain the change open in your tab' });
+    }
+    if (gh) chips.push({ id: 'reader', label: '📚 Repo', title: 'Repo Reader: pick files to read with the AI' });
+    else if (usable) chips.push({ id: 'add_page', label: video ? '🎬 Video' : '📄 Page', title: video ? "Add this video's transcript" : "Add this page's text" });
+
+    const more = [];
+    if (gh && usable) more.push({ id: 'add_page', label: '📄 Add this page' });
+    if (gh) more.push({ id: 'deep_dive', label: '🧭 Deep-dive this repo' });
+    if (usable) more.push({ id: 'research_page', label: '🔎 Research this page' });
+    more.push(
+      { id: 'research_web', label: '🌐 Research the web' },
+      { id: 'videos', label: '🎬 Search videos' },
+      { id: 'local', label: '📁 Read a local folder' },
+      { id: 'run', label: '▶ Code playground' },
+      { id: 'carry_over', label: '🧳 Continue in a fresh chat' }
+    );
+    return { chips, more };
+  }
+
+  sendContextToFrame() {
+    this.postToChat({ action: 'YAVAR_CONTEXT', ...this.chatContext() });
+  }
+
+  // Sidebar menus: grouped tools instead of one button each
+  toolMenuItems(kind) {
+    const { usable, gh } = this._tabCtx || {};
+    const repo = gh ? `${gh.owner}/${gh.repo}` : '';
+    if (kind === 'agents') {
+      return [
+        { id: 'deep_dive', icon: '🧭', name: 'Deep-dive this repo', desc: repo || 'Open a GitHub repo in your tab', disabled: !gh },
+        { id: 'research_web', icon: '🌐', name: 'Research the web', desc: 'Searches, reads sources, cites them' },
+        { id: 'research_page', icon: '🔎', name: 'Research this page', desc: usable ? 'Dig deeper into the open page' : 'Open a web page in your tab', disabled: !usable },
+        { id: 'videos', icon: '🎬', name: 'Search videos', desc: 'Top YouTube videos on a topic, summarized' }
+      ];
+    }
+    return [
+      { id: 'reader', icon: '📚', name: 'Read this repo', desc: repo || 'Open a GitHub repo in your tab', disabled: !gh },
+      { id: 'local', icon: '📁', name: 'Read a local folder', desc: 'A project on this computer' },
+      { id: 'run', icon: '▶️', name: 'Code playground', desc: 'Run Python or JavaScript' }
+    ];
+  }
+
+  toggleToolMenu(kind, anchor) {
+    const menu = this.toolMenu;
+    if (!menu) return;
+    if (!menu.classList.contains('hidden') && menu.dataset.kind === kind) {
+      menu.classList.add('hidden');
+      return;
+    }
+    this.hideModelSwitcher();
+    this.lensPicker.classList.add('hidden');
+    menu.dataset.kind = kind;
+    document.getElementById('tool-menu-title').textContent = kind === 'agents' ? 'Agents' : 'Code';
+    document.getElementById('tool-menu-list').innerHTML = this.toolMenuItems(kind).map(t =>
+      `<button type="button" role="menuitem" class="lens-item${t.disabled ? ' is-disabled' : ''}" data-tool="${t.id}"${t.disabled ? ' disabled' : ''}>` +
+      `<span class="lens-emoji">${t.icon}</span><span class="lens-text"><span class="lens-name">${t.name}</span>` +
+      `<span class="lens-desc">${this.escapeHtml(t.desc)}</span></span></button>`).join('');
+    menu.classList.remove('hidden');
+    // Beside the button, kept on screen
+    const r = anchor.getBoundingClientRect();
+    menu.style.right = (window.innerWidth - r.left + 8) + 'px';
+    menu.style.top = Math.max(8, Math.min(r.top - 8, window.innerHeight - menu.offsetHeight - 8)) + 'px';
+    menu.querySelector('button:not([disabled])')?.focus();
+  }
+
+  // One place for every tool, whether opened from the sidebar or the chat
+  runTool(id) {
+    const tools = {
+      reader: () => this.toggleFilesPanel(true),
+      add_page: () => (this._addPageIsVideo ? this.addVideoToChat() : this.addPageToChat()),
+      add_file: () => this.quickAddActiveFile(),
+      explain_diff: () => this.explainActiveDiff(),
+      deep_dive: () => this.lensPicker.classList.remove('hidden'),
+      research_web: () => this.startResearchAgent(),
+      research_page: () => this.researchThisPage(),
+      videos: () => this.researchVideosOnTopic(),
+      local: () => this.openLocalFolder({ reuse: true }),
+      run: () => this.openRunPanel(),
+      carry_over: () => this.carryOverToNewChat()
+    };
+    tools[id]?.();
   }
 
   // First visit to a repo: slide the dock out briefly and explain the reader
@@ -1819,8 +1930,9 @@ Begin: state a one-line plan, then issue your first tool call.`;
       if ((await chrome.storage.local.get('readerTipShown')).readerTipShown) return;
       await chrome.storage.local.set({ readerTipShown: true });
     } catch (e) { return; }
-    this.filesRailGroup?.classList.add('peek');
-    this.showNotification('📚 Tip: "Read repo" on the left edge sends several files to the AI in one message');
+    const where = this._inChatBarShown ? '"📚 Repo" above the message box' : '"Read repo" on the left edge';
+    if (!this._inChatBarShown) this.filesRailGroup?.classList.add('peek');
+    this.showNotification(`📚 Tip: ${where} sends several files to the AI in one message`);
     setTimeout(() => this.filesRailGroup?.classList.remove('peek'), 5000);
   }
 
@@ -3664,7 +3776,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
         this.showNotification('⚠️ ' + msg);
       }
 
-      if (/^YAVAR_(TO_NOTES|COPY|TEMPLATE|OPEN)$/.test(data.action || '')) {
+      if (/^(YAVAR_(TO_NOTES|COPY|TEMPLATE|OPEN)|INCHAT_BAR)$/.test(data.action || '')) {
         this.handleInChatAction(data);
         return;
       }
@@ -4333,10 +4445,10 @@ Begin: state a one-line plan, then issue your first tool call.`;
     } else if (data.action === 'YAVAR_TEMPLATE') {
       this.applyTemplateFromChat(data.id, data.inputText);
     } else if (data.action === 'YAVAR_OPEN') {
-      if (data.what === 'reader') this.toggleFilesPanel(true);
-      else if (data.what === 'add_page') this._addPageIsVideo ? this.addVideoToChat() : this.addPageToChat();
-      else if (data.what === 'run') this.openRunPanel();
-      else if (data.what === 'carry_over') this.carryOverToNewChat();
+      this.runTool(String(data.what || ''));
+    } else if (data.action === 'INCHAT_BAR') {
+      this._inChatBarShown = !!data.visible;
+      this.applyDockVisibility();
     }
   }
 
