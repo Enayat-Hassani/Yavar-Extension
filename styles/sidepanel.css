@@ -2176,3 +2176,7 @@ button.lens-item:focus-visible {
   .answer-card.is-writing .answer-body > p:last-child::after,
   .answer-card.is-writing .answer-body > :is(ul, ol):last-child > li:last-child::after { animation: none; }
 }
+
+/* One-tap actions for what's attached: they arrive one after another */
+.composer-mode { animation: msgIn 0.26s var(--ease-out) both; animation-delay: calc(var(--i, 0) * 40ms); }
+@media (prefers-reduced-motion: reduce) { .composer-mode { animation: none; } }
