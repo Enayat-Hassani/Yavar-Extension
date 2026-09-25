@@ -5,7 +5,7 @@ import { isPublicWebUrl } from './utils/net.js';
 import {
   parseGitHubUrl, refCandidates, rawFileUrl, isReadablePath, estimateTokens, formatCount, formatBytes,
   langFromPath, sliceLines, extractImports, resolveImports, suggestStartFiles, buildPack, readingPrompt, READ_MODES,
-  parseCommitsAtom, commitsFromApi, timeAgo, folderReadme, readmeSnippet
+  parseCommitsAtom, commitsFromApi, timeAgo, folderReadme, readmeSnippet, LOCAL_SKIP_DIRS, isSecretPath
 } from './utils/github.js';
 
 class YavarSidePanel {
@@ -257,6 +257,7 @@ class YavarSidePanel {
       this.refreshSelectionUi();
     });
     this.dockExplainDiff?.addEventListener('click', () => this.explainActiveDiff());
+    document.getElementById('files-add-imports')?.addEventListener('click', () => this.addImportsOfSelection());
     this.filesPanel?.querySelector('.files-tabs')?.addEventListener('click', (e) => {
       const view = e.target.closest('[data-view]')?.dataset.view;
       if (view) this.setFilesView(view);
@@ -289,6 +290,11 @@ class YavarSidePanel {
     this.sidebarBtnNewChat.addEventListener('click', () => this.openNewChat());
     this.sidebarBtnCarryOver?.addEventListener('click', () => this.carryOverToNewChat());
     document.getElementById('sidebar-btn-run')?.addEventListener('click', () => this.openRunPanel());
+    document.getElementById('sidebar-btn-local')?.addEventListener('click', () => this.openLocalFolder({ reuse: true }));
+    document.getElementById('btn-open-folder')?.addEventListener('click', () => this.openLocalFolder());
+    this.filesTree?.addEventListener('click', (e) => {
+      if (e.target.closest('[data-open-folder]')) this.openLocalFolder({ reuse: true });
+    });
     document.getElementById('run-close')?.addEventListener('click', () => this.closeRunPanel());
     this.runGo?.addEventListener('click', () => this.runCode());
     this.runStop?.addEventListener('click', () => this.stopCode());
@@ -2148,7 +2154,23 @@ Begin: state a one-line plan, then issue your first tool call.`;
 
   // ----- Read marks: files you've already sent, per repo -----
   readMarksKey() {
-    return this.repoTree ? `readMarks:${this.repoTree.owner}/${this.repoTree.repo}` : null;
+    if (!this.repoTree) return null;
+    return this.repoTree.source === 'local'
+      ? `readMarks:local/${this.repoTree.repo}`
+      : `readMarks:${this.repoTree.owner}/${this.repoTree.repo}`;
+  }
+
+  // "owner/repo" for GitHub, the folder name for a local folder
+  repoDisplayName() {
+    const t = this.repoTree;
+    return !t ? '' : t.owner ? `${t.owner}/${t.repo}` : t.repo;
+  }
+
+  // Read a file from whichever source the reader is showing
+  async readRepoFile(path, maxChars = 2000000) {
+    const t = this.repoTree;
+    if (t.source === 'local') return this.readLocalFile(path, maxChars);
+    return this.fetchRepoFile(t.owner, t.repo, path, t.ref, maxChars);
   }
 
   async loadReadMarks() {
@@ -2191,23 +2213,28 @@ Begin: state a one-line plan, then issue your first tool call.`;
     this.renderFilesActionBar();
   }
 
+  async loadReadMode() {
+    if (this.readMode != null) return;
+    try { this.readMode = (await chrome.storage.local.get('yavarReadMode')).yavarReadMode || 'explain'; }
+    catch (e) { this.readMode = 'explain'; }
+  }
+
   async toggleFilesPanel(forceOpen = false) {
     if (!forceOpen && !this.filesPanel.classList.contains('hidden')) {
       this.filesPanel.classList.add('hidden');
       return;
     }
-    if (this.readMode == null) {
-      try { this.readMode = (await chrome.storage.local.get('yavarReadMode')).yavarReadMode || 'explain'; }
-      catch (e) { this.readMode = 'explain'; }
-    }
+    await this.loadReadMode();
     this.filesPanel.classList.remove('hidden');
+    this.filesPanel.classList.remove('is-local');
     this.filesSearch.value = '';
     this.setFilesView('files', false);
     this.filesTree.innerHTML = '<div class="files-empty"><span class="files-spinner"></span>Loading the repo…</div>';
     try {
       const ok = await this.ensureRepoTree();
       if (!ok) {
-        this.filesTree.innerHTML = '<div class="files-empty">Open a GitHub repository in this tab, then reopen the reader.</div>';
+        this.filesTree.innerHTML = '<div class="files-empty">Open a GitHub repository in this tab, then reopen the reader.<br><br>' +
+          '<button type="button" class="files-chip-btn primary" data-open-folder="1">Or read a folder on this computer</button></div>';
         return;
       }
       this.renderFilesTree();
@@ -2218,6 +2245,10 @@ Begin: state a one-line plan, then issue your first tool call.`;
   }
 
   async refreshFiles() {
+    if (this.repoTree?.source === 'local') {
+      await this.openLocalFolder({ reuse: true });
+      return;
+    }
     if (this.repoTree) {
       const key = `tree:${this.repoTree.owner}/${this.repoTree.repo}@${this.repoTree.ref}`;
       this._treeCache?.delete(key);
@@ -2257,8 +2288,9 @@ Begin: state a one-line plan, then issue your first tool call.`;
     }
     const { owner, repo, ref, truncated } = this.repoTree;
     if (this.filesRepoChip) {
-      this.filesRepoChip.textContent = `${owner}/${repo} · ${this.refLabel(ref)}`;
-      this.filesRepoChip.title = `${owner}/${repo} @ ${ref}`;
+      const local = this.repoTree.source === 'local';
+      this.filesRepoChip.textContent = local ? `${repo} · folder on this computer` : `${owner}/${repo} · ${this.refLabel(ref)}`;
+      this.filesRepoChip.title = local ? repo : `${owner}/${repo} @ ${ref}`;
     }
 
     // The file open in the GitHub tab: one-click read in the current mode
@@ -2286,7 +2318,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
 
     // What the repo is, from its README
     const rootReadme = folderReadme('', this.repoTree.fileSet);
-    if (rootReadme) this.filesTree.appendChild(this.readmeBox(rootReadme, 'About this repo'));
+    if (rootReadme) this.filesTree.appendChild(this.readmeBox(rootReadme, this.repoTree.source === 'local' ? 'About this project' : 'About this repo'));
 
     // Suggested reading order for newcomers
     const starts = suggestStartFiles([...this.repoTree.fileSet]);
@@ -2450,6 +2482,179 @@ Begin: state a one-line plan, then issue your first tool call.`;
     }
   }
 
+  // ----- Local folders -----
+  // Read a project folder from this computer with the same reader: packs,
+  // modes, imports, READMEs. Nothing is uploaded except what you send.
+
+  async openLocalFolder({ reuse = false } = {}) {
+    let tree;
+    try {
+      if (window.showDirectoryPicker) {
+        let handle = reuse ? await this.idbGet('lastFolder') : null;
+        if (handle) {
+          const perm = await handle.queryPermission({ mode: 'read' });
+          if (perm !== 'granted' && (await handle.requestPermission({ mode: 'read' })) !== 'granted') handle = null;
+        }
+        if (!handle) handle = await window.showDirectoryPicker({ id: 'yavar-reader', mode: 'read' });
+        this.idbSet('lastFolder', handle);
+        await this.loadReadMode();
+        this.showLocalLoading(handle.name);
+        tree = await this.scanDirectoryHandle(handle);
+      } else {
+        const files = await this.pickFolderViaInput();
+        if (!files) return;
+        await this.loadReadMode();
+        tree = this.treeFromFileList(files);
+      }
+    } catch (e) {
+      if (e?.name === 'AbortError') return; // picker cancelled
+      this.showNotification('⚠️ Could not open the folder: ' + e.message);
+      return;
+    }
+    if (!tree.items.length) {
+      this.showNotification('⚠️ No readable files found in that folder');
+      return;
+    }
+
+    const blobs = tree.items.filter(i => i.type === 'blob');
+    this.repoTree = {
+      source: 'local', owner: '', repo: tree.name, ref: '', truncated: tree.truncated,
+      items: tree.items,
+      fileSet: new Set(blobs.map(i => i.path)),
+      sizes: new Map(blobs.map(i => [i.path, i.size])),
+      root: this.buildFileTree(tree.items)
+    };
+    this.localFiles = tree.files;
+    this.activeRepoFile = null;
+    this.selectedFiles = new Set();
+    this._readmeCache?.clear();
+    await this.loadReadMarks();
+
+    this.filesPanel.classList.remove('hidden');
+    this.filesPanel.classList.add('is-local');
+    this.filesSearch.value = '';
+    this.setFilesView('files', false);
+    this.renderFilesTree();
+    this.filesSearch.focus();
+    this.showNotification(`📂 Opened ${tree.name} (${blobs.length} files${tree.truncated ? ', list trimmed' : ''})`);
+  }
+
+  showLocalLoading(name) {
+    this.filesPanel.classList.remove('hidden');
+    this.filesPanel.classList.add('is-local');
+    this.filesTree.innerHTML = `<div class="files-empty"><span class="files-spinner"></span>Reading ${this.escapeHtml(name)}…</div>`;
+  }
+
+  // Walk a directory handle, skipping heavy/generated folders and secrets
+  async scanDirectoryHandle(root, limit = 8000) {
+    const items = [];
+    const files = new Map();
+    let truncated = false;
+    const queue = [[root, '']];
+    while (queue.length) {
+      const [dir, prefix] = queue.shift();
+      for await (const [name, handle] of dir.entries()) {
+        if (items.length >= limit) { truncated = true; break; }
+        const path = prefix + name;
+        if (handle.kind === 'directory') {
+          if (LOCAL_SKIP_DIRS.has(name)) continue;
+          items.push({ path, type: 'tree' });
+          queue.push([handle, path + '/']);
+        } else if (!isSecretPath(path)) {
+          let size = null;
+          if (isReadablePath(path)) {
+            try { size = (await handle.getFile()).size; } catch (e) { /* unreadable */ }
+          }
+          items.push({ path, type: 'blob', size });
+          files.set(path, handle);
+        }
+      }
+      if (truncated) break;
+    }
+    return { name: root.name, items, files, truncated };
+  }
+
+  // Fallback for browsers without showDirectoryPicker
+  pickFolderViaInput() {
+    return new Promise((resolve) => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.webkitdirectory = true;
+      input.multiple = true;
+      input.addEventListener('change', () => resolve(input.files?.length ? [...input.files] : null), { once: true });
+      input.addEventListener('cancel', () => resolve(null), { once: true });
+      input.click();
+    });
+  }
+
+  treeFromFileList(fileList, limit = 8000) {
+    const items = [];
+    const files = new Map();
+    const dirs = new Set();
+    let name = '';
+    let truncated = false;
+    for (const f of fileList) {
+      const parts = (f.webkitRelativePath || f.name).split('/');
+      name = name || parts[0];
+      const rel = parts.slice(1);
+      if (!rel.length || rel.slice(0, -1).some(d => LOCAL_SKIP_DIRS.has(d))) continue;
+      const path = rel.join('/');
+      if (isSecretPath(path)) continue;
+      if (items.length >= limit) { truncated = true; break; }
+      for (let i = 1; i < rel.length; i++) {
+        const d = rel.slice(0, i).join('/');
+        if (!dirs.has(d)) { dirs.add(d); items.push({ path: d, type: 'tree' }); }
+      }
+      items.push({ path, type: 'blob', size: f.size });
+      files.set(path, f);
+    }
+    return { name: name || 'folder', items, files, truncated };
+  }
+
+  async readLocalFile(path, maxChars) {
+    const entry = this.localFiles?.get(path);
+    if (!entry) throw new Error('file not found');
+    let file;
+    try {
+      file = entry.getFile ? await entry.getFile() : entry;
+    } catch (e) {
+      throw new Error('the folder changed or permission was lost, reopen it');
+    }
+    if (file.size > 5 * 1024 * 1024) throw new Error('file is over 5 MB');
+    let text = await file.text();
+    if (text.length > maxChars) text = text.slice(0, maxChars) + `\n\n… [truncated, full file is ${text.length} chars]`;
+    return text;
+  }
+
+  // Tiny IndexedDB key/value store (directory handles can't go in chrome.storage)
+  idb() {
+    this._idb = this._idb || new Promise((resolve, reject) => {
+      const req = indexedDB.open('yavar', 1);
+      req.onupgradeneeded = () => req.result.createObjectStore('kv');
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    return this._idb;
+  }
+
+  async idbGet(key) {
+    try {
+      const db = await this.idb();
+      return await new Promise((resolve) => {
+        const req = db.transaction('kv').objectStore('kv').get(key);
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => resolve(null);
+      });
+    } catch (e) { return null; }
+  }
+
+  async idbSet(key, value) {
+    try {
+      const db = await this.idb();
+      db.transaction('kv', 'readwrite').objectStore('kv').put(value, key);
+    } catch (e) { /* not critical */ }
+  }
+
   // A small preview card for a README: first paragraph, plus one-click actions.
   readmeBox(path, label) {
     const box = document.createElement('div');
@@ -2475,11 +2680,11 @@ Begin: state a one-line plan, then issue your first tool call.`;
   }
 
   async readmeSnippetFor(path) {
-    const { owner, repo, ref } = this.repoTree;
-    const key = `${owner}/${repo}@${ref}:${path}`;
+    const { owner, repo, ref, source } = this.repoTree;
+    const key = `${source || 'github'}:${owner}/${repo}@${ref}:${path}`;
     this._readmeCache = this._readmeCache || new Map();
     if (!this._readmeCache.has(key)) {
-      this._readmeCache.set(key, this.fetchRepoFile(owner, repo, path, ref, 20000)
+      this._readmeCache.set(key, this.readRepoFile(path, 20000)
         .then(md => readmeSnippet(md))
         .catch(() => ''));
     }
@@ -2608,8 +2813,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
   async selectWithImports(path) {
     this.showNotification('🔗 Finding the files it imports…');
     try {
-      const { owner, repo, ref } = this.repoTree;
-      const content = await this.fetchRepoFile(owner, repo, path, ref, 400000);
+      const content = await this.readRepoFile(path, 400000);
       const found = resolveImports(extractImports(content, path), path, this.repoTree.fileSet).filter(isReadablePath);
       this.selectedFiles.add(path);
       found.forEach(p => this.selectedFiles.add(p));
@@ -2620,6 +2824,24 @@ Begin: state a one-line plan, then issue your first tool call.`;
     } catch (e) {
       this.showNotification('⚠️ ' + e.message);
     }
+  }
+
+  // Add the in-repo imports of every selected file (one level deep)
+  async addImportsOfSelection() {
+    const sources = [...this.selectedFiles];
+    if (!sources.length) return;
+    this.showNotification('🔗 Finding imports…');
+    const before = this.selectedFiles.size;
+    const files = await this.fetchRepoFilesMany(sources);
+    for (const f of files) {
+      if (f.error) continue;
+      resolveImports(extractImports(f.content, f.path), f.path, this.repoTree.fileSet)
+        .filter(isReadablePath)
+        .forEach(p => this.selectedFiles.add(p));
+    }
+    const added = this.selectedFiles.size - before;
+    this.refreshSelectionUi();
+    this.showNotification(added ? `🔗 Added ${added} imported file${added === 1 ? '' : 's'}` : '🔗 No more in-repo imports found');
   }
 
   // Update checkmarks in place (keeps folders expanded and scroll position)
@@ -2680,14 +2902,13 @@ Begin: state a one-line plan, then issue your first tool call.`;
 
   // Fetch with a small concurrency limit (be gentle to GitHub and the browser)
   async fetchRepoFilesMany(paths) {
-    const { owner, repo, ref } = this.repoTree;
     const out = new Array(paths.length);
     let next = 0;
     const worker = async () => {
       while (next < paths.length) {
         const i = next++;
         try {
-          out[i] = { path: paths[i], content: await this.fetchRepoFile(owner, repo, paths[i], ref, 2000000) };
+          out[i] = { path: paths[i], content: await this.readRepoFile(paths[i], 2000000) };
         } catch (e) {
           out[i] = { path: paths[i], error: e.message };
         }
@@ -2702,8 +2923,8 @@ Begin: state a one-line plan, then issue your first tool call.`;
     if (this._sendingFiles) return;
     this._sendingFiles = true;
     if (this.filesSend) this.filesSend.disabled = true;
-    const { owner, repo, ref } = this.repoTree;
-    const repoName = `${owner}/${repo}`;
+    const { owner, repo, ref, source } = this.repoTree;
+    const repoName = this.repoDisplayName();
     this.showNotification(`📄 Reading ${paths.length === 1 ? paths[0].split('/').pop() : paths.length + ' files'}…`);
 
     try {
@@ -2731,7 +2952,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
         this.forwardToIframe({ prompt: question ? `${block}\n\n${question}` : block, autoSubmit: false });
       } else {
         // Several (or big) files: ONE attachment with a repo map, then the question
-        const pack = buildPack({ owner, repo, ref: this.refLabel(ref), files, treePaths: [...this.repoTree.fileSet] });
+        const pack = buildPack({ owner, repo, ref: source === 'local' ? '' : this.refLabel(ref), files, treePaths: [...this.repoTree.fileSet] });
         const fname = single
           ? single.path.split('/').pop() + '.md'
           : `${repo}-${files.length}-files.md`.replace(/[^\w.-]+/g, '-');
