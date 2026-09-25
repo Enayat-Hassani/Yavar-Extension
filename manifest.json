@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Yavar - Your AI Sidekick",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "description": "Your AI sidekick for ChatGPT, Gemini, and Claude. Smart code explanation, screenshot capture, and guided study mode.",
   "icons": {
     "16": "icons/icon16.png",
@@ -23,7 +23,6 @@
     "https://chat.openai.com/*",
     "https://gemini.google.com/*",
     "https://claude.ai/*",
-    "https://www.bing.com/chat/*",
     "<all_urls>"
   ],
   "background": {
@@ -60,15 +59,6 @@
       "all_frames": true
     }
   ],
-  "declarative_net_request": {
-    "rule_resources": [
-      {
-        "id": "csp_bypass_rules",
-        "enabled": true,
-        "path": "rules/csp-bypass.json"
-      }
-    ]
-  },
   "commands": {
     "toggle-sidebar": {
       "suggested_key": {
@@ -99,11 +89,5 @@
       "description": "Toggle Notes Panel"
     }
   },
-  "options_page": "options.html",
-  "web_accessible_resources": [
-    {
-      "resources": ["src/styles/*.css", "icons/*.png", "src/utils/templates.js"],
-      "matches": ["<all_urls>"]
-    }
-  ]
+  "options_page": "options.html"
 }

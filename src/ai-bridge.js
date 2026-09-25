@@ -39,6 +39,22 @@
   // Present while a response is still streaming (used to warn about partial captures)
   const STOP_SELECTORS = 'button[data-testid="stop-button"], button[aria-label*="Stop generating" i], button[aria-label*="Stop response" i], button[aria-label="Stop"]';
 
+  // Only the Yavar side panel may drive this bridge. The chat sites can be
+  // framed by other pages too, and without this check any website could send
+  // prompts into the user's logged-in chat and read the answers back.
+  const EXTENSION_ORIGIN = (() => {
+    try { return new URL(chrome.runtime.getURL('')).origin; } catch (e) { return null; }
+  })();
+
+  function isFromYavar(event) {
+    return !!EXTENSION_ORIGIN && event.origin === EXTENSION_ORIGIN && event.source === window.parent;
+  }
+
+  function postToYavar(message) {
+    if (!EXTENSION_ORIGIN || window.parent === window) return;
+    window.parent.postMessage(message, EXTENSION_ORIGIN);
+  }
+
   function detectPlatform() {
     const host = window.location.hostname;
     if (host.includes('chatgpt.com') || host.includes('chat.openai.com')) return 'chatgpt';
@@ -140,7 +156,7 @@
     stopAnswerWatch();
     const platform = detectPlatform();
     if (!platform) {
-      try { window.parent.postMessage({ action: 'ANSWER_WATCH_FAILED', reason: 'unknown-platform', requestId }, '*'); } catch (e) {}
+      try { postToYavar({ action: 'ANSWER_WATCH_FAILED', reason: 'unknown-platform', requestId }); } catch (e) {}
       return;
     }
     watchRequestId = requestId;
@@ -164,9 +180,9 @@
       const rid = requestId;
       stopAnswerWatch();
       try {
-        window.parent.postMessage({
+        postToYavar({
           action: 'ANSWER_SETTLED', text, platform, url: window.location.href, requestId: rid
-        }, '*');
+        });
         console.log('[Yavar Bridge] ANSWER_SETTLED sent to parent');
       } catch (e) {
         console.warn('[Yavar Bridge] Failed to post settled answer:', e);
@@ -176,7 +192,7 @@
     const emit = (action) => {
       const rid = requestId;
       stopAnswerWatch();
-      try { window.parent.postMessage({ action, requestId: rid }, '*'); } catch (e) {}
+      try { postToYavar({ action, requestId: rid }); } catch (e) {}
     };
 
     watchInterval = setInterval(() => {
@@ -492,6 +508,8 @@
 
   // Listen for postMessage from sidepanel
   window.addEventListener('message', (event) => {
+    if (!isFromYavar(event)) return;
+
     if (event.data?.action === 'AUTO_SUBMIT_PROMPT' && event.data?.prompt) {
       console.log('[Yavar Bridge] Received AUTO_SUBMIT_PROMPT via postMessage (paste + submit)');
       handleAutoSubmit(event.data.prompt);
@@ -526,7 +544,7 @@
             requestId: event.data.requestId
           };
       try {
-        window.parent.postMessage(reply, '*');
+        postToYavar(reply);
         console.log('[Yavar Bridge] Sent', reply.action, 'to parent');
       } catch (e) {
         console.warn('[Yavar Bridge] Failed to post answer to parent:', e);

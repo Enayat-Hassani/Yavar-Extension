@@ -4,6 +4,15 @@
 import { ContextMenuHandler } from './utils/contextMenu.js';
 import { CommandHandler } from './utils/commands.js';
 import { MessageHandler } from './utils/messageHandler.js';
+import { syncFrameRules } from './utils/frameRules.js';
+
+// Session rules are cleared when the browser restarts, so register them on
+// every worker start (cheap and idempotent), and again when models change.
+syncFrameRules();
+chrome.runtime.onStartup.addListener(syncFrameRules);
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'sync' && changes.aiModels) syncFrameRules();
+});
 
 // Initialize on install
 chrome.runtime.onInstalled.addListener(async (details) => {
@@ -138,15 +147,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           });
         }
 
-        // Also try to notify sidepanel directly (if it's already open)
-        const payload = {
-          type: 'SCREENSHOT_CAPTURED',
-          imageData: dataUrl,
-          rect: message.rect
-        };
-        chrome.runtime.sendMessage(payload).catch((err) => {
-          console.log('[Yavar BG] Sidepanel not ready, will use storage fallback');
-        });
+        // An already-open panel picks this up via its storage listener
 
         sendResponse({ success: true });
       } catch (error) {
@@ -187,42 +188,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   
-  // Handle screenshot capture from content script
-  if (message.type === 'CAPTURE_SCREENSHOT') {
-    (async () => {
-      try {
-        // Get the tab where the request originated
-        const tab = sender.tab || await chrome.tabs.query({ active: true, currentWindow: true }).then(t => t[0]);
-
-        // Capture visible tab
-        const dataUrl = await chrome.tabs.captureVisibleTab(null, {
-          format: 'png',
-          quality: 90
-        });
-
-        // Store for sidebar to pick up
-        await chrome.storage.session.set({ pendingScreenshot: dataUrl });
-
-        // Notify sidebar if open
-        const views = chrome.extension.getViews({ type: 'panel' });
-        views.forEach(view => {
-          if (view.panel?.handleScreenshotCapture) {
-            view.panel.handleScreenshotCapture(dataUrl);
-          }
-        });
-
-        sendResponse({ success: true, imageData: dataUrl });
-      } catch (error) {
-        console.error('[Yavar] Screenshot capture failed:', error);
-        sendResponse({ success: false, error: error.message });
-      }
-    })();
-    return true;
-  }
-  
   // Let MessageHandler handle OTHER messages (not GitHub API)
   // Only call MessageHandler if message has a type we don't handle above
-  if (message.type && !['CAPTURE_SCREENSHOT'].includes(message.type)) {
+  if (message.type) {
     MessageHandler.handle(message, sender, sendResponse);
     return true;
   }
@@ -276,6 +244,11 @@ function injectAreaSelector() {
 
   function cleanup() {
     overlay.remove();
+    document.removeEventListener('keydown', escHandler, true);
+  }
+
+  function escHandler(e) {
+    if (e.key === 'Escape') cleanup();
   }
 
   overlay.addEventListener('mousedown', (e) => {
@@ -323,12 +296,7 @@ function injectAreaSelector() {
     chrome.runtime.sendMessage({ action: 'area_selected', rect });
   });
 
-  document.addEventListener('keydown', function escHandler(e) {
-    if (e.key === 'Escape') {
-      cleanup();
-      document.removeEventListener('keydown', escHandler);
-    }
-  });
+  document.addEventListener('keydown', escHandler, true);
 
   document.body.appendChild(overlay);
 }

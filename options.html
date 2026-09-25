@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="styles/options.css">
 </head>
 <body>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
   <div class="container">
     <header class="header">
       <h1>Yavar Settings</h1>
@@ -20,11 +21,11 @@
         <div class="setting-item">
           <label for="default-ai">Default AI:</label>
           <select id="default-ai">
+            <option value="gemini">Gemini</option>
             <option value="chatgpt">ChatGPT</option>
-            <option value="gemini">Google Gemini</option>
-            <option value="claude">Anthropic Claude</option>
+            <option value="claude">Claude</option>
           </select>
-          <p class="help-text">This AI will be loaded by default when you open the sidebar</p>
+          <p class="help-text">Loaded when you open the sidebar. Switching models in the sidebar updates this too.</p>
         </div>
       </section>
 
@@ -69,11 +70,8 @@
       <!-- Keyboard Shortcuts -->
       <section class="settings-section">
         <h2>Keyboard Shortcuts</h2>
-        <div class="shortcuts-info">
-          <h3>Global Shortcuts</h3>
-          <p><strong>Toggle Sidebar:</strong> <kbd>Ctrl</kbd> + <kbd>Space</kbd> (or <kbd>Cmd</kbd> + <kbd>Space</kbd> on Mac)</p>
-          <p><strong>Copy Selected Text:</strong> <kbd>Ctrl</kbd> + <kbd>H</kbd> (or <kbd>Cmd</kbd> + <kbd>H</kbd> on Mac)</p>
-          <p><strong>Capture Screenshot:</strong> <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>I</kbd> (or <kbd>Cmd</kbd> + <kbd>Shift</kbd> + <kbd>I</kbd> on Mac)</p>
+        <div class="shortcuts-info" id="shortcuts-list">
+          <!-- Filled from chrome.commands so it always shows your current bindings -->
         </div>
         <button id="configure-shortcuts-btn" class="btn-secondary">Change Shortcuts in Chrome</button>
       </section>
@@ -81,7 +79,7 @@
       <!-- Site-specific Settings -->
       <section class="settings-section">
         <h2>Site-Specific Settings</h2>
-        <p class="help-text">Disable the sidebar or floating menu on specific websites</p>
+        <p class="help-text">Turn off the floating text-selection menu on specific websites</p>
         
         <div class="disabled-sites-input">
           <input type="text" id="disabled-site" placeholder="Enter domain (e.g., github.com)">
@@ -99,9 +97,9 @@
         <p class="help-text">
           Reusable prompts. Placeholders get filled in when you run them:
           <code>{{selection}}</code>, <code>{{page}}</code>, <code>{{clipboard}}</code>,
-          <code>{{url}}</code>, <code>{{title}}</code>.
-          Turn on <strong>In menu</strong> to show a template as a button in the floating
-          text-selection menu.
+          <code>{{url}}</code>, <code>{{title}}</code>, <code>{{repo}}</code>.
+          Turn on <strong>In menu</strong> to pin a template as a button in the floating
+          text-selection menu; the rest are one click away under its <strong>⋯</strong> button.
         </p>
 
         <div id="templates-list" class="templates-list">
@@ -118,7 +116,7 @@
       <section class="settings-section">
         <h2>Data Management</h2>
         <div class="data-actions">
-          <button id="export-settings-btn" class="btn-secondary">Export Settings</button>
+          <button id="export-settings-btn" class="btn-secondary" title="Settings, prompt templates and custom models">Export Settings</button>
           <button id="import-settings-btn" class="btn-secondary">Import Settings</button>
           <button id="reset-settings-btn" class="btn-danger">Reset to Defaults</button>
         </div>
@@ -126,7 +124,7 @@
     </main>
 
     <footer class="footer">
-      <p>AI Sidebar v1.0.0</p>
+      <p>Yavar <span id="app-version"></span></p>
     </footer>
   </div>
 

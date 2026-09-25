@@ -37,13 +37,15 @@ export async function expandTemplate(body, ctx = {}) {
     },
   };
 
-  const used = new Set([...body.matchAll(/\{\{\s*(\w+)\s*\}\}/g)].map(m => m[1]));
-  let out = body;
-  for (const name of used) {
+  // Resolve every referenced value first, then substitute in ONE pass, so
+  // text inside a value (e.g. a selection containing "{{page}}") is never expanded.
+  const PLACEHOLDER = /\{\{\s*(\w+)\s*\}\}/g;
+  const values = {};
+  for (const name of new Set([...body.matchAll(PLACEHOLDER)].map(m => m[1]))) {
     const getter = getters[name];
-    const value = getter ? await getter() : '';
-    out = out.replace(new RegExp('\\{\\{\\s*' + name + '\\s*\\}\\}', 'g'), value);
+    values[name] = getter ? String(await getter() ?? '') : '';
   }
+  const out = body.replace(PLACEHOLDER, (_, name) => values[name]);
   return out.trim();
 }
 

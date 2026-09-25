@@ -12,7 +12,7 @@ A Chrome extension that embeds ChatGPT, Claude, and Gemini in a sidebar — so y
 - **Explain** — send it wrapped in a "Guided Learning" prompt.
 - **Summarize** — send it wrapped in a concise-summary prompt.
 
-Add, edit, or remove your own templates in Settings using `{{selection}}`, `{{page}}`, `{{clipboard}}`, `{{url}}`, and `{{title}}` placeholders, and choose which appear in the menu.
+Add, edit, or remove your own templates in Settings using `{{selection}}`, `{{page}}`, `{{clipboard}}`, `{{url}}`, `{{title}}`, and `{{repo}}` placeholders. Pin the ones you use most to the menu; the rest (e.g. **Improve writing**, **Translate**) sit behind its **⋯** button.
 
 **GitHub analysis** — on any GitHub repository, generate a structured learning prompt with the file tree and README context. Unauthenticated by default; optionally add a GitHub token in Settings to lift the 60 req/hr rate limit.
 
@@ -31,9 +31,11 @@ Add, edit, or remove your own templates in Settings using `{{selection}}`, `{{pa
 
 **Architecture diagrams** — generate a Mermaid **architecture diagram** of the current repository, rendered interactively in the sidebar.
 
-**History & saved answers** — capture the AI's last answer and keep it in a saved-answers history panel you can return to, copy, or clear.
+**History & saved answers** — capture the AI's last answer and keep it in a searchable saved-answers panel. Click an answer to expand it, copy it, send it to Notes, or **export everything as Markdown**.
 
-**Notes panel** — a built-in CodeMirror-powered scratchpad inside the sidebar, toggled with the notes shortcut.
+**Notes panel** — a built-in CodeMirror-powered scratchpad inside the sidebar, toggled with the notes shortcut. Download it as a `.md` file anytime.
+
+**Light & dark** — the sidebar and Settings follow your OS theme, matching the chat sites.
 
 **Auto-submit & auto-paste** — send selected text, or paste a screenshot, directly into ChatGPT, Claude, or Gemini.
 
@@ -85,14 +87,16 @@ Yavar-Extension/
 │   └── utils/
 │       ├── commands.js   # Keyboard shortcut handlers
 │       ├── templates.js  # Prompt templates (defaults + {{variable}} expansion)
+│       ├── frameRules.js # Lets the chat sites load in the sidebar (see below)
+│       ├── net.js        # URL guard for the research agent
 │       ├── messageHandler.js
 │       └── contextMenu.js
 ├── lib/
 │   ├── codemirror/       # CodeMirror (notes panel)
 │   └── mermaid/          # Mermaid (architecture diagrams)
 ├── styles/
-├── rules/
-│   └── csp-bypass.json   # Declarative Net Request rules (see below)
+├── tests/                # node:test unit tests
+├── scripts/              # ytx setup + check.mjs (static checks)
 ├── sidepanel.html
 ├── options.html
 └── manifest.json
@@ -103,7 +107,9 @@ Yavar-Extension/
 Yavar asks for broad permissions to do its job. Here's what they are and why:
 
 - **`<all_urls>`** — the floating text-selection menu needs to run on every page. This is the widest possible ask; you can review exactly what the content script does in `src/content.js`.
-- **Declarative Net Request (CSP bypass)** — to inject and auto-submit prompts on ChatGPT, Claude, and Gemini, the extension strips `Content-Security-Policy` and `X-Frame-Options` response headers **only on those chat sites** (see `rules/csp-bypass.json`). It does not touch any other site. This is required to iframe the AI frontends; know that it weakens those sites' own headers while Yavar is installed.
+- **Declarative Net Request (frame headers)** — ChatGPT, Claude, and Gemini send `X-Frame-Options` / `Content-Security-Policy` headers that stop them loading in an iframe. Yavar removes those headers **only for frames loaded by its own sidebar** (a session rule scoped to `tabIds: [-1]`, the ID Chrome gives requests that don't belong to a tab), and only for the chat sites plus any custom models you add. Your normal tabs keep the sites' full headers, and other websites can't use Yavar to frame your logged-in chats. See `src/utils/frameRules.js`.
+- **Talking to the chat frame** — the in-chat helper (`src/ai-bridge.js`) only accepts instructions from the Yavar sidebar's own origin and only sends answers back to it.
+- **Research agent** — pages the AI asks to READ are fetched without your cookies, and local or private-network addresses (localhost, `192.168.x.x`, cloud metadata, etc.) are refused, so text on a web page can't steer the agent into your LAN.
 
 ## Configuration
 
@@ -174,6 +180,13 @@ instead of the common `8000` to avoid clashing with other local servers.
 ## Development
 
 This is a vanilla JavaScript (MV3) extension with no bundler. Edit source files, then reload from `chrome://extensions/`.
+
+```bash
+npm test          # unit tests (node:test, no install needed)
+npm run check     # manifest + referenced files + syntax
+```
+
+CI runs both on every push and pull request.
 
 - **Content scripts:** Browser DevTools → Console
 - **Background worker:** `chrome://extensions/` → "Inspect views: background page"

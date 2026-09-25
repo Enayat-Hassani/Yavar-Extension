@@ -8,13 +8,13 @@ export const ContextMenuHandler = {
     // Create context menu items
     chrome.contextMenus.create({
       id: 'yavar-copy-selection',
-      title: 'Copy to Yavar',
+      title: 'Send selection to Yavar',
       contexts: ['selection']
     });
 
     chrome.contextMenus.create({
       id: 'yavar-copy-page',
-      title: 'Copy page content to Yavar',
+      title: 'Add this page to the Yavar chat',
       contexts: ['page']
     });
 
@@ -63,13 +63,11 @@ ${selectionText}
 \`\`\``;
 
       // Copy to clipboard via Yavar
-      await chrome.storage.session.set({
-        pendingText: prompt,
-        pendingNotification: '📋 Code copied! Press Cmd+V to paste into Yavar'
-      });
-
-      // Open Yavar sidebar
-      await chrome.sidePanel.open({ windowId: tab.windowId });
+      // Open first: sidePanel.open() must run before any await to keep the
+      // user gesture from the menu click.
+      const opening = chrome.sidePanel.open({ windowId: tab.windowId });
+      await chrome.storage.session.set({ pendingText: prompt });
+      await opening;
     } catch (error) {
       console.error('[Yavar] Explain code failed:', error);
     }
@@ -79,58 +77,35 @@ ${selectionText}
 
   async sendSelectionToYavar(text, tab) {
     try {
-      // Copy to clipboard
-      await navigator.clipboard.writeText(text);
-
-      // Store for Yavar
+      // The service worker has no clipboard access; the side panel pastes
+      // pendingText into the chat when it picks it up.
+      const opening = chrome.sidePanel.open({ windowId: tab.windowId });
       await chrome.storage.session.set({ pendingText: text });
-
-      // Open Yavar sidebar
-      await chrome.sidePanel.open({ windowId: tab.windowId });
+      await opening;
     } catch (error) {
       console.error('[Yavar] Failed to send selection:', error);
     }
   },
 
+  // The side panel's "Add page" flow extracts readable text and attaches long
+  // pages as a file, so hand off to it rather than pasting raw innerText.
   async copyPageToYavar(tab) {
     try {
-      // Execute script to extract page content
-      const result = await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        func: () => {
-          const article = document.querySelector('article');
-          if (article) return article.innerText;
-          const main = document.querySelector('main');
-          if (main) return main.innerText;
-          return document.body.innerText;
-        }
-      });
-
-
-      const content = result[0]?.result || '';
-
-      if (content) {
-        await chrome.storage.session.set({ pendingText: content });
-        await chrome.sidePanel.open({ windowId: tab.windowId });
-      }
+      const opening = chrome.sidePanel.open({ windowId: tab.windowId });
+      await chrome.storage.session.set({ pendingAction: 'add_page' });
+      await opening;
     } catch (error) {
-      console.error('[Yavar] Failed to copy page:', error);
+      console.error('[Yavar] Failed to send page:', error);
     }
   },
 
   async captureAndSend(tab) {
     try {
-      // Capture visible tab
-      const dataUrl = await chrome.tabs.captureVisibleTab(null, {
-        format: 'png',
-        quality: 90
-      });
-
-      // Store for Yavar
+      // Open first (needs the menu click's user gesture), then capture
+      const opening = chrome.sidePanel.open({ windowId: tab.windowId });
+      const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
       await chrome.storage.session.set({ pendingScreenshot: dataUrl });
-
-      // Open Yavar sidebar
-      await chrome.sidePanel.open({ windowId: tab.windowId });
+      await opening;
     } catch (error) {
       console.error('[Yavar] Screenshot capture failed:', error);
     }
