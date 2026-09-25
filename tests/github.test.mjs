@@ -122,3 +122,11 @@ test('finds folder READMEs and extracts a clean snippet', () => {
   assert.equal(readmeSnippet(md), 'A fast parser for toml.');
   assert.ok(readmeSnippet('word '.repeat(100), 50).endsWith('…'));
 });
+
+import { isSecretPath } from '../src/utils/github.js';
+
+test('local packs have no owner prefix; secrets are recognised', () => {
+  assert.match(buildPack({ owner: '', repo: 'my-app', files: [{ path: 'a.py', content: 'x' }] }), /^# my-app: 1 file/);
+  for (const p of ['.env', 'app/.env.local', 'certs/server.key', 'id_rsa', '.npmrc']) assert.ok(isSecretPath(p), p);
+  for (const p of ['env.py', 'src/keys.ts', 'README.md', '.env.example.md']) assert.ok(!isSecretPath(p), p);
+});

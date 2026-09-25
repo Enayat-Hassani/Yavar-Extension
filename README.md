@@ -41,6 +41,10 @@ Add, edit, or remove your own templates in Settings using `{{selection}}`, `{{pa
 - **DeepWiki / GitIngest links** open the repo in those free tools (an AI-written wiki, or the whole repo as one prompt-ready file).
 - **Barely touches the GitHub API:** file contents come from `raw.githubusercontent.com`, and the tree is one cached API call per repo, so the 60 requests/hour anonymous limit stops being a problem.
 
+**Local folders** — the same reader works on a project folder on your computer (the folder button in the reader, or in the sidebar): packs, reading modes, imports, README cards, read marks. `node_modules`, `.git`, build output and secret files (`.env`, keys) are never listed, and nothing leaves your machine except the files you choose to send. Reopening remembers the last folder.
+
+**Run code** — every Python or JavaScript block in an answer gets a **▶ Run** button. It runs locally in a sandbox (Python via bundled [Pyodide](https://pyodide.org), standard library only), shows the output, and offers *Ask AI to fix it*, *Explain the output* and *What should I try next?*. The sidebar's code button opens the same runner as a playground.
+
 **Explain PR / commit** — on a pull request or commit page, one click attaches the diff and asks the AI to explain the goal, each file's change, what to learn from it, and what's risky.
 
 **Architecture diagrams** — generate a Mermaid **architecture diagram** of the current repository, rendered interactively in the sidebar.

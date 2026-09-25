@@ -206,7 +206,8 @@
           <span id="files-repo-chip" class="files-repo-chip"></span>
         </div>
         <div class="files-header-actions">
-          <button id="btn-refresh-files" class="history-action-btn" title="Reload tree">⟳</button>
+          <button id="btn-open-folder" class="history-action-btn" title="Read a folder on this computer"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg></button>
+          <button id="btn-refresh-files" class="history-action-btn" title="Reload">⟳</button>
           <button id="btn-close-files" class="history-action-btn" title="Close (Esc)">✕</button>
         </div>
       </div>
@@ -228,6 +229,7 @@
         <div class="files-sel-info">
           <span id="files-sel-count" class="files-sel-count"></span>
           <span id="files-sel-tokens" class="files-sel-tokens"></span>
+          <button id="files-add-imports" class="files-link-btn files-imports-btn" type="button" title="Also select the repo files these import">+ Imports</button>
           <button id="files-clear" class="files-link-btn" type="button">Clear</button>
         </div>
         <div id="files-modes" class="files-modes" role="radiogroup" aria-label="What should the AI do?"></div>
@@ -535,6 +537,10 @@
           </button>
 
           <!-- Notes -->
+          <button class="sidebar-icon-btn" id="sidebar-btn-local" title="Read a project folder on this computer">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg>
+          </button>
+
           <button class="sidebar-icon-btn" id="sidebar-btn-run" title="Code playground: run Python or JavaScript">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
               <polyline points="8 7 3 12 8 17"></polyline><polyline points="16 7 21 12 16 17"></polyline><path d="M11 16l2-8"></path>

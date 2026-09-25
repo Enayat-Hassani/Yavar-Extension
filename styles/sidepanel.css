@@ -2023,6 +2023,10 @@ div.toggle-switch.active::after {
 
 .files-link-btn:hover { color: var(--danger); }
 
+.files-imports-btn { color: var(--accent); }
+.files-imports-btn:hover { color: var(--accent); text-decoration: underline; }
+.files-imports-btn + .files-link-btn { margin-left: 12px; }
+
 .files-modes {
   display: flex;
   flex-wrap: wrap;
@@ -2512,3 +2516,8 @@ div.toggle-switch.active::after {
 
 .run-followups.hidden,
 .run-followups .hidden { display: none; }
+
+/* Local folder mode: no GitHub-only features */
+.files-panel.is-local .files-tabs,
+.files-panel.is-local .files-links { display: none; }
+.files-panel.is-local .files-toolbar { padding-top: 0; }

@@ -302,7 +302,8 @@ export function outlineTree(paths, selected, maxLines = 120) {
 // One Markdown document holding several files, so a single chat message (and
 // a single attachment) carries them all.
 export function buildPack({ owner, repo, ref, files, treePaths = [] }) {
-  const head = `# ${owner}/${repo}${ref ? ' @ ' + ref : ''}: ${files.length} file${files.length === 1 ? '' : 's'}\n`;
+  const name = owner ? `${owner}/${repo}` : repo;   // local folders have no owner
+  const head = `# ${name}${ref ? ' @ ' + ref : ''}: ${files.length} file${files.length === 1 ? '' : 's'}\n`;
   const map = treePaths.length
     ? `\n## Repository map\n\n\`\`\`\n${outlineTree(treePaths, files.map(f => f.path))}\n\`\`\`\n`
     : '';
@@ -391,4 +392,16 @@ export function readmeSnippet(md, max = 280) {
   if (text.length <= max) return text;
   const cut = text.slice(0, max);
   return cut.slice(0, Math.max(cut.lastIndexOf(' '), max * 0.6)) + '…';
+}
+
+// Directories not worth walking in a local folder (huge, generated, or private)
+export const LOCAL_SKIP_DIRS = new Set(['node_modules', '.git', '.hg', '.svn', 'dist', 'build', 'out',
+  '.next', '.nuxt', '.cache', '.parcel-cache', 'coverage', '__pycache__', '.venv', 'venv', 'env',
+  '.tox', '.mypy_cache', '.pytest_cache', '.idea', '.vscode', 'target', 'vendor', '.gradle', 'Pods', '.terraform']);
+
+// Files that may hold secrets: never list them from a local folder
+export function isSecretPath(path) {
+  const name = path.split('/').pop().toLowerCase();
+  return /^\.env(\.(?!example|sample|template|dist)[\w.-]+)?$/.test(name) || /\.(pem|key|p12|pfx|keystore|jks)$/.test(name) ||
+    /^(id_rsa|id_ed25519|id_ecdsa|credentials|\.npmrc|\.pypirc|\.netrc)$/.test(name);
 }
