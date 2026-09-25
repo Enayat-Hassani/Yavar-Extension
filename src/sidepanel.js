@@ -15,6 +15,8 @@ class YavarSidePanel {
     this.models = [];
     this.currentModelId = 'gemini';
     this.capturedScreenshot = null;
+    this._frameReady = false;
+    this._frameWaiters = [];
 
     this.init();
   }
@@ -294,6 +296,7 @@ class YavarSidePanel {
     const model = this.getCurrentModel();
     if (model) {
       this.loadingState.classList.remove('hidden');
+      this._frameReady = false;
       this.aiFrame.src = model.url;
     }
   }
@@ -307,6 +310,9 @@ class YavarSidePanel {
   }
 
   handleFrameLoad() {
+    this._frameReady = true;
+    this._frameWaiters.splice(0).forEach(resolve => resolve());
+
     setTimeout(() => {
       this.loadingState.classList.add('hidden');
     }, 500);
@@ -323,6 +329,7 @@ class YavarSidePanel {
       this.loadingState.classList.remove('hidden');
       const url = new URL(model.url);
       url.searchParams.set('_yavar', Date.now());
+      this._frameReady = false;
       this.aiFrame.src = url.href;
     }
   }
@@ -2802,10 +2809,61 @@ Begin: state a one-line plan, then issue your first tool call.`;
     this.showNotification(`📋 "${preview}" copied!`);
   }
 
+  // Resolves once the chat iframe has loaded (or after a timeout), so messages
+  // sent while the panel is still opening aren't posted to about:blank.
+  whenFrameReady(timeoutMs = 15000) {
+    if (this._frameReady) return Promise.resolve();
+    return new Promise((resolve) => {
+      this._frameWaiters.push(resolve);
+      setTimeout(resolve, timeoutMs);
+    });
+  }
+
+  // Run a request queued by the context menu before the panel was open
+  async runPendingAction(action) {
+    await this.whenFrameReady();
+    if (action === 'add_page') this.addPageToChat();
+  }
+
+  // Text sent from the context menu ("Copy to Yavar", "Explain code", page
+  // content): paste it into the chat input so the user can add a question,
+  // and also try the clipboard (which fails if the panel isn't focused).
+  async handlePendingText(text) {
+    // The storage listener and the on-open check can both see the same text
+    if (text === this._lastPendingText && Date.now() - this._lastPendingTime < 5000) return;
+    this._lastPendingText = text;
+    this._lastPendingTime = Date.now();
+
+    const { autoPaste } = await this.getAutoPasteSettings();
+    if (autoPaste) {
+      await this.whenFrameReady();
+      this._lastForwardedPrompt = text;
+      this._lastForwardedTime = Date.now();
+      this.forwardToIframe({ prompt: text, autoSubmit: false });
+    }
+    let copied = false;
+    try { await navigator.clipboard.writeText(text); copied = true; } catch (e) { /* not focused */ }
+    this.showNotification(autoPaste
+      ? '📋 Added to the chat input' + (copied ? ' (also copied)' : '')
+      : copied ? '📋 Copied - paste it into the chat' : '⚠️ Could not copy - enable auto-paste in Settings');
+  }
+
   setupStorageListener() {
     // Listen for screenshot data that arrives after sidepanel loads
     chrome.storage.onChanged.addListener((changes, areaName) => {
       if (areaName !== 'session') return;
+
+      if (changes.pendingAction?.newValue) {
+        chrome.storage.session.remove('pendingAction');
+        this.runPendingAction(changes.pendingAction.newValue);
+      }
+
+      // Context-menu text while the panel is already open
+      if (changes.pendingText?.newValue) {
+        const text = changes.pendingText.newValue;
+        chrome.storage.session.remove(['pendingText', 'pendingNotification']);
+        this.handlePendingText(text);
+      }
 
       if (changes.pendingScreenshot) {
         const { newValue, oldValue } = changes.pendingScreenshot;
@@ -2829,17 +2887,16 @@ Begin: state a one-line plan, then issue your first tool call.`;
 
   async checkPendingData() {
     try {
-      const result = await chrome.storage.session.get(['pendingText', 'pendingScreenshot', 'pendingScreenshotRect', 'pendingNotification']);
+      const result = await chrome.storage.session.get(['pendingText', 'pendingScreenshot', 'pendingScreenshotRect', 'pendingNotification', 'pendingAction']);
+
+      if (result.pendingAction) {
+        await chrome.storage.session.remove('pendingAction');
+        this.runPendingAction(result.pendingAction);
+      }
 
       if (result.pendingText) {
-        await navigator.clipboard.writeText(result.pendingText);
-        if (result.pendingNotification) {
-          this.showNotification(result.pendingNotification);
-        } else {
-          this.showNotification('📋 Content copied!');
-        }
-        await chrome.storage.session.remove('pendingText');
-        await chrome.storage.session.remove('pendingNotification');
+        await chrome.storage.session.remove(['pendingText', 'pendingNotification']);
+        this.handlePendingText(result.pendingText);
       }
 
       if (result.pendingScreenshot) {
