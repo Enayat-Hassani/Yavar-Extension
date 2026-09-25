@@ -1,8 +1,12 @@
 // Command Handler (Keyboard Shortcuts)
 
+import { openPanel } from './panel.js';
+
 export const CommandHandler = {
-  async handleCommand(command) {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  // `tab` comes with the command event; only query when it's missing, since
+  // an await before opening the panel loses the shortcut's user gesture.
+  async handleCommand(command, tab) {
+    if (!tab) [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     
     switch (command) {
       case 'toggle-sidebar':
@@ -22,7 +26,7 @@ export const CommandHandler = {
 
   async toggleSidebar(tab) {
     if (tab) {
-      await chrome.sidePanel.open({ windowId: tab.windowId });
+      await openPanel({ windowId: tab.windowId });
     }
   },
 
@@ -46,7 +50,7 @@ export const CommandHandler = {
   async toggleNotes(tab) {
     if (!tab) return;
     try {
-      await chrome.sidePanel.open({ windowId: tab.windowId });
+      await openPanel({ windowId: tab.windowId });
       setTimeout(() => {
         chrome.runtime.sendMessage({ action: 'toggle_notes' });
       }, 300);
@@ -89,7 +93,7 @@ export const CommandHandler = {
     
     try {
       // Open sidebar - the sidepanel.js will handle the analysis
-      await chrome.sidePanel.open({ windowId: tab.windowId });
+      await openPanel({ windowId: tab.windowId });
       
       // Send message to sidepanel to trigger analysis
       setTimeout(async () => {

@@ -15,6 +15,7 @@ test('blocks local, private and non-web targets', () => {
     'http://172.20.1.1/', 'http://192.168.1.1/admin', 'http://169.254.169.254/latest/meta-data/',
     'http://100.64.0.1/', 'http://0.0.0.0/', 'http://[::1]/', 'http://[fd00::1]/',
     'http://[fe80::1]/', 'http://[::ffff:127.0.0.1]/', 'http://intranet/', 'http://metadata.google.internal/',
+    'http://localhost./', 'http://printer.local./', 'http://metadata.google.internal./',
     'file:///etc/passwd', 'javascript:alert(1)', 'chrome://settings', 'not a url'
   ];
   for (const u of blocked) assert.equal(isPublicWebUrl(u), false, u);

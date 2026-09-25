@@ -11,9 +11,8 @@
 <body>
   <div id="app">
     <!-- Notification Bar -->
-    <div id="notification-bar" class="notification-bar hidden">
+    <div id="notification-bar" class="notification-bar hidden" role="status" aria-live="polite">
       <div class="notification-content">
-        <span id="notification-icon">📋</span>
         <span id="notification-text">Text copied! Press Cmd+V to paste into ChatGPT</span>
       </div>
       <button id="notification-dismiss" class="notification-dismiss">✕</button>
@@ -54,11 +53,6 @@
         </div>
         <p class="work-cover-hint">Yavar is working with the AI in the background. Peek anytime — it keeps running.</p>
 
-        <!-- Shown when work finishes: the diagram, then the curtain lifts -->
-        <div class="work-cover-done">
-          <div id="work-cover-diagram" class="work-cover-diagram"></div>
-          <button id="btn-work-reveal" class="btn-secondary">Reveal chat ↑</button>
-        </div>
       </div>
     </div>
 
@@ -177,30 +171,65 @@
         <span class="files-tab-label files-quick-name"></span>
       </button>
 
+      <!-- Explain the pull request / commit open in the GitHub tab -->
+      <button id="dock-explain-diff" class="dock-tab hidden" title="Explain this change">
+        <span class="dock-ico" aria-hidden="true">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="6" cy="6" r="2.5"></circle><circle cx="18" cy="18" r="2.5"></circle>
+            <path d="M6 8.5v7a2.5 2.5 0 0 0 2.5 2.5H15"></path><path d="M18 15.5V9a3 3 0 0 0-3-3h-4"></path><path d="m13 4-2 2 2 2"></path>
+          </svg>
+        </span>
+        <span class="files-tab-label">Explain PR</span>
+      </button>
+
       <!-- Browse the repo file tree -->
-      <button id="files-rail" class="files-rail dock-tab hidden" title="Browse repo files">
+      <button id="files-rail" class="files-rail dock-tab hidden" title="Repo Reader: pick files to read with the AI">
         <span class="files-stack" aria-hidden="true">
           <span class="sheet sheet-1"></span>
           <span class="sheet sheet-2"></span>
           <span class="sheet sheet-3"></span>
         </span>
-        <span class="files-tab-label">Files</span>
+        <span class="files-tab-label">Read repo</span>
       </button>
     </div>
 
-    <!-- Repo File Browser Panel -->
-    <div id="files-panel" class="files-panel hidden">
+    <!-- Repo Reader: browse, pick several files, send them as one pack -->
+    <div id="files-panel" class="files-panel hidden" aria-label="Repo Reader">
       <div class="files-header">
-        <span class="files-title">Repo Files</span>
+        <div class="files-heading">
+          <span class="files-title">Repo Reader</span>
+          <span id="files-repo-chip" class="files-repo-chip"></span>
+        </div>
         <div class="files-header-actions">
-          <button id="btn-refresh-files" class="history-action-btn" title="Reload tree">⟳</button>
-          <button id="btn-close-files" class="history-action-btn" title="Close">✕</button>
+          <button id="btn-open-folder" class="history-action-btn" title="Read a folder on this computer"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg></button>
+          <button id="btn-refresh-files" class="history-action-btn" title="Reload">⟳</button>
+          <button id="btn-close-files" class="history-action-btn" title="Close (Esc)">✕</button>
         </div>
       </div>
-      <div class="files-search-wrap">
-        <input id="files-search" type="text" class="files-search" placeholder="Filter files…">
+      <div class="files-toolbar">
+        <div class="files-tabs" role="tablist">
+          <button type="button" role="tab" class="files-tab active" data-view="files" aria-selected="true">Files</button>
+          <button type="button" role="tab" class="files-tab" data-view="changes" aria-selected="false">Recent changes</button>
+        </div>
+        <div class="files-links">
+          <button type="button" class="files-ext-link" data-ext="deepwiki" title="Open an AI-written wiki of this repo on DeepWiki (free)">DeepWiki ↗</button>
+          <button type="button" class="files-ext-link" data-ext="gitingest" title="Turn the whole repo into one prompt-ready text file on GitIngest (free)">GitIngest ↗</button>
+        </div>
+      </div>
+      <div class="files-search-wrap" id="files-search-wrap">
+        <input id="files-search" type="search" class="files-search" placeholder="Find a file…  ( / )" autocomplete="off">
       </div>
       <div id="files-tree" class="files-tree"></div>
+      <div id="files-actionbar" class="files-actionbar hidden">
+        <div class="files-sel-info">
+          <span id="files-sel-count" class="files-sel-count"></span>
+          <span id="files-sel-tokens" class="files-sel-tokens"></span>
+          <button id="files-add-imports" class="files-link-btn files-imports-btn" type="button" title="Also select the repo files these import">+ Imports</button>
+          <button id="files-clear" class="files-link-btn" type="button">Clear</button>
+        </div>
+        <div id="files-modes" class="files-modes" role="radiogroup" aria-label="What should the AI do?"></div>
+        <button id="files-send" class="files-send" type="button">Send to chat</button>
+      </div>
     </div>
 
     <!-- Deep-Dive Lens Picker Popover -->
@@ -228,15 +257,6 @@
           <div class="lens-text"><div class="lens-name">Security review</div><div class="lens-desc">Auth, input, secrets, deps</div></div>
         </div>
       </div>
-    </div>
-
-    <!-- Architecture Diagram Panel (Mermaid) -->
-    <div id="diagram-panel" class="diagram-panel hidden">
-      <div class="diagram-header">
-        <span class="diagram-title">Architecture Diagram</span>
-        <button id="btn-close-diagram" class="history-action-btn" title="Close">✕</button>
-      </div>
-      <div id="diagram-content" class="diagram-content"></div>
     </div>
 
     <!-- Model Switcher Popover -->
@@ -325,6 +345,24 @@
         </div>
 
         <div class="settings-section">
+          <h3>Inside the chat</h3>
+          <p class="settings-description">Yavar controls shown directly in ChatGPT, Claude and Gemini (only inside this sidebar)</p>
+
+          <div class="toggle-setting">
+            <label class="toggle-label" for="setting-inchat-toggle">
+              <span class="toggle-text">
+                <strong>Show Yavar buttons in the chat</strong>
+                <span>Save / Notes / Copy under each answer, a chip bar above the message box, and ▶ Run on code</span>
+              </span>
+            </label>
+            <label class="toggle-switch">
+              <input type="checkbox" id="setting-inchat-toggle" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="settings-section">
           <h3>Research Agent</h3>
           <p class="settings-description">Controls how thoroughly the web research agent (🔍) explores</p>
 
@@ -384,6 +422,47 @@
       </div>
     </div>
 
+    <!-- Code runner: run JS/Python from answers (or your own) in a sandbox -->
+    <div id="run-panel" class="run-panel hidden" role="dialog" aria-label="Code runner">
+      <div class="run-header">
+        <div class="run-title">
+          <span>Run code</span>
+          <div class="files-tabs run-lang" role="tablist" aria-label="Language">
+            <button type="button" role="tab" class="files-tab" data-lang="python">Python</button>
+            <button type="button" role="tab" class="files-tab" data-lang="javascript">JavaScript</button>
+          </div>
+        </div>
+        <button id="run-close" class="history-action-btn" title="Close (Esc)">✕</button>
+      </div>
+      <div id="run-editor" class="run-editor"></div>
+      <div class="run-actions">
+        <button id="run-go" type="button" class="run-go" title="Run (Ctrl+Enter)">▶ Run</button>
+        <button id="run-stop" type="button" class="run-stop hidden">■ Stop</button>
+        <span id="run-status" class="run-status" aria-live="polite"></span>
+      </div>
+      <pre id="run-output" class="run-output" aria-label="Output"></pre>
+      <div id="run-followups" class="run-followups hidden">
+        <button type="button" class="files-chip-btn" data-ask="fix">Ask AI to fix it</button>
+        <button type="button" class="files-chip-btn" data-ask="explain">Explain the output</button>
+        <button type="button" class="files-chip-btn" data-ask="next">What should I try next?</button>
+      </div>
+    </div>
+
+    <!-- Rebuild it yourself: a step-by-step plan to rebuild the project -->
+    <div id="rebuild-panel" class="run-panel rebuild-panel hidden" role="dialog" aria-label="Rebuild it yourself">
+      <div class="run-header">
+        <div class="files-heading">
+          <span class="files-title">Rebuild it yourself</span>
+          <span id="rebuild-sub" class="files-repo-chip"></span>
+        </div>
+        <div class="files-header-actions">
+          <button id="rebuild-reset" class="history-action-btn" title="Start over with a new plan">↺</button>
+          <button id="rebuild-close" class="history-action-btn" title="Close (Esc)">✕</button>
+        </div>
+      </div>
+      <div id="rebuild-body" class="rebuild-body"></div>
+    </div>
+
     <!-- Text input dialog for the agents (window.prompt is unreliable in side panels) -->
     <dialog id="ask-dialog" class="ask-dialog" aria-labelledby="ask-title">
       <form method="dialog" class="ask-form">
@@ -416,6 +495,15 @@
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <line x1="12" y1="5" x2="12" y2="19"></line>
               <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+          </button>
+
+          <!-- Continue in a fresh chat with a handoff summary -->
+          <button class="sidebar-icon-btn" id="sidebar-btn-carry-over" title="Continue in a fresh chat (AI summarizes this one first)">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 12a8 8 0 0 1 14-5.3L20 9"></path>
+              <path d="M20 4v5h-5"></path>
+              <path d="M9 13h6M9 17h4"></path>
             </svg>
           </button>
 
@@ -460,7 +548,7 @@
           </button>
 
           <!-- Saved Answers / History -->
-          <button class="sidebar-icon-btn" id="sidebar-btn-history" title="Saved Answers &amp; Diagram">
+          <button class="sidebar-icon-btn" id="sidebar-btn-history" title="Saved answers">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
               <circle cx="12" cy="12" r="10"></circle>
               <polyline points="12 6 12 12 16 14"></polyline>
@@ -468,6 +556,16 @@
           </button>
 
           <!-- Notes -->
+          <button class="sidebar-icon-btn" id="sidebar-btn-local" title="Read a project folder on this computer">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg>
+          </button>
+
+          <button class="sidebar-icon-btn" id="sidebar-btn-run" title="Code playground: run Python or JavaScript">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="8 7 3 12 8 17"></polyline><polyline points="16 7 21 12 16 17"></polyline><path d="M11 16l2-8"></path>
+            </svg>
+          </button>
+
           <button class="sidebar-icon-btn" id="sidebar-btn-notes" title="Notes (Ctrl+Shift+N)">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
               <path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path>
@@ -475,15 +573,6 @@
           </button>
 
           <div class="sidebar-divider"></div>
-
-          <!-- Diagram (Mermaid) -->
-          <button class="sidebar-icon-btn" id="sidebar-btn-diagram" title="Show Architecture Diagram">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-              <rect x="3" y="3" width="7" height="5" rx="1"></rect>
-              <rect x="14" y="16" width="7" height="5" rx="1"></rect>
-              <path d="M6.5 8v4a2 2 0 0 0 2 2h6"></path>
-            </svg>
-          </button>
 
           <!-- Settings -->
           <button class="sidebar-icon-btn" id="sidebar-btn-settings" title="Settings">
@@ -503,7 +592,6 @@
   <script src="lib/codemirror/javascript.min.js"></script>
   <script src="lib/codemirror/python.min.js"></script>
   <script src="lib/codemirror/htmlmixed.min.js"></script>
-  <script src="lib/mermaid/mermaid.min.js"></script>
   <script src="src/sidepanel.js" type="module"></script>
 </body>
 </html>

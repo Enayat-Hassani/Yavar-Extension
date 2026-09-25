@@ -264,15 +264,26 @@ class YavarContentHandler {
 
       // Let the selection settle after the mouse is released
       setTimeout(() => {
+        // Read-only textareas first (GitHub's code view selects inside one):
+        // the page selection has no usable rect there, so read the textarea
+        // directly and place the menu at the mouse.
+        const ta = this.readOnlyTextareaSelection();
+        if (ta) {
+          this.currentText = ta.text;
+          this.textareaSel = ta;
+          this.showFloatingMenuAt({ left: e.clientX, right: e.clientX, top: e.clientY - 12, bottom: e.clientY + 12, width: 1, height: 24 });
+          return;
+        }
+
         const selection = window.getSelection();
         const text = selection ? selection.toString().trim() : '';
-
-        if (text.length > 0 && text.length < 5000) {
+        if (text.length > 0 && text.length < 20000) {
           this.currentText = text;
+          this.textareaSel = null;
           this.showFloatingMenu(selection);
-        } else {
-          this.forceHide();
+          return;
         }
+        this.forceHide();
       }, 10);
     });
 
@@ -286,7 +297,9 @@ class YavarContentHandler {
     // If the selection is cleared or changed away, drop the menu
     document.addEventListener('selectionchange', () => {
       if (!this.menuVisible() || this.isInteracting) return;
-      const text = (window.getSelection()?.toString() || '').trim();
+      const text = this.textareaSel
+        ? this.hasTextareaSelection()
+        : (window.getSelection()?.toString() || '').trim();
       if (!text) this.forceHide();
     });
 
@@ -306,16 +319,51 @@ class YavarContentHandler {
     });
   }
 
+  // Selected text in the focused read-only textarea (GitHub's code view)
+  readOnlyTextareaSelection() {
+    const el = document.activeElement;
+    if (!el || el.tagName !== 'TEXTAREA' || !el.readOnly) return null;
+    const { selectionStart: a, selectionEnd: b } = el;
+    if (a == null || b == null || a === b || b - a >= 20000) return null;
+    const text = el.value.slice(a, b).trim();
+    return text ? { text, el, a, b } : null;
+  }
+
+  // Cheap check for selectionchange (fires on every drag step)
+  hasTextareaSelection() {
+    const el = document.activeElement;
+    return !!(el && el.tagName === 'TEXTAREA' && el.selectionStart !== el.selectionEnd);
+  }
+
+  // 1-based line range of a textarea selection, computed only when needed
+  textareaLines({ el, a, b }) {
+    const v = el.value;
+    let start = 1;
+    for (let i = v.indexOf('\n'); i !== -1 && i < a; i = v.indexOf('\n', i + 1)) start++;
+    let end = start;
+    const last = v.slice(a, b).replace(/\n+$/, '');
+    for (let i = last.indexOf('\n'); i !== -1; i = last.indexOf('\n', i + 1)) end++;
+    return { startLine: start, endLine: end };
+  }
+
   showFloatingMenu(selection) {
+    try {
+      const rect = selection.getRangeAt(0).getBoundingClientRect();
+      // Degenerate rect (e.g. selection inside an input) → skip
+      if (rect.width === 0 && rect.height === 0) return;
+      this.showFloatingMenuAt(rect);
+    } catch (error) {
+      console.error('[Yavar] Error positioning menu:', error);
+    }
+  }
+
+  // Place the menu above (or below) a rect in viewport coordinates
+  showFloatingMenuAt(rect) {
     // Lazy-init: create menu on first use
     this.ensureFloatingMenu();
     if (!this.floatingMenu) return;
 
     try {
-      const range = selection.getRangeAt(0);
-      const rect = range.getBoundingClientRect();
-      // Degenerate rect (e.g. selection inside an input) → skip
-      if (rect.width === 0 && rect.height === 0) return;
 
       if (this.hideTimeout) { clearTimeout(this.hideTimeout); this.hideTimeout = null; }
 
@@ -366,6 +414,7 @@ class YavarContentHandler {
     if (this.floatingMenu) this.floatingMenu.style.display = 'none';
     this.toggleMoreList(false);
     this.currentText = '';
+    this.textareaSel = null;
   }
 
   async runTemplate(templateId) {
@@ -386,7 +435,11 @@ class YavarContentHandler {
       if (vars.includes('url')) ctx.url = window.location.href;
       if (vars.includes('title')) ctx.title = document.title;
 
-      const prompt = await expandTemplate(tpl.body, ctx);
+      let prompt = await expandTemplate(tpl.body, ctx);
+      // On a GitHub file page, say where the code came from so the AI can
+      // reason about it (and you can find it again).
+      const source = vars.includes('selection') ? this.githubSourceNote() : '';
+      if (source) prompt += '\n\n' + source;
       chrome.runtime.sendMessage({ action: 'trigger_auto_submit', prompt });
       this.forceHide();
     } catch (err) {
@@ -394,6 +447,20 @@ class YavarContentHandler {
       this.showButtonFeedback(templateId,
         err.message?.includes('Extension context invalidated') ? 'Reload page' : 'Failed');
     }
+  }
+
+  // "(Lines 12-20 of `src/app.ts` in owner/repo)" on github.com/…/blob/… pages
+  githubSourceNote() {
+    const m = location.pathname.match(/^\/([^/]+)\/([^/]+)\/blob\/[^/]+\/(.+)$/);
+    if (location.hostname !== 'github.com' || !m) return '';
+    let path;
+    try { path = decodeURIComponent(m[3]); } catch { path = m[3]; }
+    let lines = 'From ';
+    if (this.textareaSel) {
+      const { startLine, endLine } = this.textareaLines(this.textareaSel);
+      lines = (startLine === endLine ? `Line ${startLine}` : `Lines ${startLine}-${endLine}`) + ' of ';
+    }
+    return `(${lines}\`${path}\` in ${m[1]}/${m[2]})`;
   }
 
   // Best-effort readable text of the live page (mirror of the sidepanel's htmlToText).
