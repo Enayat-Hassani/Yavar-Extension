@@ -506,6 +506,98 @@
     })();
   }
 
+  // ---- "▶ Run" buttons on code blocks in answers ----
+  // Only inside the Yavar side panel (never in the user's normal chat tabs).
+  // Clicking sends the code to the panel, which runs it in a sandbox.
+
+  const RUNNABLE = {
+    javascript: 'javascript', js: 'javascript', node: 'javascript', nodejs: 'javascript', mjs: 'javascript',
+    python: 'python', py: 'python', python3: 'python', py3: 'python'
+  };
+
+  // Language from the code element's class, a nearby header label, or a guess
+  function codeLanguage(pre, text) {
+    const code = pre.querySelector('code') || pre;
+    const cls = (code.className || '') + ' ' + (pre.className || '');
+    const m = cls.match(/(?:language|lang)-([\w+#-]+)/i);
+    if (m) return RUNNABLE[m[1].toLowerCase()] || null;
+
+    // ChatGPT / Gemini show the language as a small label above the block
+    const box = pre.closest('div');
+    const label = box?.parentElement?.querySelector('span, div')?.textContent?.trim().toLowerCase() || '';
+    if (RUNNABLE[label]) return RUNNABLE[label];
+    const header = pre.parentElement?.previousElementSibling?.textContent?.trim().toLowerCase() || '';
+    if (RUNNABLE[header]) return RUNNABLE[header];
+
+    // Heuristic fallback
+    if (/^\s*(def |class \w+.*:\s*$|from [\w.]+ import |import [\w.]+\s*$|print\()/m.test(text) && !/[;{]\s*$/m.test(text)) return 'python';
+    if (/\b(console\.log|const |let |function |=>|document\.)/.test(text)) return 'javascript';
+    return null;
+  }
+
+  function isInsideAnswer(el) {
+    const platform = detectPlatform();
+    const sel = platform && RESPONSE_SELECTORS[platform];
+    if (sel && el.closest(sel.message)) return true;
+    // Unknown DOM: accept any block that isn't in the message composer
+    return !el.closest('[contenteditable="true"], textarea, form');
+  }
+
+  // Code text without our own button's label
+  function codeText(pre) {
+    const el = pre.querySelector('code') || pre;
+    return (el.innerText || '').replace(/\n?▶ Run\s*$/, '').replace(/\n$/, '');
+  }
+
+  function decorateCodeBlocks() {
+    document.querySelectorAll('pre:not([data-yavar-run])').forEach((pre) => {
+      if (!isInsideAnswer(pre)) { pre.setAttribute('data-yavar-run', 'skip'); return; }
+      const text = codeText(pre);
+      if (text.length > 100000) { pre.setAttribute('data-yavar-run', 'skip'); return; }
+      // Not recognisable yet (maybe still streaming): look again next time
+      const lang = text.trim().length >= 3 ? codeLanguage(pre, text) : null;
+      if (!lang) return;
+      pre.setAttribute('data-yavar-run', lang);
+
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = '▶ Run';
+      btn.title = `Run this ${lang === 'python' ? 'Python' : 'JavaScript'} in Yavar's sandbox`;
+      btn.setAttribute('aria-label', btn.title);
+      btn.style.cssText = [
+        'position:absolute', 'right:8px', 'bottom:8px', 'z-index:5',
+        'padding:3px 10px', 'font:600 12px/1.4 system-ui,-apple-system,sans-serif',
+        'color:#fff', 'background:#0071e3', 'border:none', 'border-radius:999px',
+        'cursor:pointer', 'opacity:0.85', 'box-shadow:0 1px 4px rgba(0,0,0,.25)'
+      ].join(';');
+      btn.addEventListener('mouseenter', () => { btn.style.opacity = '1'; });
+      btn.addEventListener('mouseleave', () => { btn.style.opacity = '0.85'; });
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        // Re-read at click time: the block may have finished streaming since
+        const code = codeText(pre);
+        postToYavar({ action: 'RUN_CODE', lang: codeLanguage(pre, code) || lang, code });
+      });
+      if (getComputedStyle(pre).position === 'static') pre.style.position = 'relative';
+      pre.appendChild(btn);
+    });
+  }
+
+  if (EXTENSION_ORIGIN && window.parent !== window && detectPlatform()) {
+    let pending = null;
+    const schedule = () => {
+      if (pending) return;
+      pending = setTimeout(() => { pending = null; decorateCodeBlocks(); }, 800);
+    };
+    const start = () => {
+      decorateCodeBlocks();
+      new MutationObserver(schedule).observe(document.body, { childList: true, subtree: true });
+    };
+    if (document.body) start();
+    else document.addEventListener('DOMContentLoaded', start);
+  }
+
   // Listen for postMessage from sidepanel
   window.addEventListener('message', (event) => {
     if (!isFromYavar(event)) return;
