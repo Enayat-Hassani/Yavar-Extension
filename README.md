@@ -27,7 +27,18 @@ Add, edit, or remove your own templates in Settings using `{{selection}}`, `{{pa
 - **Search videos** (deep search) — search YouTube for a topic (e.g. *"top things to try in Chiang Mai"*), pull the top videos' transcripts, and hand them to the AI to synthesize against your Notes. Requires a running **ytx** server; see [Video search: setting up ytx](#video-search-setting-up-ytx).
 - On GitHub, one click **adds the file you're viewing**, or opens the repo **file browser**.
 
-**Repo file browser** — browse any GitHub repository's file tree right in the sidebar, search/filter it, and jump to (or quick-add) the active file.
+**Repo Reader** — learn from other people's code without an API key or burning your chat quota:
+
+- **Pick several files, send one message.** Tick files (or *Select all* in a folder) and they go to the chat as **one Markdown pack** with a map of the repo showing where each file sits. One message instead of ten.
+- **Choose what the AI should do:** *Explain*, *Line by line*, *How it fits* (its role in the repo and what to read next), *Review*, *Quiz me*, or *Just add*. Your choice is remembered.
+- **+ Imports** selects the file you're viewing plus the repo files it imports (JS/TS, Python, C/C++, Rust, CSS).
+- **Start here** suggests a reading order: README, the manifest, then entry points.
+- **Line ranges:** select lines on GitHub (`#L10-L25`) and the dock's quick-read tab sends just those lines.
+- **Read marks (✓)**, file sizes, and a token estimate so you know when a pack is too big for a free plan.
+- **Works on any branch or tag**, including names with slashes.
+- **Barely touches the GitHub API:** file contents come from `raw.githubusercontent.com`, and the tree is one cached API call per repo, so the 60 requests/hour anonymous limit stops being a problem.
+
+**Explain PR / commit** — on a pull request or commit page, one click attaches the diff and asks the AI to explain the goal, each file's change, what to learn from it, and what's risky.
 
 **Architecture diagrams** — generate a Mermaid **architecture diagram** of the current repository, rendered interactively in the sidebar.
 
