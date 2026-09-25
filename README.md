@@ -6,11 +6,12 @@ A Chrome extension that embeds ChatGPT, Claude, and Gemini in a sidebar — so y
 
 **AI sidebar** — opens `gemini.google.com`, `chatgpt.com`, or `claude.ai` in a full-viewport sidebar, with a model switcher (and support for adding your own custom models). Send selected text, screenshots, or whole-page content straight to the model.
 
-**The Yavar view**: Yavar opens as a full-page app. The chat (ChatGPT, Claude or Gemini) keeps running behind it, and **Chat** in the header shows it (**‹ Yavar** brings you back).
+**The Yavar view**: Yavar opens as a full-page app. The chat (ChatGPT, Claude or Gemini) keeps running behind it; the chat button in the header shows it, and **‹ Yavar** brings you back.
 
-- **Start page:** actions for the tab you're on. On GitHub: *Explain this repo*, *Browse files*, *Recent changes*, *Rebuild it yourself*, and *Explain this PR / file* when one is open. On other pages: *Summarize*, *Ask about this page*, *Research this page*.
-- **Composer:** type a question, or press **+** to attach this page, files from the repo, or files from a local folder. With files attached, one tap asks for *Explain*, *Line by line*, *How it fits*, *Review* or *Quiz me*.
-- **Answers** stream in as the AI writes them, with Copy, Save and ▶ Run on code. ■ stops waiting; the pencil starts a new conversation.
+- **Header:** the model pill switches models (a divider marks the new chat), the pencil starts a new conversation, and **⋯** holds saved answers, notes, web and video research, the code playground, *Continue in a fresh chat* and settings. The edge sidebar only appears in the chat view.
+- **Start page:** actions for the tab you're on. On GitHub: *Tour this repository*, *Browse files*, *Recent changes*, *Build it yourself*, and *Explain* for an open pull request or file. On other pages: *Summarize*, *Ask about it*, *Fact-check it*.
+- **Composer:** type to the model, or press **+** to add the file open in your tab, **files from the repository** or **a folder** (a picker with search, suggestions, folders and a token count), **this page**, or a **screenshot** of an area of the page. With files attached, one tap asks for *Explain*, *Line by line*, *How it fits*, *Review* or *Quiz me*.
+- **Answers** stream in with Copy, Save and ▶ Run on code. ■ stops waiting.
 
 **Yavar inside the chat** — when ChatGPT, Claude or Gemini is open in the sidebar, Yavar's controls sit right in the chat (inside isolated shadow DOM, so they never clash with the site's styles):
 

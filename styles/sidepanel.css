@@ -2860,10 +2860,9 @@ button.lens-item:focus-visible {
 .app-head {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 12px 16px 10px;
-  /* room for the auto-hiding sidebar's edge */
-  padding-right: 22px;
+  gap: 4px;
+  min-height: 52px;
+  padding: 8px 10px 8px 9px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-primary);
 }
@@ -2873,15 +2872,67 @@ button.lens-item:focus-visible {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  padding-left: 4px;
 }
 
 .app-title {
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.app-title:empty { display: none; }
+
+/* Model pill: the conversation's model, and the way to switch it */
+.app-model {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 55%;
+  padding: 5px 10px 5px 7px;
+  font: 600 14px/1 -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+  background: transparent;
+  border: none;
+  border-radius: 9px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.app-model:hover, .app-model[aria-expanded="true"] { background: var(--bg-secondary); }
+.app-model:focus-visible, .app-icon-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.app-model-icon { font-size: 15px; }
+.app-model-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.app-model-chev { color: var(--text-secondary); flex-shrink: 0; }
+
+.app-icon-btn {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: 9px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.app-icon-btn:hover { color: var(--text-primary); background: var(--bg-secondary); }
+
+/* The edge sidebar belongs to the chat view */
+.right-sidebar.in-app { display: none; }
+
+.thread-note {
+  align-self: center;
+  margin: 14px 0 4px;
+  padding: 3px 10px;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  border-radius: 999px;
 }
 
 .app-view .thread-sub:empty { display: none; }
@@ -2920,16 +2971,21 @@ button.lens-item:focus-visible {
   animation: fadeIn 0.25s ease;
 }
 
-.home-hero h2 {
-  font-size: 22px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
+.home-hero { padding: 6px 4px 0; }
+
+.home-kicker {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
 }
 
-.home-hero p {
-  margin-top: 4px;
-  font-size: 13px;
-  color: var(--text-secondary);
+.home-hero h2 {
+  margin-top: 2px;
+  font-size: 21px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
 }
 
 .home-label {
@@ -2963,9 +3019,9 @@ button.lens-item:focus-visible {
   cursor: pointer;
   transition: background 0.12s;
 }
-.home-label + .home-row { border-radius: 12px 12px 0 0; }
+.home-row:first-child, .home-label + .home-row { border-radius: 12px 12px 0 0; }
 .home-row:last-child { border-bottom: none; border-radius: 0 0 12px 12px; }
-.home-label + .home-row:last-child { border-radius: 12px; }
+.home-row:only-child, .home-label + .home-row:last-child { border-radius: 12px; }
 .home-row:hover { background: var(--bg-secondary); }
 .home-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
@@ -3004,7 +3060,7 @@ button.lens-item:focus-visible {
   align-items: center;
   gap: 6px;
   max-width: 100%;
-  padding: 4px 4px 4px 10px;
+  padding: 4px 4px 4px 8px;
   font-size: 12px;
   color: var(--text-primary);
   background: var(--surface);
@@ -3068,11 +3124,15 @@ button.lens-item:focus-visible {
 .thread-private.hidden { display: none; }
 
 .thread-private {
-  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
   padding: 3px 8px;
   font-size: 11px;
+  font-weight: 500;
   color: var(--text-secondary);
-  background: var(--bg-tertiary);
+  background: var(--bg-secondary);
   border-radius: 999px;
 }
 
@@ -3222,3 +3282,196 @@ button.lens-item:focus-visible {
 .cm-s-yavar .cm-tag { color: var(--cm-def); }
 .cm-s-yavar .cm-error { color: var(--danger); }
 .cm-s-yavar .CodeMirror-matchingbracket { outline: 1px solid var(--border); color: inherit !important; }
+
+.composer { position: relative; }
+.composer-item-ico { font-size: 12px; }
+.composer-item-name { overflow: hidden; text-overflow: ellipsis; }
+.composer-item.is-image { padding-left: 4px; }
+.composer-item img {
+  width: 26px;
+  height: 20px;
+  object-fit: cover;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+}
+
+.tool-menu .lens-picker-header[hidden] { display: none; }
+
+/* ========== File picker ==========
+   A card above the composer: search, suggestions, folders, checkmarks */
+.picker {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: calc(100% + 8px);
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  max-height: min(480px, calc(100vh - 150px));
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.16), 0 2px 6px rgba(0, 0, 0, 0.06);
+  overflow: hidden;
+  transition: opacity 0.16s ease, translate 0.2s var(--ease-out), display 0.2s allow-discrete;
+}
+.picker.hidden { display: none; opacity: 0; translate: 0 8px; pointer-events: none; }
+@starting-style { .picker:not(.hidden) { opacity: 0; translate: 0 8px; } }
+
+.picker-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 8px 6px 14px;
+}
+.picker-heading { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; }
+.picker-title { font-size: 14px; font-weight: 600; }
+.picker-sub { font-size: 12px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.picker-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 10px 6px;
+  padding: 0 10px;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  border-radius: 9px;
+}
+.picker-search input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 0;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text-primary);
+  background: none;
+  border: none;
+  outline: none;
+}
+
+.picker-crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  padding: 0 12px 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.picker-crumbs[hidden] { display: none; }
+.picker-crumbs button {
+  padding: 2px 4px;
+  font: inherit;
+  color: var(--accent);
+  background: none;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.picker-crumbs button[aria-current] { color: var(--text-primary); font-weight: 600; cursor: default; }
+
+.picker-list {
+  flex: 1;
+  min-height: 120px;
+  overflow-y: auto;
+  padding: 2px 6px 6px;
+  overscroll-behavior: contain;
+}
+
+.pk-section {
+  padding: 10px 8px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+}
+
+.pk-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 8px;
+  text-align: left;
+  font: inherit;
+  color: var(--text-primary);
+  background: none;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.pk-row:hover { background: var(--bg-secondary); }
+.pk-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+.pk-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.pk-name { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pk-path { font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pk-meta { flex-shrink: 0; font-size: 11px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.pk-chev { color: var(--text-secondary); opacity: 0.6; font-size: 16px; }
+
+/* Round checkmark, filled when selected */
+.pk-check {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border: 1.5px solid var(--bg-tertiary);
+  border-radius: 50%;
+  transition: background 0.12s, border-color 0.12s;
+}
+.pk-file[aria-selected="true"] .pk-check {
+  border-color: var(--accent);
+  background: var(--accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E") center / 12px no-repeat;
+}
+
+.pk-folder {
+  flex-shrink: 0;
+  width: 18px;
+  height: 14px;
+  background: color-mix(in srgb, var(--accent) 70%, transparent);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 18'%3E%3Cpath d='M0 3a3 3 0 0 1 3-3h5.5l2.5 2.5H21a3 3 0 0 1 3 3V15a3 3 0 0 1-3 3H3a3 3 0 0 1-3-3z'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 18'%3E%3Cpath d='M0 3a3 3 0 0 1 3-3h5.5l2.5 2.5H21a3 3 0 0 1 3 3V15a3 3 0 0 1-3 3H3a3 3 0 0 1-3-3z'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+.pk-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 28px 16px;
+  font-size: 13px;
+  text-align: center;
+  color: var(--text-secondary);
+}
+.pk-empty .files-spinner { margin: 0; }
+
+.pk-link {
+  font: inherit;
+  font-size: 13px;
+  color: var(--accent);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.picker-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 10px 10px 14px;
+  border-top: 1px solid var(--border);
+}
+.picker-count { flex: 1; font-size: 12px; color: var(--text-secondary); }
+.picker-count.warn { color: #c77700; }
+.picker-add {
+  padding: 7px 16px;
+  font: 600 13px/1 -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
+  color: #fff;
+  background: var(--accent);
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.picker-add:disabled { opacity: 0.35; cursor: default; }
