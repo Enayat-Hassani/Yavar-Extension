@@ -4,6 +4,15 @@
 import { ContextMenuHandler } from './utils/contextMenu.js';
 import { CommandHandler } from './utils/commands.js';
 import { MessageHandler } from './utils/messageHandler.js';
+import { syncFrameRules } from './utils/frameRules.js';
+
+// Session rules are cleared when the browser restarts, so register them on
+// every worker start (cheap and idempotent), and again when models change.
+syncFrameRules();
+chrome.runtime.onStartup.addListener(syncFrameRules);
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'sync' && changes.aiModels) syncFrameRules();
+});
 
 // Initialize on install
 chrome.runtime.onInstalled.addListener(async (details) => {
@@ -191,9 +200,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'CAPTURE_SCREENSHOT') {
     (async () => {
       try {
-        // Get the tab where the request originated
-        const tab = sender.tab || await chrome.tabs.query({ active: true, currentWindow: true }).then(t => t[0]);
-
         // Capture visible tab
         const dataUrl = await chrome.tabs.captureVisibleTab(null, {
           format: 'png',
@@ -203,13 +209,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // Store for sidebar to pick up
         await chrome.storage.session.set({ pendingScreenshot: dataUrl });
 
-        // Notify sidebar if open
-        const views = chrome.extension.getViews({ type: 'panel' });
-        views.forEach(view => {
-          if (view.panel?.handleScreenshotCapture) {
-            view.panel.handleScreenshotCapture(dataUrl);
-          }
-        });
+        // Notify the sidebar if it's already open (storage covers the rest)
+        chrome.runtime.sendMessage({ type: 'SCREENSHOT_CAPTURED', imageData: dataUrl }).catch(() => {});
 
         sendResponse({ success: true, imageData: dataUrl });
       } catch (error) {
@@ -276,6 +277,11 @@ function injectAreaSelector() {
 
   function cleanup() {
     overlay.remove();
+    document.removeEventListener('keydown', escHandler, true);
+  }
+
+  function escHandler(e) {
+    if (e.key === 'Escape') cleanup();
   }
 
   overlay.addEventListener('mousedown', (e) => {
@@ -323,12 +329,7 @@ function injectAreaSelector() {
     chrome.runtime.sendMessage({ action: 'area_selected', rect });
   });
 
-  document.addEventListener('keydown', function escHandler(e) {
-    if (e.key === 'Escape') {
-      cleanup();
-      document.removeEventListener('keydown', escHandler);
-    }
-  });
+  document.addEventListener('keydown', escHandler, true);
 
   document.body.appendChild(overlay);
 }
