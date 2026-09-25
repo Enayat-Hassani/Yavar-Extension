@@ -2,7 +2,7 @@
 
 import { loadTemplates, saveTemplates, DEFAULT_TEMPLATES } from './utils/templates.js';
 import { loadModels } from './utils/models.js';
-import { OPENROUTER_BASE, isFreeModel, loadApiConfig, buildRoute, askRoute } from './utils/llm.js';
+import { OPENROUTER_BASE, DEFAULT_MONTHLY_CAP, isFreeModel, loadApiConfig, buildRoute, askWithBudget, loadSpend, spentThisMonth } from './utils/llm.js';
 
 const DEFAULT_SETTINGS = {
   defaultAI: 'chatgpt',
@@ -17,6 +17,7 @@ const DEFAULT_SETTINGS = {
   answerWith: 'chat',
   apiFreeModels: [],
   apiPaidModel: '',
+  apiMonthlyCap: DEFAULT_MONTHLY_CAP,
   apiGatewayBase: '',
   apiGatewayModel: ''
 };
@@ -114,6 +115,10 @@ class OptionsPage {
     document.getElementById('load-free-models')?.addEventListener('click', () => this.loadFreeModels());
     document.getElementById('free-models')?.addEventListener('change', () => this.saveFreeModels());
     document.getElementById('paid-model')?.addEventListener('change', (e) => this.saveSetting({ apiPaidModel: e.target.value.trim() }));
+    document.getElementById('monthly-cap')?.addEventListener('change', (e) => {
+      const cap = parseFloat(e.target.value);
+      this.saveSetting({ apiMonthlyCap: Number.isFinite(cap) && cap >= 0 ? cap : DEFAULT_MONTHLY_CAP }).then(() => this.showSpend());
+    });
     document.getElementById('gateway-base')?.addEventListener('change', (e) => this.saveSetting({ apiGatewayBase: e.target.value.trim().replace(/\/+$/, '') }));
     document.getElementById('gateway-model')?.addEventListener('change', (e) => this.saveSetting({ apiGatewayModel: e.target.value.trim() }));
     document.getElementById('test-api')?.addEventListener('click', () => this.testApi());
@@ -182,6 +187,8 @@ class OptionsPage {
     if (this.ytxBaseUrlInput) this.ytxBaseUrlInput.value = this.settings.ytxBaseUrl;
     if (this.ytxVideoCountInput) this.ytxVideoCountInput.value = this.settings.ytxVideoCount;
     document.getElementById('paid-model').value = this.settings.apiPaidModel || '';
+    document.getElementById('monthly-cap').value = this.settings.apiMonthlyCap;
+    this.showSpend();
     document.getElementById('gateway-base').value = this.settings.apiGatewayBase || '';
     document.getElementById('gateway-model').value = this.settings.apiGatewayModel || '';
     this.renderFreeModels();
@@ -357,15 +364,24 @@ class OptionsPage {
     this.saveSetting({ apiFreeModels: [...kept, ...added] }).then(() => this.renderFreeModels());
   }
 
+  async showSpend() {
+    const el = document.getElementById('spent-this-month');
+    try {
+      const spent = spentThisMonth(await loadSpend());
+      el.textContent = `Spent this month: $${spent.toFixed(spent && spent < 0.01 ? 4 : 2)} of $${Number(this.settings.apiMonthlyCap).toFixed(2)}. At the limit, Yavar uses only the free models until next month.`;
+    } catch (e) { el.textContent = ''; }
+  }
+
   async testApi() {
     const out = document.getElementById('test-api-result');
     const route = buildRoute(await loadApiConfig());
     out.textContent = 'Asking…';
     try {
-      const { text, step } = await askRoute(route, [{ role: 'user', content: 'Reply with just: OK' }], {
+      const { text, step, cost } = await askWithBudget(route, [{ role: 'user', content: 'Reply with just: OK' }], {
         onAttempt: (s) => { out.textContent = `Trying ${s.label}…`; }
       });
-      out.textContent = `✓ ${step.label}${step.paid ? ' (paid)' : ''} answered: ${text.trim().slice(0, 80)}`;
+      out.textContent = `✓ ${step.label}${step.paid ? ` (paid, $${cost.toFixed(5)})` : ''} answered: ${text.trim().slice(0, 80)}`;
+      if (step.paid) this.showSpend();
     } catch (e) {
       out.textContent = '✕ ' + e.message;
     }
@@ -470,6 +486,7 @@ class OptionsPage {
         if (Array.isArray(imported.disabledSites)) clean.disabledSites = imported.disabledSites.filter(x => typeof x === 'string');
         if (typeof imported.ytxBaseUrl === 'string') clean.ytxBaseUrl = imported.ytxBaseUrl;
         if (Number.isFinite(imported.ytxVideoCount)) clean.ytxVideoCount = imported.ytxVideoCount;
+        if (Number.isFinite(imported.apiMonthlyCap) && imported.apiMonthlyCap >= 0) clean.apiMonthlyCap = imported.apiMonthlyCap;
         for (const k of ['apiPaidModel', 'apiGatewayBase', 'apiGatewayModel']) {
           if (typeof imported[k] === 'string') clean[k] = imported[k];
         }

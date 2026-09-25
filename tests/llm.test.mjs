@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseSSE, buildRoute, isFreeModel, askRoute, OPENROUTER_BASE } from '../src/utils/llm.js';
+import { parseSSE, buildRoute, isFreeModel, askRoute, OPENROUTER_BASE, monthKey, spentThisMonth, addSpend, callCost } from '../src/utils/llm.js';
 
 // A fetch that answers each model from a script: a status, or SSE text
 function fakeFetch(script) {
@@ -95,4 +95,35 @@ test('when every model is resting, all are tried anyway', async () => {
   await assert.rejects(askRoute([step('x:free')], [], { fetchImpl: impl }));
   await assert.rejects(askRoute([step('x:free')], [], { fetchImpl: impl }));
   assert.deepEqual(calls, ['x:free', 'x:free']);
+});
+
+test('parseSSE keeps the usage OpenRouter sends with the last chunk', () => {
+  const { usage } = parseSSE('data: {"choices":[{"delta":{"content":"x"}}]}\ndata: {"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":5,"cost":0.0004}}\n');
+  assert.deepEqual(usage, { prompt_tokens: 10, completion_tokens: 5, cost: 0.0004 });
+});
+
+test('skip() passes over a model with its reason, and the answer carries usage', async () => {
+  const usageChunk = 'data: {"choices":[],"usage":{"cost":0.002}}\n\n';
+  const { impl, calls } = fakeFetch({ 'f:free': 503, paid: sse('ok').replace('data: [DONE]', usageChunk + 'data: [DONE]') });
+  const route = [step('f:free'), step('paid', { paid: true })];
+  await assert.rejects(askRoute(route, [], { fetchImpl: impl, skip: s => (s.paid ? 'budget used up' : null) }), /paid: budget used up/);
+  assert.deepEqual(calls, ['f:free']);
+  const r = await askRoute(route, [], { fetchImpl: impl });
+  assert.equal(r.usage.cost, 0.002);
+});
+
+test('spending adds up within a month and starts again in the next', () => {
+  const sep = new Date(2026, 8, 26), oct = new Date(2026, 9, 1);
+  assert.equal(monthKey(sep), '2026-09');
+  let spend = addSpend(null, 0.5, sep);
+  spend = addSpend(spend, 0.25, sep);
+  assert.deepEqual(spend, { month: '2026-09', usd: 0.75 });
+  assert.equal(spentThisMonth(spend, oct), 0);
+  assert.deepEqual(addSpend(spend, 0.1, oct), { month: '2026-10', usd: 0.1 });
+});
+
+test('cost: OpenRouter figure first, else tokens times prices', () => {
+  assert.equal(callCost({ cost: 0.01, prompt_tokens: 1e6 }, { prompt: '1' }), 0.01);
+  assert.equal(callCost({ prompt_tokens: 1000, completion_tokens: 500 }, { prompt: '0.000001', completion: '0.000005' }), 0.0035);
+  assert.equal(callCost(null, null), 0);
 });
