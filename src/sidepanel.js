@@ -1,6 +1,8 @@
 // Side Panel - Main Logic (2026 Redesign)
 // Full viewport chat with bottom navigation and model management
 
+import { isPublicWebUrl } from './utils/net.js';
+
 class YavarSidePanel {
   constructor() {
     // Default AI models
@@ -13,6 +15,8 @@ class YavarSidePanel {
     this.models = [];
     this.currentModelId = 'gemini';
     this.capturedScreenshot = null;
+    this._frameReady = false;
+    this._frameWaiters = [];
 
     this.init();
   }
@@ -48,6 +52,7 @@ class YavarSidePanel {
     this.notesEditorContainer = document.getElementById('notes-editor');
     this.btnClearNotes = document.getElementById('btn-clear-notes');
     this.btnCopyNotes = document.getElementById('btn-copy-notes');
+    this.btnDownloadNotes = document.getElementById('btn-download-notes');
     this.notesOpen = false;
 
     // History panel (captured AI answers)
@@ -55,6 +60,7 @@ class YavarSidePanel {
     this.historyList = document.getElementById('history-list');
     this.historySearch = document.getElementById('history-search');
     this.btnClearHistory = document.getElementById('btn-clear-history');
+    this.btnExportHistory = document.getElementById('btn-export-history');
     this.btnCloseHistory = document.getElementById('btn-close-history');
 
     // Deep-dive agent
@@ -143,10 +149,11 @@ class YavarSidePanel {
         await this.saveModels();
       }
       
-      // Load current model
-      const currentResult = await chrome.storage.sync.get('currentModelId');
-      if (currentResult.currentModelId) {
-        this.currentModelId = currentResult.currentModelId;
+      // Current model: last used, else the Default AI from Settings
+      const { currentModelId, settings } = await chrome.storage.sync.get(['currentModelId', 'settings']);
+      const wanted = currentModelId || settings?.defaultAI;
+      if (wanted && this.models.some(m => m.id === wanted)) {
+        this.currentModelId = wanted;
       }
     } catch (error) {
       console.error('[Yavar] Failed to load models:', error);
@@ -171,7 +178,9 @@ class YavarSidePanel {
   }
 
   getCurrentModel() {
-    return this.models.find(m => m.id === this.currentModelId) || this.models[0];
+    return this.models.find(m => m.id === this.currentModelId)
+      || this.models.find(m => m.enabled)
+      || this.models[0];
   }
 
   bindEvents() {
@@ -251,7 +260,8 @@ class YavarSidePanel {
     this.notificationDismiss.addEventListener('click', () => this.hideNotification());
 
     // Notes panel buttons
-    this.btnClearNotes.addEventListener('click', () => this.clearNotes());
+    this.btnClearNotes.addEventListener('click', () => this.handleClearNotesClick());
+    this.btnDownloadNotes.addEventListener('click', () => this.downloadNotes());
     this.btnCopyNotes.addEventListener('click', () => this.copyNotes());
 
     // Screenshot panel buttons
@@ -261,6 +271,7 @@ class YavarSidePanel {
     // History panel buttons
     this.btnCloseHistory.addEventListener('click', () => this.historyPanel.classList.add('hidden'));
     this.btnClearHistory.addEventListener('click', () => this.handleClearHistoryClick());
+    this.btnExportHistory.addEventListener('click', () => this.exportHistory());
     this.historySearch.addEventListener('input', () => this.renderHistory());
     this.historyList.addEventListener('click', (e) => this.handleHistoryListClick(e));
 
@@ -285,6 +296,7 @@ class YavarSidePanel {
     const model = this.getCurrentModel();
     if (model) {
       this.loadingState.classList.remove('hidden');
+      this._frameReady = false;
       this.aiFrame.src = model.url;
     }
   }
@@ -298,6 +310,9 @@ class YavarSidePanel {
   }
 
   handleFrameLoad() {
+    this._frameReady = true;
+    this._frameWaiters.splice(0).forEach(resolve => resolve());
+
     setTimeout(() => {
       this.loadingState.classList.add('hidden');
     }, 500);
@@ -312,7 +327,10 @@ class YavarSidePanel {
     const model = this.getCurrentModel();
     if (model) {
       this.loadingState.classList.remove('hidden');
-      this.aiFrame.src = model.url + '?' + Date.now();
+      const url = new URL(model.url);
+      url.searchParams.set('_yavar', Date.now());
+      this._frameReady = false;
+      this.aiFrame.src = url.href;
     }
   }
 
@@ -341,10 +359,10 @@ class YavarSidePanel {
     this.modelList.innerHTML = enabledModels.map(model => `
       <div class="model-item ${model.id === this.currentModelId ? 'active' : ''}" 
            data-model-id="${model.id}">
-        <div class="model-icon">${model.icon}</div>
+        <div class="model-icon">${this.escapeHtml(model.icon)}</div>
         <div class="model-info">
-          <div class="model-name">${model.name}</div>
-          ${model.custom ? `<div class="model-url">${model.url}</div>` : ''}
+          <div class="model-name">${this.escapeHtml(model.name)}</div>
+          ${model.custom ? `<div class="model-url">${this.escapeHtml(model.url)}</div>` : ''}
         </div>
       </div>
     `).join('');
@@ -363,6 +381,7 @@ class YavarSidePanel {
   async showSettings() {
     await this.renderModelsList();
     await this.loadAutoPasteSettings();
+    this.renderShortcuts();
     await this.loadGithubToken();
     this.settingsPanel.classList.remove('hidden');
   }
@@ -410,10 +429,10 @@ class YavarSidePanel {
 
       // Add event listeners if not already added
       if (!this.settingsListenersAdded) {
-        autoPasteToggle?.addEventListener('change', (e) => this.saveAutoPasteSetting(e.target.checked));
-        autoSubmitToggle?.addEventListener('change', (e) => this.saveAutoSubmitSetting(e.target.checked));
-        screenshotPreviewToggle?.addEventListener('change', (e) => this.saveScreenshotPreviewSetting(e.target.checked));
-        deepResearchToggle?.addEventListener('change', (e) => this.saveDeepResearchSetting(e.target.checked));
+        autoPasteToggle?.addEventListener('change', (e) => this.saveSetting('autoPaste', e.target.checked));
+        autoSubmitToggle?.addEventListener('change', (e) => this.saveSetting('autoSubmit', e.target.checked));
+        screenshotPreviewToggle?.addEventListener('change', (e) => this.saveSetting('showScreenshotPreview', e.target.checked));
+        deepResearchToggle?.addEventListener('change', (e) => this.saveSetting('deepResearch', e.target.checked));
         this.settingsListenersAdded = true;
       }
     } catch (error) {
@@ -421,48 +440,31 @@ class YavarSidePanel {
     }
   }
 
-  async saveAutoPasteSetting(enabled) {
+  // Merge one key into the shared settings object in sync storage
+  async saveSetting(key, value) {
     try {
-      const { settings } = await chrome.storage.sync.get('settings') || {};
-      const newSettings = { ...settings, autoPaste: enabled };
-      await chrome.storage.sync.set({ settings: newSettings });
-      console.log('[Yavar] Auto-paste setting saved:', enabled);
+      const { settings } = await chrome.storage.sync.get('settings');
+      await chrome.storage.sync.set({ settings: { ...settings, [key]: value } });
     } catch (error) {
-      console.error('[Yavar] Failed to save auto-paste setting:', error);
+      console.error(`[Yavar] Failed to save ${key}:`, error);
     }
   }
 
-  async saveAutoSubmitSetting(enabled) {
-    try {
-      const { settings } = await chrome.storage.sync.get('settings') || {};
-      const newSettings = { ...settings, autoSubmit: enabled };
-      await chrome.storage.sync.set({ settings: newSettings });
-      console.log('[Yavar] Auto-submit setting saved:', enabled);
-    } catch (error) {
-      console.error('[Yavar] Failed to save auto-submit setting:', error);
-    }
-  }
-
-  async saveScreenshotPreviewSetting(enabled) {
-    try {
-      const { settings } = await chrome.storage.sync.get('settings') || {};
-      const newSettings = { ...settings, showScreenshotPreview: enabled };
-      await chrome.storage.sync.set({ settings: newSettings });
-      console.log('[Yavar] Screenshot preview setting saved:', enabled);
-    } catch (error) {
-      console.error('[Yavar] Failed to save screenshot preview setting:', error);
-    }
-  }
-
-  async saveDeepResearchSetting(enabled) {
-    try {
-      const { settings } = await chrome.storage.sync.get('settings') || {};
-      const newSettings = { ...settings, deepResearch: enabled };
-      await chrome.storage.sync.set({ settings: newSettings });
-      console.log('[Yavar] Deep research setting saved:', enabled);
-    } catch (error) {
-      console.error('[Yavar] Failed to save deep research setting:', error);
-    }
+  // Current bindings (users can rebind at chrome://extensions/shortcuts)
+  renderShortcuts() {
+    const list = document.getElementById('shortcuts-list');
+    if (!list || !chrome.commands?.getAll) return;
+    chrome.commands.getAll((commands) => {
+      const rows = (commands || [])
+        .filter(c => c.description)
+        .map(c => ({ label: c.description, keys: c.shortcut || 'Not set' }));
+      rows.push({ label: 'Save AI answer to history', keys: 'Ctrl+Shift+S' });
+      list.innerHTML = rows.map(r => `
+            <div class="shortcut-item">
+              <span>${this.escapeHtml(r.label)}</span>
+              <kbd>${this.escapeHtml(r.keys)}</kbd>
+            </div>`).join('');
+    });
   }
 
   async getAutoPasteSettings() {
@@ -482,10 +484,10 @@ class YavarSidePanel {
   renderModelsList() {
     this.modelsListContainer.innerHTML = this.models.map(model => `
       <div class="model-row">
-        <div class="model-row-icon">${model.icon}</div>
+        <div class="model-row-icon">${this.escapeHtml(model.icon)}</div>
         <div class="model-row-info">
-          <div class="model-row-name">${model.name}</div>
-          <div class="model-row-url">${model.url}</div>
+          <div class="model-row-name">${this.escapeHtml(model.name)}</div>
+          <div class="model-row-url">${this.escapeHtml(model.url)}</div>
         </div>
         <div class="model-row-actions">
           <div class="toggle-switch ${model.enabled ? 'active' : ''}" 
@@ -565,10 +567,18 @@ class YavarSidePanel {
 
     if (!name || !url) return;
 
+    // Only real web pages can be framed; reject javascript:, file:, typos, etc.
+    let parsed;
+    try { parsed = new URL(/^https?:\/\//i.test(url) ? url : 'https://' + url); } catch (err) { parsed = null; }
+    if (!parsed || !/^https?:$/.test(parsed.protocol)) {
+      this.showNotification('⚠️ Enter a valid http(s) URL');
+      return;
+    }
+
     const newModel = {
       id: 'custom_' + Date.now(),
       name,
-      url,
+      url: parsed.href,
       icon: '🌐',
       enabled,
       custom: true
@@ -844,13 +854,12 @@ First Task: Based on the tree and tech stack, what is the single most important 
       return;
     }
 
-    let query = '';
-    try {
-      query = (window.prompt('What should the AI research?') || '').trim();
-    } catch (e) {
-      this.showNotification('⚠️ Could not open the input dialog');
-      return;
-    }
+    const query = await this.askInput({
+      title: 'Web research',
+      message: 'The AI will search the web, read sources, and write up an answer with citations.',
+      placeholder: 'e.g. How do passkeys work, and are they safer than passwords?',
+      okLabel: 'Research'
+    });
     if (!query) return;
 
     // Deep mode raises the limits and pushes the AI to cover more sources
@@ -1111,7 +1120,11 @@ Begin: state a one-line plan, then issue your first tool call.`;
 
   async readUrl(url) {
     if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
-    const res = await fetch(url, { headers: { 'Accept': 'text/html,application/json,*/*' } });
+    if (!isPublicWebUrl(url)) throw new Error('blocked: only public http(s) pages can be read');
+    const res = await fetch(url, {
+      headers: { 'Accept': 'text/html,application/json,*/*' },
+      credentials: 'omit'
+    });
     if (!res.ok) throw new Error('HTTP ' + res.status);
 
     const ct = res.headers.get('content-type') || '';
@@ -1240,7 +1253,8 @@ Begin: state a one-line plan, then issue your first tool call.`;
   initMermaid() {
     try {
       if (window.mermaid) {
-        window.mermaid.initialize({ startOnLoad: false, theme: 'default', securityLevel: 'strict' });
+        const dark = window.matchMedia?.('(prefers-color-scheme: dark)').matches;
+        window.mermaid.initialize({ startOnLoad: false, theme: dark ? 'dark' : 'default', securityLevel: 'strict' });
       }
     } catch (e) {
       console.warn('[Yavar] mermaid init failed:', e);
@@ -1765,13 +1779,12 @@ Begin: state a one-line plan, then issue your first tool call.`;
   // pulls each video's transcript from the ytx server, and hands the bundle to
   // the AI to synthesize against the plan in Notes.
   async researchVideosOnTopic() {
-    let topic = '';
-    try {
-      topic = (window.prompt('Research a topic across YouTube videos:\n\nWhat do you want to look into?') || '').trim();
-    } catch (e) {
-      this.showNotification('⚠️ Could not open the input dialog');
-      return;
-    }
+    const topic = await this.askInput({
+      title: 'Search videos',
+      message: 'Pulls transcripts from the top YouTube results and has the AI synthesize them.',
+      placeholder: 'e.g. top things to try in Chiang Mai',
+      okLabel: 'Search'
+    });
     if (!topic) return;
 
     const { base, count } = await this.getYtxSettings();
@@ -1780,9 +1793,14 @@ Begin: state a one-line plan, then issue your first tool call.`;
     let plan = '';
     try { plan = ((await chrome.storage.local.get('yavarNotes')).yavarNotes || '').trim(); } catch (e) {}
     if (!plan) {
-      try {
-        plan = (window.prompt('Your Notes are empty. What should the AI optimize the summary for?\n(e.g. "a 4-day trip, love food + hikes, on a budget")') || '').trim();
-      } catch (e) {}
+      const goal = await this.askInput({
+        title: 'What should it optimize for?',
+        message: 'Your Notes are empty, so tell the AI what matters to you (optional).',
+        placeholder: 'e.g. a 4-day trip, love food + hikes, on a budget',
+        okLabel: 'Continue'
+      });
+      if (goal === null) return;
+      plan = goal;
     }
 
     // ytx must be running for bulk fetching.
@@ -1855,13 +1873,13 @@ Begin: state a one-line plan, then issue your first tool call.`;
       return;
     }
 
-    let question = '';
-    try {
-      question = (window.prompt(`Research this page:\n"${page.title}"\n\nWhat do you want to know? (blank = summarize & dig deeper)`) || '').trim();
-    } catch (e) {
-      this.showNotification('⚠️ Could not open the input dialog');
-      return;
-    }
+    // null = cancelled; '' = summarize and dig deeper
+    const question = await this.askInput({
+      title: 'Research this page',
+      message: `"${page.title}"\n\nLeave blank to summarize it and dig deeper.`,
+      placeholder: 'What do you want to know?',
+      okLabel: 'Research'
+    });
     if (question === null) return;
 
     let deep = false;
@@ -2288,6 +2306,8 @@ Begin: state a one-line plan, then issue your first tool call.`;
   // Receive answers posted back from the iframe (ai-bridge → window.parent).
   setupIframeMessageListener() {
     window.addEventListener('message', (event) => {
+      // Only trust replies from the chat we loaded, not other frames/windows
+      if (!this.aiFrame || event.source !== this.aiFrame.contentWindow) return;
       const data = event.data;
       if (!data || typeof data !== 'object') return;
 
@@ -2458,7 +2478,7 @@ Begin: state a one-line plan, then issue your first tool call.`;
             <span class="history-date">${date}</span>
           </div>
           ${promptLine}
-          <div class="history-answer">${preview}</div>
+          <div class="history-answer" data-act="expand" data-id="${e.id}" title="Click to expand">${preview}</div>
           <div class="history-item-actions">
             <button class="history-btn" data-act="copy" data-id="${e.id}">Copy</button>
             <button class="history-btn" data-act="notes" data-id="${e.id}">→ Notes</button>
@@ -2469,12 +2489,27 @@ Begin: state a one-line plan, then issue your first tool call.`;
   }
 
   handleHistoryListClick(e) {
+    const answerEl = e.target.closest('.history-answer[data-act="expand"]');
+    if (answerEl) {
+      this.toggleHistoryAnswer(answerEl);
+      return;
+    }
     const btn = e.target.closest('.history-btn');
     if (!btn) return;
     const { act, id } = btn.dataset;
     if (act === 'copy') this.copyHistoryEntry(id);
     else if (act === 'notes') this.insertHistoryToNotes(id);
     else if (act === 'delete') this.deleteHistoryEntry(id);
+  }
+
+  // Swap the short preview for the full answer (and back). Full text is only
+  // read on demand so the list stays light with 200 long entries.
+  async toggleHistoryAnswer(el) {
+    if (window.getSelection()?.toString()) return; // don't collapse while selecting text
+    const expanded = el.classList.toggle('expanded');
+    const answer = (await this.getHistory()).find(x => x.id === el.dataset.id)?.answer || '';
+    el.textContent = expanded ? answer : answer.slice(0, 240) + (answer.length > 240 ? '…' : '');
+    el.title = expanded ? 'Click to collapse' : 'Click to expand';
   }
 
   async copyHistoryEntry(id) {
@@ -2557,6 +2592,63 @@ Begin: state a one-line plan, then issue your first tool call.`;
     chrome.storage.local.set({ yavarNotes: this.cmEditor.getValue() });
   }
 
+  // Two-click confirm, same as history: one stray click shouldn't wipe notes
+  handleClearNotesClick() {
+    if (!this.cmEditor.getValue()) return;
+    if (this._clearNotesArmed) {
+      clearTimeout(this._clearNotesTimer);
+      this._clearNotesArmed = false;
+      this.clearNotes();
+      this.showNotification('🗑️ Notes cleared');
+      return;
+    }
+    this._clearNotesArmed = true;
+    this.showNotification('Click clear again to confirm');
+    this._clearNotesTimer = setTimeout(() => { this._clearNotesArmed = false; }, 3000);
+  }
+
+  downloadNotes() {
+    const text = this.cmEditor.getValue();
+    if (!text.trim()) {
+      this.showNotification('Notes are empty');
+      return;
+    }
+    this.downloadText(`yavar-notes-${this.fileDateStamp()}.md`, text);
+  }
+
+  async exportHistory() {
+    const history = await this.getHistory();
+    if (!history.length) {
+      this.showNotification('No saved answers to export');
+      return;
+    }
+    const blocks = history.map(e => {
+      const head = `## ${e.platform || 'AI'} · ${new Date(e.ts).toLocaleString()}`;
+      const src = e.url ? `\n\n<${e.url}>` : '';
+      const prompt = e.prompt ? `\n\n**Prompt:**\n\n${e.prompt}` : '';
+      return `${head}${src}${prompt}\n\n**Answer:**\n\n${e.answer || ''}`;
+    });
+    const md = `# Yavar saved answers\n\nExported ${new Date().toLocaleString()} · ${history.length} answer(s)\n\n---\n\n` +
+      blocks.join('\n\n---\n\n') + '\n';
+    this.downloadText(`yavar-answers-${this.fileDateStamp()}.md`, md);
+    this.showNotification(`⬇️ Exported ${history.length} answer(s)`);
+  }
+
+  fileDateStamp() {
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  downloadText(filename, text, mime = 'text/markdown') {
+    const url = URL.createObjectURL(new Blob([text], { type: mime + ';charset=utf-8' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
   clearNotes() {
     this.cmEditor.setValue('');
     this.saveNotes();
@@ -2607,15 +2699,47 @@ Begin: state a one-line plan, then issue your first tool call.`;
     }
   }
 
+  // ========== Input Dialog ==========
+
+  // Ask for a line of text. Resolves to the trimmed text, or null if cancelled.
+  askInput({ title, message = '', placeholder = '', okLabel = 'Go', value = '' }) {
+    const dialog = document.getElementById('ask-dialog');
+    const input = document.getElementById('ask-input');
+    if (!dialog?.showModal) return Promise.resolve(null);
+
+    document.getElementById('ask-title').textContent = title;
+    document.getElementById('ask-message').textContent = message;
+    document.getElementById('ask-ok').textContent = okLabel;
+    input.placeholder = placeholder;
+    input.value = value;
+
+    return new Promise((resolve) => {
+      const onKey = (e) => {
+        if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+          e.preventDefault();
+          dialog.close('ok');
+        }
+      };
+      input.addEventListener('keydown', onKey);
+      dialog.addEventListener('close', () => {
+        input.removeEventListener('keydown', onKey);
+        resolve(dialog.returnValue === 'ok' ? input.value.trim() : null);
+      }, { once: true });
+      dialog.returnValue = '';
+      dialog.showModal();
+      input.focus();
+    });
+  }
+
   // ========== Notification Functions ==========
 
   showNotification(text) {
     this.notificationText.textContent = text;
     this.notificationBar.classList.remove('hidden');
 
-    setTimeout(() => {
-      this.hideNotification();
-    }, 4000);
+    // Restart the timer so a newer message isn't hidden by an older one's timeout
+    clearTimeout(this._notificationTimer);
+    this._notificationTimer = setTimeout(() => this.hideNotification(), 4000);
   }
 
   hideNotification() {
@@ -2661,7 +2785,15 @@ Begin: state a one-line plan, then issue your first tool call.`;
           console.log('[Yavar Sidepanel] Received AUTO_SUBMIT_PROMPT, forwarding to iframe');
           this._lastForwardedPrompt = message.prompt;
           this._lastForwardedTime = Date.now();
-          this.forwardToIframe(message);
+          // Handled here, so drop the stored copy; otherwise the next frame load
+          // (model switch, new chat) would paste this prompt again.
+          chrome.storage.session.remove(['pendingAutoSubmit', 'lastSubmitTime']).catch(() => {});
+          this.getAutoPasteSettings().then(({ autoPaste, autoSubmit }) => {
+            if (autoPaste) this.forwardToIframe({ prompt: message.prompt, autoSubmit });
+            else navigator.clipboard.writeText(message.prompt)
+              .then(() => this.showNotification('📋 Prompt copied - paste it into the chat'))
+              .catch(() => {});
+          });
         } else {
           console.log('[Yavar Sidepanel] Ignoring duplicate AUTO_SUBMIT_PROMPT from staggered retry');
         }
@@ -2680,10 +2812,61 @@ Begin: state a one-line plan, then issue your first tool call.`;
     this.showNotification(`📋 "${preview}" copied!`);
   }
 
+  // Resolves once the chat iframe has loaded (or after a timeout), so messages
+  // sent while the panel is still opening aren't posted to about:blank.
+  whenFrameReady(timeoutMs = 15000) {
+    if (this._frameReady) return Promise.resolve();
+    return new Promise((resolve) => {
+      this._frameWaiters.push(resolve);
+      setTimeout(resolve, timeoutMs);
+    });
+  }
+
+  // Run a request queued by the context menu before the panel was open
+  async runPendingAction(action) {
+    await this.whenFrameReady();
+    if (action === 'add_page') this.addPageToChat();
+  }
+
+  // Text sent from the context menu ("Copy to Yavar", "Explain code", page
+  // content): paste it into the chat input so the user can add a question,
+  // and also try the clipboard (which fails if the panel isn't focused).
+  async handlePendingText(text) {
+    // The storage listener and the on-open check can both see the same text
+    if (text === this._lastPendingText && Date.now() - this._lastPendingTime < 5000) return;
+    this._lastPendingText = text;
+    this._lastPendingTime = Date.now();
+
+    const { autoPaste } = await this.getAutoPasteSettings();
+    if (autoPaste) {
+      await this.whenFrameReady();
+      this._lastForwardedPrompt = text;
+      this._lastForwardedTime = Date.now();
+      this.forwardToIframe({ prompt: text, autoSubmit: false });
+    }
+    let copied = false;
+    try { await navigator.clipboard.writeText(text); copied = true; } catch (e) { /* not focused */ }
+    this.showNotification(autoPaste
+      ? '📋 Added to the chat input' + (copied ? ' (also copied)' : '')
+      : copied ? '📋 Copied - paste it into the chat' : '⚠️ Could not copy - enable auto-paste in Settings');
+  }
+
   setupStorageListener() {
     // Listen for screenshot data that arrives after sidepanel loads
     chrome.storage.onChanged.addListener((changes, areaName) => {
       if (areaName !== 'session') return;
+
+      if (changes.pendingAction?.newValue) {
+        chrome.storage.session.remove('pendingAction');
+        this.runPendingAction(changes.pendingAction.newValue);
+      }
+
+      // Context-menu text while the panel is already open
+      if (changes.pendingText?.newValue) {
+        const text = changes.pendingText.newValue;
+        chrome.storage.session.remove(['pendingText', 'pendingNotification']);
+        this.handlePendingText(text);
+      }
 
       if (changes.pendingScreenshot) {
         const { newValue, oldValue } = changes.pendingScreenshot;
@@ -2707,17 +2890,16 @@ Begin: state a one-line plan, then issue your first tool call.`;
 
   async checkPendingData() {
     try {
-      const result = await chrome.storage.session.get(['pendingText', 'pendingScreenshot', 'pendingScreenshotRect', 'pendingNotification']);
+      const result = await chrome.storage.session.get(['pendingText', 'pendingScreenshot', 'pendingScreenshotRect', 'pendingNotification', 'pendingAction']);
+
+      if (result.pendingAction) {
+        await chrome.storage.session.remove('pendingAction');
+        this.runPendingAction(result.pendingAction);
+      }
 
       if (result.pendingText) {
-        await navigator.clipboard.writeText(result.pendingText);
-        if (result.pendingNotification) {
-          this.showNotification(result.pendingNotification);
-        } else {
-          this.showNotification('📋 Content copied!');
-        }
-        await chrome.storage.session.remove('pendingText');
-        await chrome.storage.session.remove('pendingNotification');
+        await chrome.storage.session.remove(['pendingText', 'pendingNotification']);
+        this.handlePendingText(result.pendingText);
       }
 
       if (result.pendingScreenshot) {
