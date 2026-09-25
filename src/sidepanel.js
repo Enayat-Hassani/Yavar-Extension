@@ -7,6 +7,7 @@ import { renderMarkdown, runnableLang } from './utils/markdown.js';
 import { DEFAULT_MODELS, loadModels as loadStoredModels } from './utils/models.js';
 import { captureLabel, captureMarkdown, hasCaptureText } from './utils/capture.js';
 import { suggestActions } from './utils/actions.js';
+import { transcriptMarkdown, turnsToMessages, HANDOFF_NOTE } from './utils/conversation.js';
 import { loadApiConfig, buildRoute, askRoute, askWithBudget } from './utils/llm.js';
 import { pickCoreFiles, planPrompt, hintPrompt, checkPrompt, parseRebuildPlan } from './utils/rebuild.js';
 import {
@@ -258,13 +259,7 @@ class YavarSidePanel {
     }
     const changed = this.answerWith !== 'api';
     await this.setAnswerWith('api');
-    if (changed && this.hasMessages?.()) {
-      const note = document.createElement('div');
-      note.className = 'thread-note';
-      note.textContent = 'Switched to API · new chat';
-      this.threadBody.appendChild(note);
-      note.scrollIntoView({ block: 'end', behavior: 'smooth' });
-    }
+    if (changed) this.noteSwitch('API');
   }
 
   async setAnswerWith(v) {
@@ -284,14 +279,26 @@ class YavarSidePanel {
     this.saveCurrentModelId();
     this.loadCurrentAI();
     this.updateModelPill();
-    // The new model starts a new chat: say so where the conversation shows
-    if (changed && this.hasMessages?.()) {
-      const note = document.createElement('div');
-      note.className = 'thread-note';
-      note.textContent = `Switched to ${this.getCurrentModel()?.name || 'another model'} · new chat`;
-      this.threadBody.appendChild(note);
-      note.scrollIntoView({ block: 'end', behavior: 'smooth' });
-    }
+    if (changed) this.noteSwitch(this.getCurrentModel()?.name || 'another model');
+  }
+
+  // The next model picks up the conversation: its next question carries the
+  // turns so far (see showAnswerIn). Say so where the conversation shows.
+  noteSwitch(name) {
+    if (!this.hasMessages?.()) return;
+    this._handoff = this.threadTurns().length > 0;
+    const note = document.createElement('div');
+    note.className = 'thread-note';
+    note.textContent = this._handoff ? `Switched to ${name} · it picks up this conversation` : `Switched to ${name} · new chat`;
+    this.threadBody.appendChild(note);
+    note.scrollIntoView({ block: 'end', behavior: 'smooth' });
+  }
+
+  // The conversation's answered turns, oldest first (a retried answer's
+  // turn goes with its card)
+  threadTurns() {
+    this._turns = (this._turns || []).filter(t => t.el.isConnected);
+    return this._turns;
   }
 
   handleFrameLoad() {
@@ -1389,7 +1396,14 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
   // and shortcuts (queued as pendingAction) all come through here
   runTool(id) {
     if (id.startsWith('tpl:')) { this.applyTemplate(id.slice(4)); return; }
-    if (id.startsWith('model:')) { this.setAnswerWith('chat'); this.switchModel(id.slice(6)); return; }
+    if (id.startsWith('model:')) {
+      // From API back to the chat site already open: still a switch for the conversation
+      const sameSite = this.answerWith === 'api' && id.slice(6) === this.currentModelId;
+      this.setAnswerWith('chat');
+      this.switchModel(id.slice(6));
+      if (sameSite) this.noteSwitch(this.getCurrentModel()?.name || 'the chat');
+      return;
+    }
     if (id === 'answer:api') { this.useApi(); return; }
     const tools = {
       reader: () => this.openPicker('repo'),
@@ -3290,14 +3304,27 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     const card = this.answerCard(container, {
       title, onUseCode, collapsible, saveAs,
       onRetry: () => again(card, opts, true),
-      onAskChat: api ? () => again(card, { ...opts, via: 'chat' }, false) : null
+      // A second opinion from the chat site, which hasn't seen this conversation
+      onAskChat: api ? () => again(card, { ...opts, via: 'chat', handoff: card.el }, false) : null
     });
+    // The conversation so far goes with the question after a model switch,
+    // and with a second opinion (minus the answer it's a second opinion on)
+    let askPrompt = prompt;
+    let askAttachments = attachments;
+    const prior = inThread ? this.threadTurns().filter(t => t.el !== opts.handoff) : [];
+    const handoff = prior.length > 0 && (this._handoff || !!opts.handoff);
+    if (handoff && api) {
+      this._apiHistory = turnsToMessages(prior);
+    } else if (handoff) {
+      askPrompt = `${HANDOFF_NOTE}\n\n${prompt}`;
+      askAttachments = [...attachments, { filename: 'conversation-so-far.md', content: transcriptMarkdown(prior), mime: 'text/markdown' }];
+    }
     card.el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     try {
       // Bring the answer's top into view once it starts arriving
       let shown = false;
-      const text = await this.askInPanel(prompt, {
-        attachments, via,
+      const text = await this.askInPanel(askPrompt, {
+        attachments: askAttachments, via,
         onModel: (label) => card.setModel(label),
         onProgress: (t) => {
           card.update(t);
@@ -3306,6 +3333,10 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       });
       card.done(text);
       onDone?.(text);
+      if (inThread) {
+        if (handoff && !opts.handoff) this._handoff = false;   // the new model has it now
+        this._turns = [...this.threadTurns(), { q: saveAs?.prompt || title, a: text, by: card.el.querySelector('.answer-title').textContent, el: card.el }];
+      }
       if (api && inThread) this.suggestFollowups(card.el, saveAs?.prompt || '', text);
       return text;
     } catch (e) {
@@ -3522,6 +3553,8 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     this.renderComposer();
     this._freshChatNext = true;
     this._apiHistory = [];
+    this._turns = [];
+    this._handoff = false;
     this.renderHome();
     this.setView('app');
   }
