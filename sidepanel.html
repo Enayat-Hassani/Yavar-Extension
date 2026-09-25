@@ -46,6 +46,7 @@
           <button id="btn-copy-notes" class="history-action-btn" title="Copy notes">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
           </button>
+          <button id="btn-close-notes" class="history-action-btn" title="Close (Esc)" aria-label="Close notes">✕</button>
         </div>
       </div>
       <div id="notes-editor"></div>
@@ -80,19 +81,6 @@
       <div class="lens-list" id="tool-menu-list"></div>
     </div>
 
-    <!-- Model Switcher Popover -->
-    <div id="model-switcher" class="model-switcher hidden">
-      <div class="model-switcher-header">
-        <span class="model-switcher-title">Model</span>
-      </div>
-      <div id="model-list" class="model-list">
-        <!-- Models populated dynamically -->
-      </div>
-      <div class="model-switcher-footer">
-        <button id="btn-manage-models" class="btn-text">Manage models</button>
-      </div>
-    </div>
-
     <!-- Code runner: run JS/Python from answers (or your own) in a sandbox -->
     <div id="run-panel" class="run-panel sheet hidden" role="dialog" aria-label="Code runner">
       <div class="run-header">
@@ -123,11 +111,11 @@
       </div>
     </div>
 
-    <!-- Rebuild it yourself: a step-by-step plan to rebuild the project -->
-    <div id="rebuild-panel" class="run-panel rebuild-panel sheet hidden" role="dialog" aria-label="Rebuild it yourself">
+    <!-- Build it yourself: a step-by-step plan to rebuild the project -->
+    <div id="rebuild-panel" class="run-panel rebuild-panel sheet hidden" role="dialog" aria-label="Build it yourself">
       <div class="run-header">
         <div class="files-heading">
-          <span class="files-title">Rebuild it yourself</span>
+          <span class="files-title">Build it yourself</span>
           <span id="rebuild-sub" class="files-repo-chip"></span>
         </div>
         <div class="files-header-actions">
@@ -138,19 +126,6 @@
       <div id="rebuild-body" class="rebuild-body"></div>
     </div>
 
-    <!-- Text input dialog for the agents (window.prompt is unreliable in side panels) -->
-    <dialog id="ask-dialog" class="ask-dialog" aria-labelledby="ask-title">
-      <form method="dialog" class="ask-form">
-        <h3 id="ask-title" class="ask-title"></h3>
-        <p id="ask-message" class="ask-message"></p>
-        <textarea id="ask-input" class="ask-input" rows="3"></textarea>
-        <p class="ask-hint">Enter to submit · Shift+Enter for a new line · Esc to cancel</p>
-        <div class="modal-actions">
-          <button type="submit" value="cancel" class="btn-secondary" formnovalidate>Cancel</button>
-          <button type="submit" value="ok" id="ask-ok" class="btn-primary">Go</button>
-        </div>
-      </form>
-    </dialog>
 
     <!-- Yavar view: the main screen. The chat runs behind it (the "Chat"
          button shows it); answers, files and tools all live here. -->
@@ -218,11 +193,16 @@
       </div>
     </section>
 
-    <!-- In chat view: one tap back to Yavar -->
-    <button id="back-to-yavar" class="back-to-yavar hidden" title="Back to Yavar">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"></path></svg>
-      Yavar
-    </button>
+    <!-- In chat view: one tap back to Yavar, and a screenshot straight into the chat -->
+    <div id="chat-bar" class="chat-bar hidden">
+      <button id="back-to-yavar" class="chat-bar-btn" title="Back to Yavar">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"></path></svg>
+        Yavar
+      </button>
+      <button id="chat-screenshot" class="chat-bar-btn is-icon" title="Screenshot an area of the page into this chat" aria-label="Screenshot into the chat">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"></path><circle cx="12" cy="12" r="3"></circle></svg>
+      </button>
+    </div>
 
   </div>
 

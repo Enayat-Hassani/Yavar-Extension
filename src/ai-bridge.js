@@ -7,11 +7,11 @@
   const SELECTORS = {
     chatgpt: {
       input: '#prompt-textarea, textarea[data-id="root"], div[contenteditable="true"][id="prompt-textarea"]',
-      button: 'button[data-testid="send-button"], button[aria-label="Send prompt"]'
+      button: 'button[data-testid="send-button"], #composer-submit-button, button[aria-label="Send prompt" i]'
     },
     claude: {
       input: 'div[contenteditable="true"].ProseMirror, div[contenteditable="true"]',
-      button: 'button[aria-label="Send Message"], button[data-testid="send-button"]'
+      button: 'button[aria-label="Send message" i], button[data-testid="send-button"]'
     },
     gemini: {
       input: 'div[contenteditable="true"].ql-editor, div[contenteditable="true"]',
@@ -146,6 +146,10 @@
   let watchInterval = null;
   let watchRequestId = null;
   let watchSafetyTimer = null;
+  // True while autoSubmit waits for the chat to accept the message (a file
+  // upload keeps the send button disabled); the answer watch doesn't count
+  // that time as "no reply"
+  let submitting = false;
 
   function stopAnswerWatch() {
     if (watchInterval) { clearInterval(watchInterval); watchInterval = null; }
@@ -208,6 +212,7 @@
 
     watchInterval = setInterval(() => {
       if (watchRequestId !== requestId) return;
+      if (submitting) { elapsed = 0; lastActivity = Date.now(); return; }
       elapsed += TICK;
 
       const generating = !!document.querySelector(STOP_SELECTORS);
@@ -321,45 +326,53 @@
       inputEl.focus();
       insertTextIntoInput(inputEl, prompt);
 
-      console.log('[Yavar Bridge] Text inserted, submitting (with retries)...');
-
-      // Retry the submit until the input actually clears (message sent).
-      // A single click often fails on ChatGPT when the send button isn't ready yet.
-      const MAX_ATTEMPTS = 6;
-      const currentInputText = () => {
-        const el = document.querySelector(selectors.input);
-        if (!el) return '';
-        return (el.value !== undefined ? el.value : el.innerText || '').trim();
-      };
-
-      const trySubmit = (attempt) => {
-        if (attempt > 0 && currentInputText() === '') {
-          console.log('[Yavar Bridge] Submit confirmed (input cleared)');
-          return;
+      submitting = true;
+      const sent = await submitWhenReady(selectors);
+      submitting = false;
+      if (!sent) {
+        console.warn('[Yavar Bridge] The chat did not accept the message');
+        // Fail the answer watch now with the real reason, rather than "no reply" later
+        if (watchRequestId) {
+          const rid = watchRequestId;
+          stopAnswerWatch();
+          postToYavar({ action: 'ANSWER_WATCH_NOT_SENT', requestId: rid });
         }
-        if (attempt >= MAX_ATTEMPTS) {
-          console.warn('[Yavar Bridge] Submit attempts exhausted — message may not have sent');
-          return;
-        }
-
-        const submitBtn = document.querySelector(selectors.button);
-        if (submitBtn && !submitBtn.disabled) {
-          submitBtn.click();
-        } else {
-          const el = document.querySelector(selectors.input);
-          el?.focus();
-          el?.dispatchEvent(new KeyboardEvent('keydown', {
-            key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true
-          }));
-        }
-        setTimeout(() => trySubmit(attempt + 1), 700);
-      };
-
-      setTimeout(() => trySubmit(0), 500);
-
+      }
     } catch (err) {
+      submitting = false;
       console.error('[Yavar Bridge] autoSubmit failed:', err);
     }
+  }
+
+  // Press send once the chat allows it, and resolve true when the message
+  // has left the input. With a file attached the send button stays disabled
+  // until the upload finishes, which can take far longer than a fixed wait.
+  async function submitWhenReady(selectors) {
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+    const inputText = () => {
+      const el = document.querySelector(selectors.input);
+      return el ? (el.value !== undefined ? el.value : el.innerText || '').trim() : '';
+    };
+    const deadline = Date.now() + 90000;
+    let presses = 0;
+    await sleep(400);
+    while (Date.now() < deadline && presses < 6) {
+      if (presses > 0 && inputText() === '') return true;
+      const btn = document.querySelector(selectors.button);
+      if (btn && !btn.disabled && btn.getAttribute('aria-disabled') !== 'true') {
+        btn.click();
+        presses++;
+      } else if (!btn) {
+        // No send button matched (the site may have changed): try Enter
+        const el = document.querySelector(selectors.input);
+        el?.focus();
+        el?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+        presses++;
+      }
+      // A disabled button means an upload is still running: keep waiting
+      await sleep(presses ? 800 : 500);
+    }
+    return presses > 0 && inputText() === '';
   }
 
   // The panel sends each message exactly once, after BRIDGE_READY (see the
