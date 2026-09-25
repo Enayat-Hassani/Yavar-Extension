@@ -225,7 +225,7 @@
     <!-- Model Switcher Popover -->
     <div id="model-switcher" class="model-switcher hidden">
       <div class="model-switcher-header">
-        <span class="model-switcher-title">Select AI Model</span>
+        <span class="model-switcher-title">Model</span>
       </div>
       <div id="model-list" class="model-list">
         <!-- Models populated dynamically -->
@@ -462,20 +462,53 @@
          button shows it); answers, files and tools all live here. -->
     <section id="app-view" class="app-view" aria-label="Yavar">
       <header class="app-head">
-        <div class="app-heading">
-          <span id="thread-title" class="app-title">Yavar</span>
+        <button id="app-model" class="app-model" type="button" title="Switch model" aria-haspopup="menu">
+          <span id="app-model-icon" class="app-model-icon" aria-hidden="true"></span>
+          <span id="app-model-name" class="app-model-name"></span>
+          <svg class="app-model-chev" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg>
+        </button>
+        <span id="thread-private" class="thread-private hidden" title="A temporary chat: it won't appear in your chat history">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path></svg>
+          Private
+        </span>
+        <div class="app-heading" aria-live="polite">
+          <span id="thread-title" class="app-title"></span>
           <span id="thread-sub" class="thread-sub"></span>
         </div>
-        <span id="thread-private" class="thread-private hidden" title="A temporary chat: it won't appear in your chat history">Private</span>
-        <button id="app-new" class="history-action-btn" title="New conversation">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"></path></svg>
+        <button id="app-new" class="app-icon-btn" title="New conversation">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"></path></svg>
         </button>
-        <button id="app-to-chat" class="history-action-btn" title="Show the chat">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"></path></svg>
+        <button id="app-to-chat" class="app-icon-btn" title="Show the chat">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"></path></svg>
+        </button>
+        <button id="app-more" class="app-icon-btn" title="More" aria-haspopup="menu">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"></circle><circle cx="12" cy="12" r="1.8"></circle><circle cx="19" cy="12" r="1.8"></circle></svg>
         </button>
       </header>
       <div id="thread-body" class="thread-body" aria-live="polite"></div>
       <div class="composer">
+        <!-- File picker: add repo or folder files to the message -->
+        <div id="picker" class="picker hidden" role="dialog" aria-label="Add files">
+          <div class="picker-head">
+            <div class="picker-heading">
+              <span class="picker-title">Add files</span>
+              <span id="picker-sub" class="picker-sub"></span>
+            </div>
+            <button id="picker-close" class="app-icon-btn" type="button" title="Close (Esc)" aria-label="Close">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg>
+            </button>
+          </div>
+          <div class="picker-search">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M21 21l-4.3-4.3"></path></svg>
+            <input id="picker-search" type="search" placeholder="Search files" autocomplete="off" spellcheck="false" aria-label="Search files">
+          </div>
+          <nav id="picker-crumbs" class="picker-crumbs" aria-label="Folder"></nav>
+          <div id="picker-list" class="picker-list" role="listbox" aria-multiselectable="true"></div>
+          <div class="picker-foot">
+            <span id="picker-count" class="picker-count">No files selected</span>
+            <button id="picker-add" class="picker-add" type="button" disabled>Add</button>
+          </div>
+        </div>
         <div id="composer-items" class="composer-items hidden"></div>
         <div id="composer-modes" class="composer-modes hidden"></div>
         <form id="thread-form" class="thread-form">
