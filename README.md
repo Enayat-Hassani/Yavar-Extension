@@ -1,10 +1,16 @@
 # Yavar - Your AI Sidekick
 
-A Chrome extension that embeds ChatGPT, Claude, and Gemini in a sidebar — so you can select anything on any page and route it to the AI, capture screenshots, analyze GitHub repositories with a deep-dive agent, run a web research agent, and keep your AI answers in a searchable history.
+A Chrome extension that embeds ChatGPT, Claude, and Gemini in a sidebar — so you can select anything on any page and route it to the AI, capture screenshots, learn GitHub repositories, run a web research agent, and keep your AI answers in a searchable history.
 
 ## What it does
 
 **AI sidebar** — opens `gemini.google.com`, `chatgpt.com`, or `claude.ai` in a full-viewport sidebar, with a model switcher (and support for adding your own custom models). Send selected text, screenshots, or whole-page content straight to the model.
+
+**The Yavar view**: Yavar opens as a full-page app. The chat (ChatGPT, Claude or Gemini) keeps running behind it, and **Chat** in the header shows it (**‹ Yavar** brings you back).
+
+- **Start page:** actions for the tab you're on. On GitHub: *Explain this repo*, *Browse files*, *Recent changes*, *Rebuild it yourself*, and *Explain this PR / file* when one is open. On other pages: *Summarize*, *Ask about this page*, *Research this page*.
+- **Composer:** type a question, or press **+** to attach this page, files from the repo, or files from a local folder. With files attached, one tap asks for *Explain*, *Line by line*, *How it fits*, *Review* or *Quiz me*.
+- **Answers** stream in as the AI writes them, with Copy, Save and ▶ Run on code. ■ stops waiting; the pencil starts a new conversation.
 
 **Yavar inside the chat** — when ChatGPT, Claude or Gemini is open in the sidebar, Yavar's controls sit right in the chat (inside isolated shadow DOM, so they never clash with the site's styles):
 
@@ -14,7 +20,7 @@ A Chrome extension that embeds ChatGPT, Claude, and Gemini in a sidebar — so y
 
 Turn them off under *Settings → Inside the chat*. They never appear in your normal chat tabs.
 
-**Right sidebar**: kept to eight buttons: model, new chat, **Agents** (deep-dive, web research, research this page, video search), **Code** (read this repo, read a local folder, playground), screenshot, saved answers, notes and settings. *Continue in a fresh chat* is in the model menu.
+**Right sidebar**: kept to eight buttons: model, new chat, **Agents** (web research, research this page, video search), **Code** (explain this repo, browse its files, read a local folder, playground), screenshot, saved answers, notes and settings. *Continue in a fresh chat* is in the model menu.
 
 **Floating menu** — select text (or code on GitHub, where it also tells the AI the file and line numbers) on any page and a compact icon menu appears, driven by **customizable prompt templates**. Built-ins include:
 
@@ -26,7 +32,7 @@ Add, edit, or remove your own templates in Settings using `{{selection}}`, `{{pa
 
 **GitHub analysis** — on any GitHub repository, generate a structured learning prompt with the file tree and README context. Unauthenticated by default; optionally add a GitHub token in Settings to lift the 60 req/hr rate limit.
 
-**GitHub deep-dive agent** — pick a repository to scan, then ask questions about it. The agent reads the codebase and answers with file references, with a status sheet at the bottom so you can watch the chat work above it.
+**Explain this repo**: one click packs the README and the repo's core files into one message and asks for a guided tour (purpose, layout, how a request flows through, the stack, and which 3 files to read first). It replaced the old deep-dive agent, which took many turns to do the same.
 
 **Web research agent** — research any topic: the agent performs **SEARCH + READ** across the web and synthesizes an answer in the sidebar. Toggle **Deep research mode** in Settings for deeper coverage.
 
