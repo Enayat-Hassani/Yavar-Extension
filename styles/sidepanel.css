@@ -139,12 +139,16 @@ html, body {
   transform: translateX(-50%) translateY(-100px);
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 20px;
-  background: var(--bg-secondary);
+  gap: 8px;
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  padding: 10px 10px 10px 16px;
+  background: var(--surface-glass);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border: 1px solid var(--border);
   border-radius: 12px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.14);
   z-index: 1000;
   transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -162,6 +166,8 @@ html, body {
   align-items: center;
   gap: 10px;
   font-size: 13px;
+  line-height: 1.4;
+  min-width: 0;
 }
 
 .notification-dismiss {
@@ -1364,7 +1370,8 @@ div.toggle-switch.active::after {
   display: none;
 }
 
-.files-rail-group:hover {
+.files-rail-group:hover,
+.files-rail-group.peek {
   transform: translateX(0);
   opacity: 1;
   box-shadow: 3px 3px 18px rgba(0, 0, 0, 0.1);
@@ -1394,7 +1401,8 @@ div.toggle-switch.active::after {
   border-top: none;
 }
 
-.files-rail-group:hover .dock-tab {
+.files-rail-group:hover .dock-tab,
+.files-rail-group.peek .dock-tab {
   gap: 7px;
 }
 
@@ -1455,7 +1463,8 @@ div.toggle-switch.active::after {
 
 .files-rail .files-tab-label { text-transform: uppercase; }
 
-.files-rail-group:hover .files-tab-label {
+.files-rail-group:hover .files-tab-label,
+.files-rail-group.peek .files-tab-label {
   max-width: 140px;
   opacity: 1;
 }
