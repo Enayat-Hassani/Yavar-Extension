@@ -607,10 +607,14 @@ class YavarSidePanel {
     const act = (id, label, svg, extra = '') =>
       `<button type="button" class="answer-act" data-ans="${id}" title="${this.escapeHtml(label)}" aria-label="${this.escapeHtml(label)}"${extra}>${svg}</button>`;
     const chatName = this.getCurrentModel()?.name || 'the chat';
+    // A foldable answer's title is its toggle, with a chevron that says which way it goes
+    const titleHtml = `<span class="answer-title">${this.escapeHtml(title)}</span>`;
     card.innerHTML =
-      `<div class="answer-head"><span class="answer-title">${this.escapeHtml(title)}</span>` +
-      `<span class="answer-status" aria-live="polite"></span>` +
-      (collapsible ? '<button type="button" class="answer-link" data-ans="toggle" title="Collapse / expand">▾</button>' : '') + `</div>` +
+      `<div class="answer-head">` + (collapsible
+        ? `<button type="button" class="answer-toggle" data-ans="toggle" aria-expanded="true">${titleHtml}` +
+          `<svg class="answer-chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg></button>`
+        : titleHtml) +
+      `<span class="answer-status" aria-live="polite"></span></div>` +
       `<div class="answer-body md"><div class="answer-wait" aria-label="Waiting for the answer"><i></i><i></i><i></i></div></div>` +
       `<div class="answer-foot" hidden>` +
         act('copy', 'Copy as Markdown', icon('<rect x="9" y="9" width="12" height="12" rx="2"></rect><path d="M5 15V5a2 2 0 0 1 2-2h10"></path>')) +
@@ -638,9 +642,15 @@ class YavarSidePanel {
       btn.classList.add(cls);
       setTimeout(() => btn.classList.remove(cls), 1400);
     };
+    // Folded from outside too (an older answer folds when a new one arrives)
+    const toggle = card.querySelector('.answer-toggle');
+    if (toggle) new MutationObserver(() => toggle.setAttribute('aria-expanded', String(!card.classList.contains('collapsed'))))
+      .observe(card, { attributes: true, attributeFilter: ['class'] });
     card.addEventListener('click', async (e) => {
       const ref = e.target.closest('[data-file-ref]');
       if (ref) { this.openRepoFile(JSON.parse(ref.dataset.fileRef)); return; }
+      // A folded answer's faded preview opens it
+      if (card.classList.contains('collapsed') && e.target.closest('.answer-body')) { card.classList.remove('collapsed'); return; }
       const btn = e.target.closest('[data-md-act], [data-ans]');
       if (!btn) return;
       const ans = btn.dataset.ans;
