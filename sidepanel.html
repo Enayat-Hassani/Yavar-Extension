@@ -126,15 +126,16 @@
       <div id="rebuild-body" class="rebuild-body"></div>
     </div>
 
-    <!-- Walk through a file: one block of lines at a time, highlighted in your tab -->
-    <div id="walk-panel" class="run-panel rebuild-panel walk-panel sheet hidden" role="dialog" aria-label="Walk through a file">
+    <!-- Reading: the repository's big picture and reading order (the map), and
+         walking through one file block by block, highlighted in the reader -->
+    <div id="walk-panel" class="run-panel rebuild-panel walk-panel sheet hidden" role="dialog" aria-label="Reading">
       <div class="run-header">
         <div class="files-heading">
-          <span class="files-title">Walk through</span>
+          <span id="walk-title" class="files-title">Walk through</span>
           <span id="walk-sub" class="files-repo-chip"></span>
         </div>
         <div class="files-header-actions">
-          <button id="walk-reset" class="history-action-btn" title="Ask for a new walkthrough of this file">↺</button>
+          <button id="walk-reset" class="history-action-btn" title="Ask again">↺</button>
           <button id="walk-close" class="history-action-btn" title="Close (Esc)">✕</button>
         </div>
       </div>
