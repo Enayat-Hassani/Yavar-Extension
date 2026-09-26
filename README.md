@@ -30,7 +30,7 @@ Add, edit, or remove your own templates in Settings using `{{selection}}`, `{{pa
 
 **Reading code** — read a repository the way you would with a mentor beside you, without an API key. The chat site does the explaining, so reading costs no paid calls.
 
-- **The reader.** Files open in a Yavar reader tab with the lines under discussion highlighted. It shows GitHub files and files from a local folder alike. File references in answers (`src/app.js:12-30`) are links that open there.
+- **The reader.** Files open in a Yavar reader tab with the lines under discussion highlighted. It shows GitHub files and files from a local folder alike. A local file can be edited there: **Edit**, then **Save** (or ⌘S) writes it back to the folder, and the walkthrough's blocks move with your change. File references in answers (`src/app.js:12-30`) are links that open there.
 - **Read <file>.** The AI splits the file into blocks of related lines. You step through them in the panel while the reader highlights each block. Every block has *Explain more*, *Quiz me*, *Practise typing* (retype the lines from memory; Yavar compares them with the original and marks what differs) and a chat button for your own question. Questions carry the block's numbered lines and the last two answers on it, so they make sense in any chat. Progress is kept per file.
 - **Read this repository** (also `Cmd/Ctrl+Shift+L`). The AI reads the README and core files and returns the big picture: what the project does, its main parts, and a reading order that starts at the entry point. Each file is then walked block by block. When you finish one, *Up next* suggests the next from the reading order and the file's imports; with a free API model set up, it picks between the candidates. *How the files connect* shows the import tree.
 - **Read this commit / pull request** (and each row of *Recent changes*). The change is split into parts, one per changed spot in a file. The AI gives the goal of the change, the order to read the parts, and what each part changed and why. The reader shows the file as it is after the change with the new lines highlighted; what was removed is in a fold under the explanation. *Write it yourself* is the typing practice over the new lines. Lockfiles, generated and vendored code and binary files are left out and named; a change with more than 40 parts has its busiest files' parts joined.
@@ -113,18 +113,20 @@ Yavar-Extension/
 │   ├── background.js     # Service worker (lifecycle, screenshot, routing)
 │   ├── sidepanel.js      # Sidebar UI: the Yavar view, agents, file picker,
 │   │                     #   walkthroughs, history, notes, runner, rebuild
-│   ├── reader.js         # The reader tab: a file with its lines highlighted
+│   ├── reader.js         # The reader tab: a file with its lines highlighted, editable when local
 │   ├── ai-bridge.js      # Auto-submit / auto-paste / answer capture on AI platforms
 │   ├── options.js        # Settings page (models, prompts, token, shortcuts)
 │   └── utils/
 │       ├── github.js     # URLs, file packs, line citations, imports
-│       ├── walkthrough.js # A file split into blocks; typing comparison; quizzes
+│       ├── walkthrough.js # A file split into blocks; typing comparison; quizzes;
+│       │                  #   moving blocks after an edit
 │       ├── journey.js    # The reading map and what to read next
 │       ├── changes.js    # A commit or PR diff split into parts
 │       ├── rebuild.js    # Build it yourself: plans, hints, reviews
 │       ├── llm.js        # Model APIs: local gateway, OpenRouter, the monthly budget
 │       ├── markdown.js   # Rendering answers
-│       ├── codeEditor.js # CodeMirror modes for the code boxes
+│       ├── codeEditor.js # CodeMirror modes for the code boxes and the reader
+│       ├── idb.js        # IndexedDB store for local folder handles
 │       ├── commands.js   # Keyboard shortcut handlers
 │       ├── template-core.js # Prompt templates: defaults + {{variable}} expansion
 │       │                    #   (classic script, shared by content script and pages)
@@ -134,7 +136,7 @@ Yavar-Extension/
 │       ├── models.js     # Built-in chat models, shared by the panel and Settings
 │       └── contextMenu.js
 ├── lib/
-│   ├── codemirror/       # CodeMirror (notes, runner, code boxes)
+│   ├── codemirror/       # CodeMirror (notes, runner, code boxes, reader)
 │   └── pyodide/          # Python runtime for the code runner
 ├── styles/
 ├── tests/                # node:test unit tests
