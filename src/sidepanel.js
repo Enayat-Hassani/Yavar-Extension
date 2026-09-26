@@ -3,7 +3,7 @@
 
 import { isPublicWebUrl } from './utils/net.js';
 import { loadTemplates, expandTemplate, varsInTemplate } from './utils/templates.js';
-import { renderMarkdown, runnableLang, highlight } from './utils/markdown.js';
+import { renderMarkdown, runnableLang } from './utils/markdown.js';
 import { walkPrompt, parseWalkthrough, compareTyped, quizPrompt, parseQuiz } from './utils/walkthrough.js';
 import { cmModeFor, defineGenericMode } from './utils/codeEditor.js';
 import { journeyPrompt, parseJourney, nextCandidates, nextPrompt, parseNext, connectionTree } from './utils/journey.js';
@@ -2359,16 +2359,8 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       if (!files.length) throw new Error('could not read the project files');
       const attachments = [{ filename: `${this.repoTree.repo}-core-files.md`.replace(/[^\w.-]+/g, '-'), content: this.packFor(files) }];
       // Show the step titles as the AI writes them
-      const onProgress = (text) => {
-        const box = this.rebuildBody.querySelector('.rebuild-live');
-        if (!box) return;
-        const titles = [...text.matchAll(/"(?:title|name)"\s*:\s*"((?:[^"\\]|\\.)+)"/g)].map(m => m[1]);
-        box.innerHTML = titles.length
-          ? `<ol>${titles.map(t => `<li>${this.escapeHtml(t)}</li>`).join('')}</ol>`
-          : '<span class="rebuild-live-hint">Reading the code…</span>';
-      };
       const { value, text, tried } = await this.askForJson(planPrompt(this.repoDisplayName()), {
-        attachments, onProgress, live: this.rebuildBody, parse: parseRebuildPlan
+        attachments, live: this.rebuildBody, list: 'title|name', parse: parseRebuildPlan
       });
       if (!value) throw new Error(`couldn't find a plan in the replies (asked ${tried})`);
       await this.adoptPlan(text);
@@ -2535,16 +2527,8 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       const prompt = inline
         ? `${walkPrompt({ path, repo, range, source: 'Below is' })}\n\n${LINE_NUMBER_NOTE}\n\n${fencedFile(file)}`
         : walkPrompt({ path, repo, range, source: `The attached "${fname}" is` });
-      const onProgress = (text) => {
-        const box = this.walkBody.querySelector('.rebuild-live');
-        if (!box) return;
-        const titles = [...text.matchAll(/"title"\s*:\s*"((?:[^"\\]|\\.)+)"/g)].map(m => m[1]);
-        box.innerHTML = titles.length
-          ? `<ol>${titles.map(t => `<li>${this.escapeHtml(t)}</li>`).join('')}</ol>`
-          : '<span class="rebuild-live-hint">Reading the code…</span>';
-      };
       const { value: parsed, text, tried } = await this.askForJson(prompt, {
-        attachments: inline ? [] : [{ filename: fname, content: this.packFor([file]) }], onProgress, live: this.walkBody,
+        attachments: inline ? [] : [{ filename: fname, content: this.packFor([file]) }], live: this.walkBody, list: 'title',
         parse: (t) => parseWalkthrough(t, range)
       });
       if (!parsed) {
@@ -2606,16 +2590,9 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       if (!blocks.length) throw new Error(files.length ? 'only lockfiles, generated or binary files changed' : 'the diff is empty');
       const what = kind === 'pull' ? `pull request #${number}` : `commit ${sha.slice(0, 7)}`;
       const fname = `${repo}-${kind === 'pull' ? `pr-${number}` : sha.slice(0, 7)}-changes.md`.replace(/[^\w.-]+/g, '-');
-      const onProgress = (text) => {
-        const box = this.walkBody.querySelector('.rebuild-live');
-        if (!box) return;
-        const titles = [...text.matchAll(/"title"\s*:\s*"((?:[^"\\]|\\.)+)"/g)].map(m => m[1]);
-        box.innerHTML = titles.length
-          ? `<ol>${titles.map(t => `<li>${this.escapeHtml(t)}</li>`).join('')}</ol>`
-          : `<span class="rebuild-live-hint">Reading ${blocks.length} part${blocks.length === 1 ? '' : 's'} of the change…</span>`;
-      };
       const { value: parsed, text, tried } = await this.askForJson(changeWalkPrompt({ what, repo: `${owner}/${repo}`, title, fname, skipped }), {
-        attachments: [{ filename: fname, content: changePack(blocks, what) }], onProgress, live: this.walkBody,
+        attachments: [{ filename: fname, content: changePack(blocks, what) }], live: this.walkBody, list: 'title',
+        hint: `Reading ${blocks.length} part${blocks.length === 1 ? '' : 's'} of the change…`,
         parse: (t) => parseChangeWalk(t, blocks)
       });
       if (!parsed) {
@@ -3033,7 +3010,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
 
   async resetJourney() {
     if (!this.journey || this._journeyPending) return;
-    if (!this.confirmTwice('journey', 'Click ↺ again to ask for a new overview and reading order')) return;
+    if (!this.confirmTwice('journey', 'Click again to ask for a new overview and reading order')) return;
     await this.createJourney();
   }
 
@@ -3058,16 +3035,8 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       if (!files.length) throw new Error('could not read the project files');
       const fname = `${this.repoTree.repo}-overview.md`.replace(/[^\w.-]+/g, '-');
       // Show the reading order as the AI writes it
-      const onProgress = (text) => {
-        const box = this.walkBody.querySelector('.rebuild-live');
-        if (!box) return;
-        const found = [...text.matchAll(/"file"\s*:\s*"((?:[^"\\]|\\.)+)"/g)].map(m => m[1]);
-        box.innerHTML = found.length
-          ? `<ol>${found.map(f => `<li>${this.escapeHtml(f)}</li>`).join('')}</ol>`
-          : '<span class="rebuild-live-hint">Reading the code…</span>';
-      };
       const { value: parsed, text, tried } = await this.askForJson(journeyPrompt(this.repoDisplayName(), fname), {
-        attachments: [{ filename: fname, content: this.packFor(files) }], onProgress, live: this.walkBody,
+        attachments: [{ filename: fname, content: this.packFor(files) }], live: this.walkBody, list: 'file',
         parse: (t) => parseJourney(t, this.repoTree.fileSet, this.repoTree.repo)
       });
       if (!parsed) {
@@ -3222,14 +3191,23 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
   // map, a plan). One that fails is usually fine the second time, so before
   // giving up, ask the same chat again, then another chat site, then the
   // free API models (never the paid one). The chosen chat comes back after.
-  // `live`: the sheet whose .rebuild-live box shows what's happening.
+  // `live`: the sheet whose .rebuild-live box shows what's happening: the
+  // values of the `list` field(s) as the reply streams in, else `hint`.
   // Returns { value, text, tried }: value null when replies came but none
   // could be read (text: the fullest one, to show; tried: who was asked,
   // "ChatGPT twice, Gemini"). Throws when no attempt got an answer at all.
-  async askForJson(prompt, { attachments = [], onProgress = null, parse, live = null }) {
+  async askForJson(prompt, { attachments = [], parse, live = null, list = 'title', hint = 'Reading the code…' }) {
     const say = (msg) => {
       const box = live?.querySelector('.rebuild-live');
       if (box) box.innerHTML = `<span class="rebuild-live-hint">${this.escapeHtml(msg)}</span>`;
+    };
+    const field = new RegExp(`"(?:${list})"\\s*:\\s*"((?:[^"\\\\]|\\\\.)+)"`, 'g');
+    const onProgress = (text) => {
+      const box = live?.querySelector('.rebuild-live');
+      if (!box) return;
+      const found = [...text.matchAll(field)].map(m => m[1]);
+      if (found.length) box.innerHTML = `<ol>${found.map(t => `<li>${this.escapeHtml(t)}</li>`).join('')}</ol>`;
+      else say(hint);
     };
     const home = this.getCurrentModel();
     const other = ['gemini', 'chatgpt', 'claude']
