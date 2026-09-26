@@ -5,7 +5,7 @@ import { isPublicWebUrl } from './utils/net.js';
 import { loadTemplates, expandTemplate, varsInTemplate } from './utils/templates.js';
 import { renderMarkdown, runnableLang } from './utils/markdown.js';
 import { walkPrompt, parseWalkthrough, compareTyped, quizPrompt, parseQuiz } from './utils/walkthrough.js';
-import { cmModeFor, defineGenericMode } from './utils/codeEditor.js';
+import { cmModeFor, defineGenericMode, closeBracketKeys } from './utils/codeEditor.js';
 import { journeyPrompt, parseJourney, nextCandidates, nextPrompt, parseNext, connectionTree } from './utils/journey.js';
 import { parseDiff, changeBlocks, changePack, changeWalkPrompt, parseChangeWalk, partContext } from './utils/changes.js';
 import { DEFAULT_MODELS, loadModels as loadStoredModels } from './utils/models.js';
@@ -2414,6 +2414,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
         Tab: (ed) => ed.somethingSelected() ? ed.indentSelection('add') : ed.replaceSelection(' '.repeat(ed.getOption('indentUnit')))
       }
     });
+    cm.addKeyMap(closeBracketKeys(CodeMirror));
     // CodeMirror 5 here has no placeholder addon: a hint shown while it's empty
     const hint = document.createElement('span');
     hint.className = 'code-box-hint';
@@ -4201,6 +4202,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
         Tab: (cm) => cm.somethingSelected() ? cm.indentSelection('add') : cm.replaceSelection(' '.repeat(cm.getOption('indentUnit')))
       }
     });
+    this.runEditor.addKeyMap(closeBracketKeys(CodeMirror));
     this.runEditor.on('change', () => {
       clearTimeout(this._runSaveTimer);
       this._runSaveTimer = setTimeout(() => {
