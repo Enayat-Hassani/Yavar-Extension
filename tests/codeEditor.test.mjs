@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cmModeFor, defineGenericMode } from '../src/utils/codeEditor.js';
+import { cmModeFor, defineGenericMode, bracketAction, deletesPair } from '../src/utils/codeEditor.js';
 
 test('bundled modes for the languages CodeMirror ships here', () => {
   assert.equal(cmModeFor('python'), 'python');
@@ -59,4 +59,31 @@ test('Python-family languages comment with #', () => {
   let mode;
   defineGenericMode({ modes: {}, defineMode: (name, factory) => { mode = factory({}, { lang: 'bash' }); } });
   assert.deepEqual(tokens(mode, 'echo hi # note').out, [['echo', 'keyword'], ['# note', 'comment']]);
+});
+
+test('openers pair up before space, end of line or a closer, not before a word', () => {
+  assert.equal(bracketAction('(', 'print', ''), 'pair');
+  assert.equal(bracketAction('{', 'if (x) ', ''), 'pair');
+  assert.equal(bracketAction('[', 'f(', ')'), 'pair');
+  assert.equal(bracketAction('(', '', 'value'), null);
+  assert.equal(bracketAction('a', '', ''), null);
+});
+
+test('closers and quotes step over the same character already next', () => {
+  assert.equal(bracketAction(')', 'f(x', ')'), 'skip');
+  assert.equal(bracketAction('"', 'say("hi', '")'), 'skip');
+  assert.equal(bracketAction(')', 'f(x', ''), null);
+});
+
+test('quotes pair at the start of a string, not after a letter', () => {
+  assert.equal(bracketAction('"', 'x = ', ''), 'pair');
+  assert.equal(bracketAction("'", "don", ''), null);
+  assert.equal(bracketAction('`', 'a', ''), null);
+});
+
+test('Backspace removes an empty pair only', () => {
+  assert.equal(deletesPair('f(', ')'), true);
+  assert.equal(deletesPair('x = "', '"'), true);
+  assert.equal(deletesPair('f(', 'x)'), false);
+  assert.equal(deletesPair('', ')'), false);
 });

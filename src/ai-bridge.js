@@ -797,14 +797,17 @@
   }
 
   // Gemini's button has moved between the side menu and the start page, so
-  // look for it by test id, label or tooltip, not one fixed selector
+  // look for it by test id, label or tooltip, not one fixed selector. The
+  // test id can sit on a wrapper around the button (temp-chat-button-container),
+  // and clicking the wrapper does nothing, so take the button inside it.
+  const CLICKABLE = 'button, a, [role="button"]';
   function findTempButton() {
     const visible = (el) => el && el.offsetParent !== null;
     const byId = [...document.querySelectorAll('[data-test-id*="temp-chat" i], [data-test-id*="temporary" i]')]
-      .map(el => el.closest('button, a, [role="button"]') || el).find(visible);
+      .map(el => el.matches(CLICKABLE) ? el : el.querySelector(CLICKABLE) || el.closest(CLICKABLE)).find(visible);
     if (byId) return byId;
     const re = /temporary chat/i;
-    return [...document.querySelectorAll('button, a, [role="button"]')].find(el => visible(el) && (
+    return [...document.querySelectorAll(CLICKABLE)].find(el => visible(el) && (
       re.test(el.getAttribute('aria-label') || '') || re.test(el.getAttribute('mattooltip') || '') ||
       re.test(el.getAttribute('title') || '') || re.test((el.textContent || '').trim().slice(0, 40))));
   }
@@ -829,12 +832,21 @@
       if (!btn && menu) menu.click();   // put the menu back
     }
     if (!btn) return false;
-    const on = btn.getAttribute('aria-pressed') === 'true' || /\b(active|selected)\b/.test(btn.className);
-    if (!on) btn.click();
+    if (!tempChatOn(btn)) btn.click();
+    // Only report a private chat once Gemini shows one; a click that didn't
+    // take would otherwise send Yavar's work to a normal, saved chat
+    if (!await waitFor(() => tempChatOn(btn), 4000)) return false;
     await new Promise(r => setTimeout(r, 900));   // let the new chat's URL settle
     tempSession = true;
     lastLoc = here();
     return true;
+  }
+
+  // The button's wrapper gets .temp-chat-on and the page shows a
+  // temporary-chat card; aria-pressed covers a plain toggle button
+  function tempChatOn(btn) {
+    return btn.getAttribute('aria-pressed') === 'true' || !!btn.closest('.temp-chat-on') ||
+      !!document.querySelector('.temporary-chat-card');
   }
 
   // Listen for postMessage from sidepanel
