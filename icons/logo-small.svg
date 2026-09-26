@@ -5,7 +5,7 @@
   <rect x="3" y="3" width="122" height="122" rx="23" fill="none" stroke="#fff" stroke-opacity=".22" stroke-width="6"/>
   <g stroke-linecap="round" stroke-width="20" fill="none">
     <path d="M36 32 L64 64" stroke="#fff"/>
-    <path d="M92 32 L64 64" stroke="#4da3ff"/>
+    <path d="M92 32 L64 64" stroke="#0a84ff"/>
     <path d="M64 64 V98" stroke="#fff"/>
   </g>
 </svg>
