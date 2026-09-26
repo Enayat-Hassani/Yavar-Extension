@@ -16,7 +16,7 @@ import {
   parseGitHubUrl, refCandidates, rawFileUrl, encodePath, isReadablePath, estimateTokens, formatCount,
   sliceLines, extractImports, resolveImports, suggestStartFiles, buildPack, readingPrompt, READ_MODES,
   fencedFile, parseCommitsAtom, commitsFromApi, timeAgo, LOCAL_SKIP_DIRS, isSecretPath,
-  blobUrl, parseFileRef, CITE_RULE, LINE_NUMBER_NOTE, langFromPath
+  parseFileRef, CITE_RULE, LINE_NUMBER_NOTE, langFromPath
 } from './utils/github.js';
 
 // Session-storage keys other parts of the extension use to hand work to the panel
@@ -1178,6 +1178,8 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       url = tab?.url || '';
     } catch (e) { /* no tab: nothing to offer */ }
 
+    // The reader shows the repo you were already on: keep that context
+    if (url.startsWith(chrome.runtime.getURL('reader.html'))) return;
     // "Usable" = a real web page that isn't one of the AI chat sites themselves
     const isHttp = /^https?:\/\//i.test(url);
     const isAIHost = /(chatgpt\.com|chat\.openai\.com|claude\.ai|gemini\.google\.com)/i.test(url);
@@ -1228,7 +1230,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     // On a GitHub repo the repo's actions stay here once the start page is gone
     const file = gh?.kind === 'blob' && gh.rest.length > 1 ? gh.rest[gh.rest.length - 1] : '';
     const repoItems = gh ? [
-      ...(file ? [{ id: 'walk_file', icon: icon('lines'), name: `Walk through ${file}`, desc: 'Line by line, highlighted in your tab' }] : []),
+      ...(file ? [{ id: 'walk_file', icon: icon('lines'), name: `Walk through ${file}`, desc: 'Line by line, highlighted as you go' }] : []),
       { id: 'explain_repo', icon: icon('compass'), name: 'Tour this repository', desc: repo },
       { id: 'reader', icon: icon('book'), name: 'Browse files', desc: 'Read, explain or review any file' },
       { id: 'changes', icon: icon('commit'), name: 'Recent changes', desc: 'What the latest commits are about' },
@@ -1899,13 +1901,21 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
   }
 
   // ----- Opening the files an answer talks about -----
+  // Files open in the Yavar reader (reader.html), one tab that shows GitHub
+  // and local files alike, with the lines under discussion highlighted.
 
-  // Inline code in an answer that names a file of the loaded GitHub repo
-  // becomes a link. The repo is stored on the link, so an old answer still
-  // opens the right repo after you move on to another one.
+  // Where a file of the loaded repo or folder lives, as the reader needs it
+  fileRefFor(path, lines = null) {
+    const t = this.repoTree;
+    return { source: t.source || 'github', owner: t.owner, repo: t.repo, ref: t.ref, path, lines };
+  }
+
+  // Inline code in an answer that names a file of the loaded repo or folder
+  // becomes a link. Where the file lives is stored on the link, so an old
+  // answer still opens the right file after you move on to another repo.
   linkFileRefs(root) {
     const t = this.repoTree;
-    if (!t || t.source === 'local') return;
+    if (!t) return;
     root.querySelectorAll('code').forEach(el => {
       if (el.closest('pre, a, button')) return;
       const ref = parseFileRef(el.textContent, t.fileSet);
@@ -1913,27 +1923,47 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'file-ref';
-      btn.dataset.fileRef = JSON.stringify({ owner: t.owner, repo: t.repo, ref: t.ref, path: ref.path, lines: ref.lines });
+      btn.dataset.fileRef = JSON.stringify(this.fileRefFor(ref.path, ref.lines));
       const at = !ref.lines ? '' : ref.lines.end > ref.lines.start ? `, lines ${ref.lines.start}-${ref.lines.end}` : `, line ${ref.lines.start}`;
-      btn.title = `Open ${ref.path}${at} in your tab`;
+      btn.title = `Open ${ref.path}${at} in the reader`;
       el.replaceWith(btn);
       btn.appendChild(el);
     });
   }
 
-  // Show the file in your tab with the lines highlighted (GitHub does the
-  // highlighting). The tab you're in is reused only if it's already on this
-  // repo, so a page you were reading isn't replaced.
-  async openRepoFile({ owner, repo, ref, path, lines = null }) {
-    const url = blobUrl(owner, repo, ref, path, lines);
+  // Show a file in the reader tab with `lines` highlighted. `label` names what
+  // is highlighted (a walkthrough block). When several calls race (Next
+  // clicked quickly), only the latest is shown.
+  async openRepoFile({ source = 'github', owner, repo, ref, path, lines = null, label = '' }) {
+    const seq = (this._readerSeq = (this._readerSeq || 0) + 1);
     try {
-      const [tab] = await this.getActiveTabs();
-      const gh = parseGitHubUrl(tab?.url || '');
-      const same = gh && gh.owner.toLowerCase() === owner.toLowerCase() && gh.repo.toLowerCase() === repo.toLowerCase();
-      if (same) await chrome.tabs.update(tab.id, { url });
-      else await chrome.tabs.create({ url, windowId: tab?.windowId });
+      const t = this.repoTree;
+      const loaded = t && t.repo === repo && (t.owner || '') === (owner || '') && (t.ref || '') === (ref || '');
+      let content;
+      if (loaded) content = await this.readRepoFile(path);
+      else if (source === 'local') throw new Error('open that folder again first');
+      else content = await this.fetchRepoFile(owner, repo, path, ref, 2000000);
+      if (seq !== this._readerSeq) return;
+      await chrome.storage.session.set({ readerView: {
+        repo: { source, owner, repo, ref, name: owner ? `${owner}/${repo}` : repo },
+        path, content, lines, label, ts: Date.now()
+      } });
+      await this.showReaderTab();
     } catch (e) {
       this.showNotification('⚠️ Could not open ' + path.split('/').pop() + ': ' + e.message);
+    }
+  }
+
+  // Bring the reader tab forward, or open one next to the tab you're on
+  async showReaderTab() {
+    const base = chrome.runtime.getURL('reader.html');
+    const [tab] = await this.getActiveTabs();
+    const tabs = await chrome.tabs.query({ windowId: tab?.windowId });
+    const reader = tabs.find(x => (x.url || '').startsWith(base));
+    if (reader) {
+      if (!reader.active) await chrome.tabs.update(reader.id, { active: true });
+    } else {
+      await chrome.tabs.create({ url: base, windowId: tab?.windowId, index: tab ? tab.index + 1 : undefined, openerTabId: tab?.id });
     }
   }
 
@@ -2170,8 +2200,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       const path = el.dataset.path;
       const name = path.split('/').pop();
       el.disabled = true;
-      const t = this.repoTree;
-      if (t.source !== 'local') this.openRepoFile({ owner: t.owner, repo: t.repo, ref: t.ref, path });
+      this.openRepoFile(this.fileRefFor(path));
       try {
         const [file] = await this.fetchRepoFilesMany([path]);
         if (file.error) throw new Error(file.error);
@@ -2271,7 +2300,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
 
   // ========== Walk through a file ==========
   // The AI splits a file into blocks of related lines; the sheet shows one
-  // block at a time with its explanation, and your GitHub tab highlights the
+  // block at a time with its explanation, and the reader tab highlights the
   // same lines. Each block can be explained further, quizzed or retyped.
   // Progress is kept per file (walk:<repo>:<path>).
 
@@ -2377,13 +2406,13 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     await this.createWalk(w.path, partial ? w.range : null);
   }
 
-  // Highlight the current block in your tab (GitHub repos only)
+  // Highlight the current block in the reader
   followWalk() {
     const w = this.walk;
-    const t = this.repoTree;
     const b = w?.blocks?.[w.current];
-    if (!b || !t || t.source === 'local') return;
-    this.openRepoFile({ owner: t.owner, repo: t.repo, ref: t.ref, path: w.path, lines: { start: b.start, end: b.end } });
+    if (!b || !this.repoTree) return;
+    this.openRepoFile({ ...this.fileRefFor(w.path, { start: b.start, end: b.end }),
+      label: `Block ${w.current + 1} of ${w.blocks.length} · ${b.title}` });
   }
 
   // The current block's code, from the cached file
@@ -2414,7 +2443,6 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     const gutter = Array.from({ length: b.end - b.start + 1 }, (_, k) => b.start + k).join('\n');
     const best = typed[i]?.best;
     const more = i === n - 1 && range.end < total;
-    const github = this.repoTree?.source !== 'local';
 
     this.walkBody.innerHTML =
       (w.summary ? `<p class="rebuild-summary">${esc(w.summary)}</p>` : '') +
@@ -2424,7 +2452,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
         `${range.start > 1 || range.end < total ? ` · lines ${range.start}-${range.end} of ${total}` : ''}</div>` +
       `<div class="rebuild-card">` +
         `<div class="walk-card-head"><span class="rebuild-card-kicker">Lines ${b.start}-${b.end}</span>` +
-          (github ? `<button type="button" class="files-link-btn walk-show" data-wk="show" title="Highlight these lines in your tab">Show in tab</button>` : '') +
+          `<button type="button" class="files-link-btn walk-show" data-wk="show" title="Highlight these lines in the reader">Show in reader</button>` +
         `</div>` +
         `<h3>${esc(b.title)}</h3>` +
         `<div class="walk-code" aria-label="Lines ${b.start} to ${b.end}"><pre class="walk-gutter" aria-hidden="true">${gutter}</pre>` +
@@ -3915,7 +3943,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
         (gh.kind === 'pull' || gh.kind === 'commit'
           ? row('explain_diff', icon('diff'), gh.kind === 'pull' ? `Explain pull request #${gh.number}` : 'Explain this commit', 'The goal, each file, and what could go wrong') : '') +
         (file ? row('add_file', icon('file'), `Explain ${file}`, 'The file open in your tab') : '') +
-        (file ? row('walk_file', icon('lines'), `Walk through ${file}`, 'Line by line, highlighted in your tab') : '') +
+        (file ? row('walk_file', icon('lines'), `Walk through ${file}`, 'Line by line, highlighted as you go') : '') +
         row('explain_repo', icon('compass'), 'Tour this repository', 'What it does, how it is organised, where to start') +
         row('reader', icon('book'), 'Browse files', 'Read, explain or review any file') +
         row('changes', icon('commit'), 'Recent changes', 'What the latest commits are about') +

@@ -133,6 +133,8 @@ test('blob URL highlights one line or a range', () => {
   assert.equal(blobUrl('o', 'r', 'HEAD', 'src/a b.js'), 'https://github.com/o/r/blob/HEAD/src/a%20b.js');
   assert.equal(blobUrl('o', 'r', 'feat/x', 'a.js', { start: 7, end: 7 }), 'https://github.com/o/r/blob/feat/x/a.js#L7');
   assert.equal(blobUrl('o', 'r', 'main', 'a.js', { start: 12, end: 30 }), 'https://github.com/o/r/blob/main/a.js#L12-L30');
+  assert.equal(blobUrl('o', 'r', 'main', 'README.md', { start: 3, end: 5 }), 'https://github.com/o/r/blob/main/README.md?plain=1#L3-L5');
+  assert.equal(blobUrl('o', 'r', 'main', 'README.md'), 'https://github.com/o/r/blob/main/README.md');
 });
 
 test('reads file references in the forms answers use', () => {

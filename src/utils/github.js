@@ -61,11 +61,16 @@ export function rawFileUrl(owner, repo, ref, path) {
   return `https://raw.githubusercontent.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${encodePath(ref)}/${encodePath(path)}`;
 }
 
+// Files GitHub shows rendered (a preview), where line links do nothing
+// unless the page is asked for the source with ?plain=1
+const RENDERED_EXT = /\.(md|markdown|mdx|rst|adoc|asciidoc|ipynb|svg|csv|tsv|geojson|topojson)$/i;
+
 // The file's page on github.com, with lines highlighted by GitHub itself
 // (#L12-L30). "HEAD" works as the ref and means the default branch.
 export function blobUrl(owner, repo, ref, path, lines = null) {
   const hash = !lines ? '' : `#L${lines.start}` + (lines.end > lines.start ? `-L${lines.end}` : '');
-  return `https://github.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/blob/${encodePath(ref)}/${encodePath(path)}${hash}`;
+  const plain = hash && RENDERED_EXT.test(path) ? '?plain=1' : '';
+  return `https://github.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/blob/${encodePath(ref)}/${encodePath(path)}${plain}${hash}`;
 }
 
 // Read a file reference out of the text of an inline code span in an
