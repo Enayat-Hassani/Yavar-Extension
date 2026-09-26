@@ -2727,7 +2727,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
         `<div class="wk-type-actions">` +
           `<button type="button" class="wk-compare" data-wk="compare">Compare</button>` +
           `<button type="button" class="run-ask" data-wk="feedback">Ask for feedback</button>` +
-          `<span class="wk-hint">Ctrl+Enter compares</span>` +
+          `<span class="wk-hint">Ctrl+Enter compares · comments don't count</span>` +
         `</div>` +
         `<div class="walk-result" aria-live="polite"></div>` +
       `</div>` +
@@ -2820,7 +2820,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
 
     if (act === 'compare') {
       if (!typedText.trim()) { this.showNotification('Type the lines first'); return; }
-      const { accuracy, ops } = compareTyped(code, typedText);
+      const { accuracy, ops } = compareTyped(code, typedText, langFromPath(b.path || w.path));
       const bestSoFar = Math.max(accuracy, w.typed?.[i]?.best || 0);
       await this.saveWalk({ ...w, typed: { ...(w.typed || {}), [i]: { best: bestSoFar, text: typedText } } });
       this.walkBody.querySelector('.walk-result').innerHTML =

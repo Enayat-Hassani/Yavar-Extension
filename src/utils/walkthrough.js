@@ -3,6 +3,7 @@
 // you can retype a block from memory to practise. Pure functions (tested).
 
 import { jsonCandidates } from './rebuild.js';
+import { keywordInfo } from './markdown.js';
 
 // A gap the AI left between two blocks that is at most this many lines
 // (usually blank lines) joins the block before it instead of becoming its own
@@ -70,13 +71,35 @@ export function parseWalkthrough(text, range) {
   return null;
 }
 
+// The code without its comments, and in Python its docstrings (a string
+// alone on its lines), so practice asks for the code only. Strings are kept
+// whole, so a # or // inside one stays. The comment syntax is the one the
+// highlighter uses; markup and unknown languages are left as they are.
+export function stripComments(code, lang) {
+  const l = String(lang || '').toLowerCase();
+  if (!l || /^(html|xml|vue|svelte|markdown|md|json)$/.test(l)) return String(code || '');
+  const { fam, lineComment } = keywordInfo(l);
+  const comment = lineComment === '#' ? '#[^\\n]*' : lineComment === '--' ? '--[^\\n]*' : '\\/\\/[^\\n]*|\\/\\*[\\s\\S]*?\\*\\/';
+  const triple = fam === 'py' ? `"{3}[\\s\\S]*?"{3}|'{3}[\\s\\S]*?'{3}` : '(?!)';
+  const re = new RegExp(`(${comment})|(${triple})|("(?:[^"\\\\\\n]|\\\\.)*"|'(?:[^'\\\\\\n]|\\\\.)*'|\`(?:[^\`\\\\]|\\\\.)*\`)`, 'g');
+  const blankLines = (t) => t.replace(/[^\n]/g, '');   // keeps the line count
+  return String(code || '').replace(re, (tok, com, doc, str, at, all) => {
+    if (com) return blankLines(com);
+    if (!doc) return tok;
+    const lineStart = all.lastIndexOf('\n', at - 1) + 1;
+    const lineEnd = all.indexOf('\n', at + tok.length);
+    const alone = !all.slice(lineStart, at).trim() && !all.slice(at + tok.length, lineEnd < 0 ? undefined : lineEnd).trim();
+    return alone ? blankLines(doc) : tok;
+  });
+}
+
 // Compare code you typed from memory with the original, line by line,
-// ignoring indentation, spacing and blank lines.
+// ignoring comments (for a known `lang`), indentation, spacing and blank lines.
 // Returns { accuracy: 0-100, ops: [{ type: 'same' | 'missing' | 'extra', text }] }
 // where 'missing' lines are in the original only and 'extra' in yours only.
-export function compareTyped(original, typed) {
+export function compareTyped(original, typed, lang = '') {
   const norm = l => l.trim().replace(/\s+/g, ' ');
-  const lines = s => String(s || '').split('\n').map(l => ({ text: l.trim(), key: norm(l) })).filter(l => l.key);
+  const lines = s => stripComments(s, lang).split('\n').map(l => ({ text: l.trim(), key: norm(l) })).filter(l => l.key);
   const a = lines(original);
   const b = lines(typed);
 
