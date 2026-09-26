@@ -56,7 +56,7 @@ export function parseDiff(text) {
 // Files that say little about what the change does: lockfiles, generated
 // and vendored code, snapshots, binaries, and renames without edits
 const NOISE = /(^|\/)(package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb?|Cargo\.lock|poetry\.lock|Pipfile\.lock|uv\.lock|composer\.lock|Gemfile\.lock|go\.sum)$|\.min\.(js|css)$|\.map$|\.snap$|(^|\/)(dist|build|vendor|node_modules|__snapshots__)\//;
-export const isNoise = (file) => file.binary || !file.hunks.length || NOISE.test(file.path);
+const isNoise = (file) => file.binary || !file.hunks.length || NOISE.test(file.path);
 
 const DIFF_CHARS = 8000;   // per part, kept with the walkthrough for follow-up questions
 
@@ -113,7 +113,7 @@ const where = (b) => `\`${b.path}\` (${b.status}${b.status === 'renamed' ? ` fro
   (b.start ? `, lines ${b.start}${b.end > b.start ? `-${b.end}` : ''} after the change` : '');
 
 // A short name for a part the AI didn't title
-export const partTitle = (b) => `${b.path.split('/').pop()}: ${[b.added && `+${b.added}`, b.removed && `−${b.removed}`].filter(Boolean).join(' ')}`;
+const partTitle = (b) => `${b.path.split('/').pop()}: ${[b.added && `+${b.added}`, b.removed && `−${b.removed}`].filter(Boolean).join(' ')}`;
 
 // The parts as one Markdown file for the chat
 export function changePack(blocks, what) {
