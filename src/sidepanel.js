@@ -5,6 +5,7 @@ import { isPublicWebUrl } from './utils/net.js';
 import { loadTemplates, expandTemplate, varsInTemplate } from './utils/templates.js';
 import { renderMarkdown, runnableLang, highlight } from './utils/markdown.js';
 import { walkPrompt, parseWalkthrough, compareTyped, quizPrompt, parseQuiz } from './utils/walkthrough.js';
+import { cmModeFor, defineGenericMode } from './utils/codeEditor.js';
 import { journeyPrompt, parseJourney, nextCandidates, nextPrompt, parseNext, connectionTree } from './utils/journey.js';
 import { DEFAULT_MODELS, loadModels as loadStoredModels } from './utils/models.js';
 import { captureLabel, captureMarkdown, hasCaptureText } from './utils/capture.js';
@@ -2118,8 +2119,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       `<div class="rebuild-label">Your task</div><p class="wk-explain">${esc(s.task)}</p>` +
       (s.done_when ? `<div class="rebuild-label">Done when</div><p class="wk-explain">${esc(s.done_when)}</p>` : '') +
       `<div class="rebuild-label">Your code</div>` +
-      `<textarea class="wk-typing rebuild-code" rows="1" spellcheck="false" aria-label="Your code for this step" ` +
-        `placeholder="Write your version of this step…">${esc(code[i] || '')}</textarea>` +
+      `<div class="code-box" aria-label="Your code for this step"></div>` +
       `<pre class="run-output rebuild-out" aria-label="Output of your code"></pre>` +
       `<div class="rebuild-mentor"></div>` +
       `<div class="rb-done">` + (isDone
@@ -2133,21 +2133,13 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
         `<span class="rebuild-run-status"></span>` +
       `</div>`;
 
-    const ta = this.rebuildBody.querySelector('.rebuild-code');
-    const grow = () => this.growTextarea(ta);
-    grow();
-    ta.addEventListener('input', () => {
-      grow();
-      clearTimeout(this._rbSave);
-      this._rbSave = setTimeout(() => {
-        const c = { ...(this.rebuild.code || {}) };
-        c[i] = ta.value;
-        this.saveRebuild({ ...this.rebuild, code: c });
-      }, 400);
-    });
-    ta.addEventListener('keydown', (e) => {
-      if (e.key === 'Tab') { e.preventDefault(); ta.setRangeText('    ', ta.selectionStart, ta.selectionEnd, 'end'); grow(); }
-      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && lang) { e.preventDefault(); this.rebuildBody.querySelector('[data-rb="try"]')?.click(); }
+    this._rbCode = this.makeCodeBox(this.rebuildBody.querySelector('.code-box'), {
+      value: code[i] || '', lang: plan.language, placeholder: 'Write your version of this step…',
+      onChange: (value) => {
+        clearTimeout(this._rbSave);
+        this._rbSave = setTimeout(() => this.saveRebuild({ ...this.rebuild, code: { ...(this.rebuild.code || {}), [i]: value } }), 400);
+      },
+      onSubmit: () => this.rebuildBody.querySelector('[data-rb="try"]')?.click()
     });
 
     // Earlier hints and reviews for this step, folded
@@ -2161,11 +2153,9 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
 
   // Put code into the current step's editor (e.g. "Use in editor" on an answer)
   setStepCode(code) {
-    const ta = this.rebuildBody.querySelector('.rebuild-code');
-    if (!ta) return;
-    ta.value = code;
-    ta.dispatchEvent(new Event('input'));
-    ta.focus();
+    if (!this._rbCode) return;
+    this._rbCode.setValue(code);
+    this._rbCode.focus();
   }
 
   async addMentorNote(i, title, text) {
@@ -2188,7 +2178,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     if (!st?.plan) return;
     const n = st.plan.steps.length;
     const i = Math.min(st.current || 0, n - 1);
-    const code = this.rebuildBody.querySelector('.rebuild-code')?.value || '';
+    const code = this._rbCode?.getValue() || '';
     const go = async (k, changes = {}) => {
       await this.saveRebuild({ ...st, ...changes, current: k, code: { ...(st.code || {}), [i]: code } });
       this.renderRebuild();
@@ -2330,14 +2320,35 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       extra + `</div></div>`;
   }
 
-  // A code box that starts one line tall and grows with what's typed; it
-  // scrolls only once it reaches its max-height
-  growTextarea(ta) {
-    ta.style.height = 'auto';
-    const want = ta.scrollHeight + ta.offsetHeight - ta.clientHeight;
-    const max = parseFloat(getComputedStyle(ta).maxHeight) || Infinity;
-    ta.style.height = Math.min(want, max) + 'px';
-    ta.style.overflowY = want > max ? 'auto' : 'hidden';
+  // A code editor with colours, line numbers and indentation (CodeMirror,
+  // like the runner) that starts one line tall and grows with the code.
+  // firstLine numbers it like the file (a block of lines 16-49 starts at 16);
+  // Ctrl/Cmd+Enter calls onSubmit.
+  makeCodeBox(host, { value = '', lang = '', firstLine = 1, placeholder = '', onChange = null, onSubmit = null }) {
+    defineGenericMode(CodeMirror);
+    const cm = CodeMirror(host, {
+      value, mode: cmModeFor(lang), theme: 'yavar', lineNumbers: true, firstLineNumber: firstLine,
+      lineWrapping: false, viewportMargin: Infinity, tabSize: 4, indentUnit: 4, indentWithTabs: false,
+      extraKeys: {
+        'Ctrl-Enter': () => onSubmit?.(),
+        'Cmd-Enter': () => onSubmit?.(),
+        Tab: (ed) => ed.somethingSelected() ? ed.indentSelection('add') : ed.replaceSelection(' '.repeat(ed.getOption('indentUnit')))
+      }
+    });
+    // CodeMirror 5 here has no placeholder addon: a hint shown while it's empty
+    const hint = document.createElement('span');
+    hint.className = 'code-box-hint';
+    hint.textContent = placeholder;
+    hint.setAttribute('aria-hidden', 'true');
+    host.appendChild(hint);
+    const empty = () => host.classList.toggle('is-empty', !cm.getValue());
+    cm.on('change', () => { empty(); onChange?.(cm.getValue()); });
+    empty();
+    requestAnimationFrame(() => {
+      cm.refresh();
+      hint.style.left = cm.getGutterElement().offsetWidth + 6 + 'px';
+    });
+    return cm;
   }
 
   toggleStepList(body, btn) {
@@ -2528,8 +2539,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
         ? `<p class="wk-explain">${esc(b.explain)}</p>`
         : `<p class="wk-explain is-empty">The AI didn't explain these lines. Ask with Explain more.</p>`) +
       `<div class="walk-type" hidden>` +
-        `<textarea class="wk-typing" rows="1" spellcheck="false" aria-label="Type lines ${b.start} to ${b.end}" ` +
-          `placeholder="Type lines ${b.start}-${b.end} here…">${esc(typed[i]?.text || '')}</textarea>` +
+        `<div class="code-box" aria-label="Type lines ${b.start} to ${b.end}"></div>` +
         `<div class="wk-type-actions">` +
           `<button type="button" class="wk-compare" data-wk="compare">Compare</button>` +
           `<button type="button" class="run-ask" data-wk="feedback">Ask for feedback</button>` +
@@ -2551,13 +2561,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     const notes = w.notes?.[i] || [];
     notes.forEach((note, k) => this.renderWalkNote(notesEl, note, k < notes.length - 1));
 
-    const ta = this.walkBody.querySelector('.wk-typing');
-    const grow = () => this.growTextarea(ta);
-    ta.addEventListener('input', grow);
-    ta.addEventListener('keydown', (e) => {
-      if (e.key === 'Tab') { e.preventDefault(); ta.setRangeText('    ', ta.selectionStart, ta.selectionEnd, 'end'); grow(); }
-      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); this.walkBody.querySelector('[data-wk="compare"]')?.click(); }
-    });
+    this._walkCode = null;   // the practice editor is made when practice opens
   }
 
   async onWalkClick(e) {
@@ -2605,9 +2609,12 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       box.hidden = !box.hidden;
       el.setAttribute('aria-expanded', String(!box.hidden));
       if (!box.hidden) {
-        const ta = box.querySelector('textarea');
-        ta.dispatchEvent(new Event('input'));   // size it to what's already typed
-        ta.focus({ preventScroll: true });
+        this._walkCode = this._walkCode || this.makeCodeBox(box.querySelector('.code-box'), {
+          value: w.typed?.[i]?.text || '', lang: langFromPath(w.path), firstLine: b.start,
+          placeholder: `Type lines ${b.start}-${b.end} here…`,
+          onSubmit: () => this.walkBody.querySelector('[data-wk="compare"]')?.click()
+        });
+        this._walkCode.focus();
         box.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
       }
       return;
@@ -2617,7 +2624,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     const repo = this.repoDisplayName();
     const where = `lines ${b.start}-${b.end} of \`${w.path}\`${repo ? ` from ${repo}` : ''}`;
     const block = fencedFile({ path: w.path, content: code, lines: b });
-    const typedText = this.walkBody.querySelector('.wk-typing')?.value || '';
+    const typedText = this._walkCode?.getValue() || '';
 
     if (act === 'compare') {
       if (!typedText.trim()) { this.showNotification('Type the lines first'); return; }
