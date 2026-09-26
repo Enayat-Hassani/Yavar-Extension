@@ -2234,9 +2234,33 @@ button.lens-item:focus-visible {
 .wk-explain { margin: 0; font-size: 13.5px; line-height: 1.6; color: var(--text-primary); text-wrap: pretty; }
 .wk-explain.is-empty { color: var(--text-secondary); }
 
-/* What to do with this block: one row of quiet text actions, as in the runner */
-.wk-actions { display: flex; flex-wrap: wrap; gap: 2px; margin: 10px -6px 0; }
-.wk-actions .run-ask[aria-expanded="true"] { background: var(--accent-soft); }
+/* What to do with this block or step: quiet text actions pinned to the
+   bottom of the sheet. With little content they sit right under it; with a
+   long answer they stay at the bottom edge while the answer scrolls. */
+.wk-dock {
+  position: sticky;
+  bottom: -20px;              /* cancels .rebuild-body's bottom padding */
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  margin: auto -16px -20px;    /* auto: the bottom edge even when the content is short */
+  padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+  background: var(--bg-primary);
+  border-top: 1px solid var(--border);
+}
+.wk-dock .run-ask[aria-expanded="true"] { background: var(--accent-soft); }
+.wk-dock .rebuild-run-status { margin-left: auto; padding-right: 6px; }
+
+/* A sheet with a dock is a column, so the dock can sit at the bottom edge */
+.rebuild-body:has(> .wk-dock) { display: flex; flex-direction: column; }
+.rebuild-body:has(> .wk-dock) > * { flex-shrink: 0; }
+.rebuild-body:has(> .wk-dock) > .wk-dock { margin-top: auto; }
+.walk-next, .rb-done { margin-bottom: 14px; }
+
+/* A new answer scrolls into view below the pinned bar, not under it */
+.walk-notes > *, .rebuild-mentor > *, .walk-type, .walk-next { scroll-margin-top: 64px; scroll-margin-bottom: 56px; }
 
 /* Practice: type the block while the reader shows it. One line to start, grows. */
 .walk-type { margin-top: 8px; }
