@@ -7,6 +7,7 @@ import { renderMarkdown, runnableLang, highlight } from './utils/markdown.js';
 import { walkPrompt, parseWalkthrough, compareTyped, quizPrompt, parseQuiz } from './utils/walkthrough.js';
 import { cmModeFor, defineGenericMode } from './utils/codeEditor.js';
 import { journeyPrompt, parseJourney, nextCandidates, nextPrompt, parseNext, connectionTree } from './utils/journey.js';
+import { parseDiff, changeBlocks, changePack, changeWalkPrompt, parseChangeWalk, partContext } from './utils/changes.js';
 import { DEFAULT_MODELS, loadModels as loadStoredModels } from './utils/models.js';
 import { captureLabel, captureMarkdown, hasCaptureText } from './utils/capture.js';
 import { suggestActions } from './utils/actions.js';
@@ -1464,7 +1465,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       attach_file: () => this.quickAddActiveFile('add'),
       summarize_page: () => this.summarizeActivePage(),
       walk_file: () => this.walkActiveFile(),
-      explain_diff: () => this.explainActiveDiff(),
+      walk_diff: () => this.walkActiveDiff(),
       explain_repo: () => this.openJourney(),
       read_folder: () => this.openJourney({ folder: true }),
       history: () => this.toggleHistory(),
@@ -1876,18 +1877,29 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
   // README preview then Explain, download each file only once.
   async readRepoFile(path, maxChars = 2000000) {
     const t = this.repoTree;
-    const key = `${t.source || 'github'}:${t.owner}/${t.repo}@${t.ref}:${path}`;
+    const text = t.source === 'local'
+      ? await this.cachedFile(`local:${t.owner}/${t.repo}@${t.ref}:${path}`, () => this.readLocalFile(path, 2000000))
+      : await this.fetchFileAt(t.owner, t.repo, t.ref, path);
+    return this.truncateText(text, maxChars);
+  }
+
+  // A GitHub file at any ref (the loaded tree's, a commit, a pull request's
+  // head), so the reader, practice and packs download it once
+  fetchFileAt(owner, repo, ref, path) {
+    return this.cachedFile(`github:${owner}/${repo}@${ref}:${path}`, () => this.fetchRepoFile(owner, repo, path, ref, 2000000));
+  }
+
+  // One download per key; failures aren't kept
+  cachedFile(key, load) {
     this._fileCache = this._fileCache || new Map();
     let pending = this._fileCache.get(key);
     if (!pending) {
-      pending = t.source === 'local'
-        ? this.readLocalFile(path, 2000000)
-        : this.fetchRepoFile(t.owner, t.repo, path, t.ref, 2000000);
-      pending.catch(() => this._fileCache.delete(key)); // don't cache failures
+      pending = load();
+      pending.catch(() => this._fileCache.delete(key));
       this._fileCache.set(key, pending);
       if (this._fileCache.size > 80) this._fileCache.delete(this._fileCache.keys().next().value);
     }
-    return this.truncateText(await pending, maxChars);
+    return pending;
   }
 
   // Lookup structures for a tree, built once per tree object (trees are
@@ -1972,7 +1984,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       let content;
       if (loaded) content = await this.readRepoFile(path);
       else if (source === 'local') throw new Error('open that folder again first');
-      else content = await this.fetchRepoFile(owner, repo, path, ref, 2000000);
+      else content = await this.fetchFileAt(owner, repo, ref, path);
       if (seq !== this._readerSeq) return;
       await chrome.storage.session.set({ readerView: {
         repo: { source, owner, repo, ref, name: owner ? `${owner}/${repo}` : repo },
@@ -2457,7 +2469,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
 
   async saveWalk(state) {
     this.walk = state;
-    const key = this.walkKey(state.path);
+    const key = state.key || this.walkKey(state.path);
     if (key) try { await chrome.storage.local.set({ [key]: state }); } catch (e) { /* ignore */ }
   }
 
@@ -2551,10 +2563,81 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     }
   }
 
+  // ----- Walk through a change (a commit or a pull request) -----
+  // Like a file, part by part: the diff is split here (utils/changes.js),
+  // the chat orders and explains the parts, and the reader shows each part's
+  // file as it is after the change. Kept per change (walk:<repo>:@<id>).
+
+  async walkChange(gh) {
+    const { owner, repo, kind, sha, number, title = '' } = gh;
+    const change = { owner, repo, kind, sha, number, title,
+      label: kind === 'pull' ? `Pull request #${number}` : `Commit ${sha.slice(0, 7)}`,
+      ref: kind === 'pull' ? `refs/pull/${number}/head` : sha,
+      key: `walk:${owner}/${repo}:@${kind === 'pull' ? `pr-${number}` : sha}` };
+    let saved = null;
+    try { saved = (await chrome.storage.local.get(change.key))[change.key]; } catch (e) { /* none */ }
+    this.walkView = 'file';
+    document.getElementById('walk-title').textContent = 'Read the change';
+    document.getElementById('walk-sub').textContent = change.label + (title ? ` · ${title}` : '');
+    this.walkPanel.classList.remove('hidden');
+    if (saved?.blocks?.length) {
+      this.walk = saved;
+      this.renderWalk();
+      this.followWalk();
+      return;
+    }
+    await this.createChangeWalk(change);
+  }
+
+  async createChangeWalk(change) {
+    if (this._walkPending) return;
+    if (this.agent?.active) {   // both use the chat's single answer watch
+      this.showNotification('⚠️ Stop the running agent first');
+      return;
+    }
+    const { owner, repo, kind, sha, number, title, label, key } = change;
+    this._walkPending = true;
+    this._walkRaw = '';
+    this.walk = { key, change, pending: true };
+    this.renderWalk();
+    try {
+      const files = parseDiff(await this.fetchDiff({ owner, repo, kind, sha, number }));
+      const { blocks, skipped } = changeBlocks(files);
+      if (!blocks.length) throw new Error(files.length ? 'only lockfiles, generated or binary files changed' : 'the diff is empty');
+      const what = kind === 'pull' ? `pull request #${number}` : `commit ${sha.slice(0, 7)}`;
+      const fname = `${repo}-${kind === 'pull' ? `pr-${number}` : sha.slice(0, 7)}-changes.md`.replace(/[^\w.-]+/g, '-');
+      const onProgress = (text) => {
+        const box = this.walkBody.querySelector('.rebuild-live');
+        if (!box) return;
+        const titles = [...text.matchAll(/"title"\s*:\s*"((?:[^"\\]|\\.)+)"/g)].map(m => m[1]);
+        box.innerHTML = titles.length
+          ? `<ol>${titles.map(t => `<li>${this.escapeHtml(t)}</li>`).join('')}</ol>`
+          : `<span class="rebuild-live-hint">Reading ${blocks.length} part${blocks.length === 1 ? '' : 's'} of the change…</span>`;
+      };
+      const { value: parsed, text, tried } = await this.askForJson(changeWalkPrompt({ what, repo: `${owner}/${repo}`, title, fname, skipped }), {
+        attachments: [{ filename: fname, content: changePack(blocks, what) }], onProgress, live: this.walkBody,
+        parse: (t) => parseChangeWalk(t, blocks)
+      });
+      if (!parsed) {
+        this._walkRaw = text;
+        throw new Error(`couldn't find the parts in the replies (asked ${tried})`);
+      }
+      await this.saveWalk({ key, change, summary: parsed.summary, blocks: parsed.blocks, skipped, current: 0, typed: {}, created: Date.now() });
+      this._readingContext = { label: `${owner}/${repo}`, ts: Date.now() };
+      this.followWalk();
+    } catch (e) {
+      this.walk = { key, change, error: e.message };
+    } finally {
+      this._walkPending = false;
+      this.renderWalk();
+    }
+  }
+
   async resetWalk() {
     const w = this.walk;
     if (!w?.blocks || this._walkPending) return;
-    if (!this.confirmTwice('walk', 'Click ↺ again to ask for a new walkthrough of this file')) return;
+    if (!this.confirmTwice('walk', 'Click again to ask for a new walkthrough')) return;
+    if (w.change) return this.createChangeWalk(w.change);
     const partial = w.range.start > 1 || w.range.end < w.total;
     await this.createWalk(w.path, partial ? w.range : null);
   }
@@ -2563,16 +2646,28 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
   followWalk() {
     const w = this.walk;
     const b = w?.blocks?.[w.current];
-    if (!b || !this.repoTree) return;
+    if (!b) return;
+    if (w.change) {
+      // The file as it is after the change, its new lines highlighted
+      const { owner, repo, ref } = w.change;
+      if (b.start) this.openRepoFile({ source: 'github', owner, repo, ref, path: b.path, lines: { start: b.start, end: b.end },
+        label: `Part ${w.current + 1} of ${w.blocks.length} · ${b.title}` });
+      return;
+    }
+    if (!this.repoTree) return;
     this.openRepoFile({ ...this.fileRefFor(w.path, { start: b.start, end: b.end }),
       label: `Block ${w.current + 1} of ${w.blocks.length} · ${b.title}` });
   }
 
-  // The current block's code, from the cached file
+  // The current block's code, from the cached file. In a change: its new
+  // lines, or what was removed when the file was deleted.
   async walkBlockCode() {
     const w = this.walk;
     const b = w.blocks[w.current];
-    return sliceLines(await this.readRepoFile(w.path), b.start, b.end);
+    if (!w.change) return sliceLines(await this.readRepoFile(w.path), b.start, b.end);
+    if (!b.start) return b.removedText;
+    const { owner, repo, ref } = w.change;
+    return sliceLines(await this.fetchFileAt(owner, repo, ref, b.path), b.start, b.end);
   }
 
   // The code itself is in the reader tab; the panel holds what's said about
@@ -2583,41 +2678,57 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     if (this.walkView !== 'file') return;   // the map or the folder choice is showing; the walk renders when you return
     const w = this.walk;
     const esc = (t) => this.escapeHtml(t || '');
-    const toMap = this.journey ? `<button type="button" class="wk-map" data-wk="map">‹ Map</button>` : '';
+    const toMap = this.journey && !w?.change ? `<button type="button" class="wk-map" data-wk="map">‹ Map</button>` : '';
     if (!w?.blocks) {
       this.walkBody.innerHTML = (toMap ? `<div class="wk-bar">${toMap}</div>` : '') + (w?.error
         ? `<div class="rebuild-intro"><p>⚠️ Could not make the walkthrough: ${esc(w.error)}.</p>` +
           `<button type="button" class="files-send jr-primary" data-wk="retry">Ask again</button></div>` +
           this.replyDisclosure(this._walkRaw)
-        : `<div class="rebuild-wait"><span class="files-spinner"></span>The AI is splitting ${esc(w?.path?.split('/').pop())} into blocks…<div class="rebuild-live"></div></div>`);
+        : `<div class="rebuild-wait"><span class="files-spinner"></span>${w?.change ? `The AI is reading ${esc(w.change.label.toLowerCase())}…`
+          : `The AI is splitting ${esc(w?.path?.split('/').pop())} into blocks…`}<div class="rebuild-live"></div></div>`);
       return;
     }
-    const { blocks, current: i, typed = {}, range, total } = w;
+    const { blocks, current: i, typed = {}, range, total, change } = w;
     const b = blocks[i];
     const n = blocks.length;
     const last = i === n - 1;
-    const more = last && range.end < total;
+    const more = !change && last && range.end < total;
     const best = typed[i]?.best;
     const practised = (k) => typed[k]?.best >= 90;
+    const lines = (x) => !x.start ? '' : x.end > x.start ? `lines ${x.start}-${x.end}` : `line ${x.start}`;
+    // A change's parts each have their own file; a file's blocks share one
+    const where = change
+      ? `<span><code>${esc(b.path)}</code>${b.start ? ` · ${lines(b)}` : ` · ${b.status}`}</span>`
+      : `<span>Lines ${b.start}-${b.end}</span>`;
+    const skippedNote = change && i === 0 && w.skipped?.length
+      ? ` <span class="wk-skipped" title="${esc(w.skipped.join('\n'))}">Left out: ${w.skipped.length} lockfile, generated or binary file${w.skipped.length === 1 ? '' : 's'}.</span>` : '';
 
     this.walkBody.innerHTML =
       this.stepBar({
         act: 'wk', back: toMap,
-        where: `Block ${i + 1} of ${n}${range.start > 1 || range.end < total ? ` · lines ${range.start}-${range.end} of ${total}` : ''}`,
+        where: change ? `Part ${i + 1} of ${n}`
+          : `Block ${i + 1} of ${n}${range.start > 1 || range.end < total ? ` · lines ${range.start}-${range.end} of ${total}` : ''}`,
         first: i === 0, pct: Math.round(((i + 1) / n) * 100),
-        next: !last ? `<button type="button" class="wk-step" data-wk="next" aria-label="Next block">›</button>`
+        next: !last ? `<button type="button" class="wk-step" data-wk="next" aria-label="Next">›</button>`
           : more ? `<button type="button" class="wk-step wk-step-text" data-wk="continue">Next lines ›</button>`
-            : `<button type="button" class="wk-step wk-step-text" data-wk="finish">Finish file</button>`,
-        items: blocks.map((x, k) => ({ i: k, current: k === i, mark: practised(k) ? '✓' : k + 1, title: esc(x.title), meta: `${x.start}-${x.end}` })),
-        extra: `<button type="button" class="files-link-btn wk-redo" data-wk="redo">Ask for a new walkthrough of this file</button>`
+            : change ? '' : `<button type="button" class="wk-step wk-step-text" data-wk="finish">Finish file</button>`,
+        items: blocks.map((x, k) => ({ i: k, current: k === i, mark: practised(k) ? '✓' : k + 1, title: esc(x.title),
+          meta: change ? esc(x.path.split('/').pop()) : `${x.start}-${x.end}` })),
+        extra: change
+          ? `<button type="button" class="files-link-btn wk-redo" data-wk="explain-change">Explain the whole change in the chat</button>` +
+            `<button type="button" class="files-link-btn wk-redo" data-wk="redo">Ask for a new walkthrough of this change</button>`
+          : `<button type="button" class="files-link-btn wk-redo" data-wk="redo">Ask for a new walkthrough of this file</button>`
       }) +
-      (i === 0 && w.summary ? `<p class="wk-summary">${esc(w.summary)}</p>` : '') +
-      `<div class="wk-meta"><span>Lines ${b.start}-${b.end}</span>` +
-        `<button type="button" class="files-link-btn wk-show" data-wk="show">Show in reader</button></div>` +
+      (i === 0 && (w.summary || skippedNote) ? `<p class="wk-summary">${esc(w.summary)}${skippedNote}</p>` : '') +
+      `<div class="wk-meta">${where}` +
+        (b.start ? `<button type="button" class="files-link-btn wk-show" data-wk="show">Show in reader</button>` : '') + `</div>` +
       `<h3 class="wk-title">${esc(b.title)}</h3>` +
       (b.explain
         ? `<p class="wk-explain">${esc(b.explain)}</p>`
-        : `<p class="wk-explain is-empty">The AI didn't explain these lines. Ask with Explain more.</p>`) +
+        : `<p class="wk-explain is-empty">The AI didn't explain ${change ? 'this part' : 'these lines'}. Ask with Explain more.</p>`) +
+      // The reader shows the file after the change; what was taken out is here
+      (change && b.removed ? `<details class="raw-reply wk-removed"${b.start ? '' : ' open'}><summary>${b.start ? 'What was removed' : 'The deleted lines'} (${b.removed} line${b.removed === 1 ? '' : 's'})</summary>` +
+        `<pre>${esc(b.removedText)}</pre></details>` : '') +
       `<div class="walk-type" hidden>` +
         `<div class="code-box" aria-label="Type lines ${b.start} to ${b.end}"></div>` +
         `<div class="wk-type-actions">` +
@@ -2633,7 +2744,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       `<div class="wk-dock">` + this.askBox('data-wk', 'Ask about these lines…',
         `<button type="button" class="run-ask" data-wk="more">Explain more</button>` +
         `<button type="button" class="run-ask" data-wk="quiz">Quiz me</button>` +
-        `<button type="button" class="run-ask" data-wk="type" aria-expanded="false">Practise typing${best != null ? ` · best ${best}%` : ''}</button>`) +
+        (!change || b.added ? `<button type="button" class="run-ask" data-wk="type" aria-expanded="false">${change ? 'Write it yourself' : 'Practise typing'}${best != null ? ` · best ${best}%` : ''}</button>` : '')) +
       `</div>`;
 
     // Earlier answers for this block, folded except the latest
@@ -2659,7 +2770,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     if (act === 'open') return this.openRepoFile(this.fileRefFor(el.dataset.path));
     if (act === 'journey-create') return this.createJourney();
     if (act === 'journey-reset') return this.resetJourney();
-    if (act === 'retry') return this.createWalk(w.path, w.lines, w.startAt);
+    if (act === 'retry') return w.change ? this.createChangeWalk(w.change) : this.createWalk(w.path, w.lines, w.startAt);
     if (act === 'reveal') {
       const a = el.nextElementSibling;
       a.hidden = !a.hidden;
@@ -2682,6 +2793,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     if (act === 'next') return go(Math.min(w.blocks.length - 1, i + 1));
     if (act === 'show') return this.followWalk();
     if (act === 'redo') return this.resetWalk();
+    if (act === 'explain-change') return this.explainDiff(w.change);
     if (act === 'continue') return this.createWalk(w.path, null, w.range.end + 1);
     if (act === 'finish') return this.finishWalkFile(el);
     if (act === 'type') {
@@ -2690,8 +2802,8 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       el.setAttribute('aria-expanded', String(!box.hidden));
       if (!box.hidden) {
         this._walkCode = this._walkCode || this.makeCodeBox(box.querySelector('.code-box'), {
-          value: w.typed?.[i]?.text || '', lang: langFromPath(w.path), firstLine: b.start,
-          placeholder: `Type lines ${b.start}-${b.end} here…`,
+          value: w.typed?.[i]?.text || '', lang: langFromPath(b.path || w.path), firstLine: b.start,
+          placeholder: w.change ? 'Write the new version of these lines…' : `Type lines ${b.start}-${b.end} here…`,
           onSubmit: () => this.walkBody.querySelector('[data-wk="compare"]')?.click()
         });
         this._walkCode.focus();
@@ -2701,9 +2813,15 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     }
 
     const code = await this.walkBlockCode();
-    const repo = this.repoDisplayName();
-    const where = `lines ${b.start}-${b.end} of \`${w.path}\`${repo ? ` from ${repo}` : ''}`;
-    const block = fencedFile({ path: w.path, content: code, lines: b });
+    const c = w.change;
+    const repo = c ? `${c.owner}/${c.repo}` : this.repoDisplayName();
+    // What the question is about: a file's numbered lines, or a change's part and its diff
+    const where = c ? `part ${i + 1} of ${w.blocks.length} of ${c.label.toLowerCase()} in ${repo}${c.title ? ` ("${c.title}")` : ''}`
+      : `lines ${b.start}-${b.end} of \`${w.path}\`${repo ? ` from ${repo}` : ''}`;
+    const block = c ? partContext(b) : `${LINE_NUMBER_NOTE}\n\n${fencedFile({ path: w.path, content: code, lines: b })}`;
+    const whole = w.summary ? `(The ${c ? 'change' : 'file'} as a whole: ${w.summary})` : '';
+    // Cited lines open the loaded tree's version, which a change's lines don't match
+    const cite = c ? '' : `\n\n${CITE_RULE}`;
     const typedText = this._walkCode?.getValue() || '';
 
     if (act === 'compare') {
@@ -2716,7 +2834,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
         `${accuracy < 100 ? ' <span>Highlighted lines are in the original but weren\'t matched in yours; faded ones are only in yours.</span>' : ''}</div>` +
         (accuracy < 100 ? `<pre class="walk-diff">${ops.map(o =>
           `<span class="is-${o.type}">${this.escapeHtml(o.text)}</span>`).join('')}</pre>` : '');
-      this.walkBody.querySelector('[data-wk="type"]').textContent = `Practise typing · best ${bestSoFar}%`;
+      this.walkBody.querySelector('[data-wk="type"]').textContent = `${w.change ? 'Write it yourself' : 'Practise typing'} · best ${bestSoFar}%`;
       if (bestSoFar >= 90) {
         const n = this.walkBody.querySelector(`.wk-blocks [data-i="${i}"] .wk-n`);
         if (n) n.textContent = '✓';
@@ -2730,24 +2848,26 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     let label;
     if (act === 'more') {
       label = 'Explain more';
-      prompt = `I'm walking through ${where}, block by block. Explain this block in more depth, line by line: ` +
-        `what each line does and why, and anything that would surprise a beginner.` +
-        `${w.summary ? ` (The file as a whole: ${w.summary})` : ''}\n\n${LINE_NUMBER_NOTE}\n\n${block}\n\n${CITE_RULE}`;
+      prompt = c
+        ? `I'm reading ${where}, part by part. Explain this part in more depth: what each changed line does, ` +
+          `what was there before, and why the change was needed. ${whole}\n\n${block}${cite}`
+        : `I'm walking through ${where}, block by block. Explain this block in more depth, line by line: ` +
+          `what each line does and why, and anything that would surprise a beginner. ${whole}\n\n${block}${cite}`;
     } else if (act === 'ask') {
       const q = this.takeQuestion(this.walkBody);
       if (!q) return;
       label = q.length > 80 ? q.slice(0, 79) + '…' : q;
       const earlier = earlierAnswers(w.notes?.[i]);
-      prompt = `I'm walking through ${where}, block by block. My question about this block: ${q}` +
-        `${w.summary ? `\n\n(The file as a whole: ${w.summary})` : ''}\n\n${LINE_NUMBER_NOTE}\n\n${block}` +
-        `${earlier ? `\n\n${earlier}` : ''}\n\n${CITE_RULE}`;
+      prompt = `I'm ${c ? 'reading' : 'walking through'} ${where}, ${c ? 'part by part' : 'block by block'}. ` +
+        `My question about this ${c ? 'part' : 'block'}: ${q}${whole ? `\n\n${whole}` : ''}\n\n${block}` +
+        `${earlier ? `\n\n${earlier}` : ''}${cite}`;
     } else if (act === 'quiz') {
       label = 'Quiz';
-      prompt = quizPrompt(where, `${LINE_NUMBER_NOTE}\n\n${block}`);
+      prompt = quizPrompt(where, block);
     } else {
       if (!typedText.trim()) { this.showNotification('Type the lines first'); return; }
       label = 'Feedback on your version';
-      const lang = langFromPath(w.path);
+      const lang = langFromPath(b.path || w.path);
       prompt = `I typed ${where} myself to practise.\n\nThe original:\n\n\`\`\`${lang}\n${code.replace(/\n$/, '')}\n\`\`\`\n\n` +
         `Mine:\n\n\`\`\`${lang}\n${typedText.replace(/\n$/, '')}\n\`\`\`\n\n` +
         `Would mine behave the same? List the differences that change behaviour first, then the ones that are only style. ` +
@@ -2769,10 +2889,10 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
         const quiz = parseQuiz(reply);
         const note = quiz ? { label, quiz } : { label, text: reply };
         this.renderWalkNote(notesEl, note, false);
-        await this.addWalkNote(w.path, i, note);
+        await this.addWalkNote(w.key || w.path, i, note);
       } else {
         const text = await this.showAnswerIn(notesEl, label, prompt, { via: 'chat', inline: true });
-        if (text) await this.addWalkNote(w.path, i, { label, text });
+        if (text) await this.addWalkNote(w.key || w.path, i, { label, text });
       }
     } finally {
       el.disabled = false;
@@ -2797,9 +2917,10 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     if (folded) card.el.classList.add('collapsed');
   }
 
-  async addWalkNote(path, i, note) {
+  // id: the walk's key (a change) or path (a file)
+  async addWalkNote(id, i, note) {
     const w = this.walk;
-    if (w?.path !== path || !w.blocks) return;   // moved to another file meanwhile
+    if ((w?.key || w?.path) !== id || !w.blocks) return;   // moved to another file or change meanwhile
     const notes = { ...(w.notes || {}) };
     notes[i] = [...(notes[i] || []), note].slice(-4);
     await this.saveWalk({ ...w, notes });
@@ -3403,7 +3524,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     list.innerHTML =
       `<button type="button" class="commit-summary" data-act="summarize">What's been happening?</button>` +
       commits.map(c =>
-        `<button type="button" class="commit-row" data-sha="${this.escapeHtml(c.sha)}" title="Explain this commit">` +
+        `<button type="button" class="commit-row" data-sha="${this.escapeHtml(c.sha)}" title="Read this commit part by part">` +
           `<span class="commit-title">${this.escapeHtml(c.title)}</span>` +
           `<span class="commit-meta"><code>${this.escapeHtml(c.sha.slice(0, 7))}</code> ` +
           `${this.escapeHtml(c.author)}${c.date ? ' · ' + this.escapeHtml(timeAgo(c.date)) : ''}</span>` +
@@ -3421,7 +3542,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
         return;
       }
       const sha = e.target.closest('[data-sha]')?.dataset.sha;
-      if (sha) this.explainDiff({ owner, repo, kind: 'commit', sha, title: commits.find(c => c.sha === sha)?.title || '' });
+      if (sha) this.walkChange({ owner, repo, kind: 'commit', sha, title: commits.find(c => c.sha === sha)?.title || '' });
     });
     this.threadBody.appendChild(list);
   }
@@ -3520,13 +3641,13 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     return buildPack({ owner, repo, ref: source === 'local' ? '' : this.refLabel(ref), files, treePaths: [...this.repoTree.fileSet] });
   }
 
-  async explainActiveDiff() {
+  async walkActiveDiff() {
     const gh = await this.getActiveGitHub();
     if (!gh || (gh.kind !== 'pull' && gh.kind !== 'commit')) {
       this.showNotification('⚠️ Open a pull request or commit on GitHub first');
       return;
     }
-    await this.explainDiff(gh);
+    await this.walkChange({ ...gh, title: (gh.title || '').split(' · ')[0].trim() });
   }
 
   async explainDiff(gh) {
@@ -4496,7 +4617,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       hero = { kicker: 'GitHub repository', title: `${gh.owner}/${gh.repo}` };
       ctx = `<div class="home-group">` +
         (gh.kind === 'pull' || gh.kind === 'commit'
-          ? row('explain_diff', icon('diff'), gh.kind === 'pull' ? `Explain pull request #${gh.number}` : 'Explain this commit', 'The goal, each file, and what could go wrong') : '') +
+          ? row('walk_diff', icon('diff'), gh.kind === 'pull' ? `Read pull request #${gh.number}` : 'Read this commit', 'Part by part, beside the code') : '') +
         (file ? row('walk_file', icon('lines'), `Read ${file}`, 'Block by block, beside the code') : '') +
         row('explain_repo', icon('compass'), 'Read this repository', this._tabCtx.journey || 'The big picture first, then file by file') +
         row('rebuild', icon('layers'), 'Build it yourself', this._tabCtx.rebuild || 'Recreate a small version, step by step') +
