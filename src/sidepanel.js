@@ -13,7 +13,7 @@ import { suggestActions } from './utils/actions.js';
 import { icon } from './utils/icons.js';
 import { transcriptMarkdown, turnsToMessages, HANDOFF_NOTE } from './utils/conversation.js';
 import { loadApiConfig, buildRoute, askRoute, askWithBudget } from './utils/llm.js';
-import { pickCoreFiles, planPrompt, hintPrompt, checkPrompt, parseRebuildPlan } from './utils/rebuild.js';
+import { pickCoreFiles, planPrompt, hintPrompt, askPrompt, checkPrompt, parseRebuildPlan } from './utils/rebuild.js';
 import {
   parseGitHubUrl, refCandidates, rawFileUrl, encodePath, isReadablePath, estimateTokens, formatCount,
   sliceLines, extractImports, resolveImports, suggestStartFiles, buildPack, readingPrompt, READ_MODES,
@@ -197,6 +197,18 @@ class YavarSidePanel {
       if (!this.closeStepList(this.walkBody, true)) this.walkPanel.classList.add('hidden');
     });
     this.walkBody?.addEventListener('click', (e) => this.onWalkClick(e));
+    for (const body of [this.rebuildBody, this.walkBody]) {
+      body?.addEventListener('keydown', (e) => {
+        if (!e.target.matches('.wk-ask-input') || e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
+        e.preventDefault();
+        e.target.nextElementSibling.click();
+      });
+      body?.addEventListener('input', (e) => {
+        if (!e.target.matches('.wk-ask-input')) return;
+        e.target.style.height = 'auto';
+        e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+      });
+    }
     document.getElementById('run-close')?.addEventListener('click', () => this.closeRunPanel());
     this.runGo?.addEventListener('click', () => this.runCode());
     this.runStop?.addEventListener('click', () => this.stopCode());
@@ -2132,6 +2144,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
         `<button type="button" class="run-ask" data-rb="check">Review my code</button>` +
         (lang ? `<button type="button" class="run-ask" data-rb="try" title="Ctrl+Enter">Run it</button>` : '') +
         `<span class="rebuild-run-status"></span>` +
+        this.askBox('data-rb', 'Ask about this step…') +
       `</div>`;
 
     this._rbCode = this.makeCodeBox(this.rebuildBody.querySelector('.code-box'), {
@@ -2165,6 +2178,24 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     const mentor = { ...(st.mentor || {}) };
     mentor[i] = [...(mentor[i] || []), { title, text, ts: Date.now() }].slice(-6);
     await this.saveRebuild({ ...st, mentor });
+  }
+
+  // Your own question, under the quick actions in a dock: one line that
+  // grows as you type; Enter asks, Shift+Enter starts a new line
+  askBox(attr, placeholder) {
+    return `<div class="wk-ask"><textarea class="wk-ask-input" rows="1" placeholder="${placeholder}" aria-label="${placeholder}"></textarea>` +
+      `<button type="button" class="wk-ask-send" ${attr}="ask" title="Ask (Enter)" aria-label="Ask">` +
+      `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"></path></svg></button></div>`;
+  }
+
+  // The question typed in a dock's ask field, cleared once taken; '' when empty
+  takeQuestion(body) {
+    const input = body.querySelector('.wk-ask-input');
+    const q = input?.value.trim() || '';
+    if (!q) { input?.focus(); return ''; }
+    input.value = '';
+    input.style.height = '';
+    return q;
   }
 
   async onRebuildClick(e) {
@@ -2244,6 +2275,17 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       el.disabled = true;
       await this.showAnswerIn(mentor, title, prompt, {
         attachments, via: 'chat', inline: true,
+        onUseCode: (c) => this.setStepCode(c),
+        onDone: (text) => this.addMentorNote(i, title, text)
+      });
+      el.disabled = false;
+    } else if (act === 'ask') {
+      const q = this.takeQuestion(this.rebuildBody);
+      if (!q) return;
+      const title = q.length > 80 ? q.slice(0, 79) + '…' : q;
+      el.disabled = true;
+      await this.showAnswerIn(this.rebuildBody.querySelector('.rebuild-mentor'), title, askPrompt(st.plan, i, code, q), {
+        via: 'chat', inline: true,
         onUseCode: (c) => this.setStepCode(c),
         onDone: (text) => this.addMentorNote(i, title, text)
       });
@@ -2563,6 +2605,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
         `<button type="button" class="run-ask" data-wk="more">Explain more</button>` +
         `<button type="button" class="run-ask" data-wk="quiz">Quiz me</button>` +
         `<button type="button" class="run-ask" data-wk="type" aria-expanded="false">Practise typing${best != null ? ` · best ${best}%` : ''}</button>` +
+        this.askBox('data-wk', 'Ask about these lines…') +
       `</div>`;
 
     // Earlier answers for this block, folded except the latest
@@ -2652,7 +2695,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       }
       return;
     }
-    if (act !== 'more' && act !== 'quiz' && act !== 'feedback') return;
+    if (act !== 'more' && act !== 'quiz' && act !== 'feedback' && act !== 'ask') return;
 
     const notesEl = this.walkBody.querySelector('.walk-notes');
     let prompt;
@@ -2662,6 +2705,12 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       prompt = `I'm walking through ${where}, block by block. Explain this block in more depth, line by line: ` +
         `what each line does and why, and anything that would surprise a beginner.` +
         `${w.summary ? ` (The file as a whole: ${w.summary})` : ''}\n\n${LINE_NUMBER_NOTE}\n\n${block}\n\n${CITE_RULE}`;
+    } else if (act === 'ask') {
+      const q = this.takeQuestion(this.walkBody);
+      if (!q) return;
+      label = q.length > 80 ? q.slice(0, 79) + '…' : q;
+      prompt = `I'm walking through ${where}, block by block. My question about this block: ${q}` +
+        `${w.summary ? `\n\n(The file as a whole: ${w.summary})` : ''}\n\n${LINE_NUMBER_NOTE}\n\n${block}\n\n${CITE_RULE}`;
     } else if (act === 'quiz') {
       label = 'Quiz';
       prompt = quizPrompt(where, `${LINE_NUMBER_NOTE}\n\n${block}`);

@@ -52,6 +52,16 @@ export function hintPrompt(plan, i) {
     `${s.study?.length ? s.study.join(', ') : 'the original code'} to look at. Keep it short.`;
 }
 
+// A question of the user's own about the current step
+export function askPrompt(plan, i, code, question) {
+  const s = plan.steps[i];
+  return `I'm rebuilding ${plan.project}, step ${i + 1} of ${plan.steps.length}: "${s.title}".\n` +
+    `Task: ${s.task}\n\n` +
+    (code.trim() ? `My code so far:\n\n\`\`\`${plan.language ? plan.language.toLowerCase() : ''}\n${code.replace(/\n$/, '')}\n\`\`\`\n\n` : '') +
+    `My question: ${question}\n\n` +
+    `Answer it like a mentor: help me understand, and don't write the step for me unless I ask for code.`;
+}
+
 export function checkPrompt(plan, i, code, attached) {
   const s = plan.steps[i];
   return `I'm rebuilding ${plan.project}, step ${i + 1} of ${plan.steps.length}: "${s.title}".\n` +
