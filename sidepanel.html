@@ -95,16 +95,16 @@
       </div>
       <div id="run-editor" class="run-editor"></div>
       <div class="run-actions">
-        <button id="run-go" type="button" class="run-go" title="Run (Ctrl+Enter)">▶ Run</button>
-        <button id="run-stop" type="button" class="run-stop hidden">■ Stop</button>
+        <button id="run-go" type="button" class="run-go" title="Run (Ctrl+Enter)">Run</button>
+        <button id="run-stop" type="button" class="run-stop hidden">Stop</button>
         <span id="run-status" class="run-status" aria-live="polite"></span>
       </div>
       <div class="run-scroll">
         <pre id="run-output" class="run-output" aria-label="Output"></pre>
         <div id="run-followups" class="run-followups hidden">
-          <button type="button" class="files-chip-btn" data-ask="fix">Ask AI to fix it</button>
-          <button type="button" class="files-chip-btn" data-ask="explain">Explain the output</button>
-          <button type="button" class="files-chip-btn" data-ask="next">What should I try next?</button>
+          <button type="button" class="run-ask" data-ask="fix">Fix it</button>
+          <button type="button" class="run-ask" data-ask="explain">Explain the output</button>
+          <button type="button" class="run-ask" data-ask="next">What to try next</button>
         </div>
         <!-- Answers to the buttons above appear here, streamed from the chat -->
         <div id="run-answers" class="run-answers"></div>

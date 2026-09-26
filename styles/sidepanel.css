@@ -771,18 +771,21 @@ html, body {
 
 .run-lang .files-tab { padding: 4px 10px; }
 
+/* The editor is as tall as the code (six lines at least) and scrolls
+   past about half the panel */
 .run-editor {
-  flex: 1 1 45%;
-  min-height: 140px;
-  overflow: hidden;
+  flex: none;
+  background: var(--surface);
   border-bottom: 1px solid var(--border);
 }
 
 .run-editor .CodeMirror {
-  height: 100%;
-  font-size: 13px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  height: auto;
+  font: 12.5px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
+.run-editor .CodeMirror-scroll { min-height: calc(6 * 1.6em + 20px); max-height: 48vh; }
+.run-editor .CodeMirror-lines { padding: 10px 0; }
+.run-editor .CodeMirror-linenumber { padding: 0 10px 0 14px; }
 
 .run-actions {
   display: flex;
@@ -793,27 +796,31 @@ html, body {
 
 .run-go,
 .run-stop {
-  padding: 7px 16px;
+  height: 28px;
+  padding: 0 14px;
   font: inherit;
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 600;
-  border: none;
   border-radius: var(--r-pill);
   cursor: pointer;
+  transition: background var(--dur-quick) var(--ease-std), border-color var(--dur-quick) var(--ease-std);
 }
 
 .run-go {
   color: var(--on-accent);
-  background: var(--success);
+  background: var(--accent);
+  border: none;
 }
 
-.run-go:hover { filter: brightness(1.05); }
+.run-go:hover { background: var(--accent-hover); }
 .run-go:disabled { opacity: 0.55; cursor: progress; }
 
 .run-stop {
-  color: var(--on-accent);
-  background: var(--danger);
+  color: var(--text-primary);
+  background: var(--surface);
+  border: 1px solid var(--border);
 }
+.run-stop:hover { border-color: var(--text-secondary); }
 
 .run-stop.hidden { display: none; }
 
@@ -823,35 +830,46 @@ html, body {
   color: var(--text-secondary);
 }
 
+/* Output reads like a console: flat, set off by a faint fill, shown once
+   there is some */
 .run-output {
-  flex: 1 1 35%;
-  min-height: 80px;
   margin: 0 14px;
   padding: 10px 12px;
   overflow: auto;
-  font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font: 12.5px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   white-space: pre-wrap;
   word-break: break-word;
   color: var(--text-primary);
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--text-primary) 4%, transparent);
   border-radius: var(--r-md);
 }
 
-.run-output:empty::before {
-  content: 'Output appears here';
-  color: var(--text-secondary);
-}
-
-.run-output.has-error { border-color: color-mix(in srgb, var(--danger) 55%, transparent); }
+.run-output:empty { display: none; }
 .run-err { color: var(--danger); }
 
+/* What to do with the result: quiet text actions, one row */
 .run-followups {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  padding: 10px 14px 14px;
+  gap: 2px;
+  padding: 6px 8px 0;
 }
+
+.run-ask {
+  padding: 4px 6px;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--accent);
+  background: none;
+  border: none;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: background var(--dur-quick) var(--ease-std);
+}
+.run-ask:hover { background: var(--accent-soft); }
+.run-ask:disabled { color: var(--text-secondary); cursor: progress; }
+.run-ask:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .run-followups.hidden,
 .run-followups .hidden { display: none; }
@@ -1029,16 +1047,32 @@ html, body {
   margin-top: 10px;
 }
 
+/* Moving between steps is a quiet footer: the step's content is what
+   matters, not the button that leaves it */
 .rebuild-nav {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 12px;
-  margin-top: 16px;
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
 }
 
-.rebuild-nav .files-link-btn { margin: 0; }
+.rebuild-nav .files-link-btn { margin: 0; padding: 4px 0; }
+.rebuild-nav .files-link-btn:hover { color: var(--text-primary); }
 .rebuild-nav .files-link-btn:disabled { opacity: 0.4; cursor: default; }
-.rebuild-nav .files-send { flex: 1; }
+.rebuild-nav .files-link-btn:disabled:hover { color: var(--text-secondary); }
+.rebuild-nav .files-send {
+  width: auto;
+  padding: 5px 12px;
+  font-size: 12.5px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: var(--r-pill);
+}
+.rebuild-nav .files-send:hover { background: color-mix(in srgb, var(--accent) 17%, transparent); }
+.rebuild-nav .files-send:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* The runner opens on top of the rebuild panel ("▶ Try it") */
 .rebuild-panel { z-index: 67; }
@@ -1204,7 +1238,6 @@ html, body {
 }
 
 /* Run panel: output, follow-ups and answers scroll together under the editor */
-.run-panel .run-editor { flex: 0 0 auto; height: 38%; min-height: 120px; }
 .run-scroll {
   flex: 1;
   min-height: 0;
@@ -2308,7 +2341,7 @@ button.lens-item:focus-visible {
 .walk-result:empty { display: none; }
 .walk-result { margin-top: 10px; }
 .walk-score { font-weight: 600; margin-bottom: 6px; }
-.walk-score span { font-weight: 400; font-size: 12px; color: var(--text-secondary); }
+.walk-score span { display: block; font-weight: 400; font-size: 12px; color: var(--text-secondary); }
 .walk-diff {
   margin: 0;
   padding: 8px 10px;
@@ -2319,9 +2352,10 @@ button.lens-item:focus-visible {
   overflow-x: auto;
 }
 .walk-diff span { display: block; white-space: pre; }
-.walk-diff .is-same { color: var(--text-secondary); }
-.walk-diff .is-missing { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); }
-.walk-diff .is-extra { color: var(--success); background: color-mix(in srgb, var(--success) 10%, transparent); }
+/* One tint for "in the original, not matched"; yours-only lines fade */
+.walk-diff .is-same { color: var(--text-primary); }
+.walk-diff .is-missing { color: var(--accent); background: var(--accent-soft); }
+.walk-diff .is-extra { color: var(--text-secondary); opacity: 0.7; }
 
 .walk-outline { margin-top: 14px; }
 .walk-lines { margin-left: auto; font-size: 11px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }

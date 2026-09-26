@@ -2550,12 +2550,11 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       const { accuracy, ops } = compareTyped(code, text);
       const bestSoFar = Math.max(accuracy, w.typed?.[i]?.best || 0);
       await this.saveWalk({ ...w, typed: { ...(w.typed || {}), [i]: { best: bestSoFar, text } } });
-      const marks = { same: ' ', missing: '−', extra: '+' };
       card.querySelector('.walk-result').innerHTML =
         `<div class="walk-score">${accuracy}% match${accuracy >= 90 ? ' ✓' : ''}` +
-        `${accuracy < 100 ? ' <span>− in the original, missing from yours · + only in yours</span>' : ''}</div>` +
+        `${accuracy < 100 ? ' <span>Highlighted lines are in the original but weren\'t matched in yours; faded ones are only in yours.</span>' : ''}</div>` +
         (accuracy < 100 ? `<pre class="walk-diff">${ops.map(o =>
-          `<span class="is-${o.type}">${marks[o.type]} ${this.escapeHtml(o.text)}</span>`).join('')}</pre>` : '');
+          `<span class="is-${o.type}">${this.escapeHtml(o.text)}</span>`).join('')}</pre>` : '');
       // The outline's tick and the button's best score
       const li = this.walkBody.querySelector(`.walk-outline li[data-i="${i}"]`);
       if (bestSoFar >= 90 && li) { li.classList.add('done'); li.querySelector('.rebuild-step-dot').textContent = '✓'; }
@@ -3539,6 +3538,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       theme: 'yavar',
       lineNumbers: true,
       lineWrapping: false,
+      viewportMargin: Infinity,   // the editor grows with the code (see .run-editor)
       tabSize: 4,
       indentUnit: 4,
       indentWithTabs: false,
@@ -3704,6 +3704,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     };
     const titles = { fix: 'Fix', explain: 'Why this output', next: 'Try next' };
     this.showAnswerIn(document.getElementById('run-answers'), titles[kind], asks[kind], {
+      via: 'chat', inline: true,
       onUseCode: (code) => { this.runEditor.setValue(code); this.runEditor.focus(); }
     });
   }
