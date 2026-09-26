@@ -183,9 +183,9 @@ class YavarSidePanel {
     this.rebuildPanel = document.getElementById('rebuild-panel');
     this.rebuildBody = document.getElementById('rebuild-body');
     document.getElementById('rebuild-close')?.addEventListener('click', () => this.rebuildPanel.classList.add('hidden'));
-    document.getElementById('rebuild-reset')?.addEventListener('click', () => this.resetRebuild());
     this.rebuildPanel?.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') this.rebuildPanel.classList.add('hidden');
+      if (e.key !== 'Escape') return;
+      if (!this.closeStepList(this.rebuildBody, true)) this.rebuildPanel.classList.add('hidden');
     });
     this.rebuildBody?.addEventListener('click', (e) => this.onRebuildClick(e));
     this.walkPanel = document.getElementById('walk-panel');
@@ -193,15 +193,7 @@ class YavarSidePanel {
     document.getElementById('walk-close')?.addEventListener('click', () => this.walkPanel.classList.add('hidden'));
     this.walkPanel?.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape') return;
-      const list = this.walkBody.querySelector('.wk-blocks:not([hidden])');
-      if (list) {
-        list.hidden = true;
-        const where = this.walkBody.querySelector('.wk-where');
-        where?.setAttribute('aria-expanded', 'false');
-        where?.focus();
-        return;
-      }
-      this.walkPanel.classList.add('hidden');
+      if (!this.closeStepList(this.walkBody, true)) this.walkPanel.classList.add('hidden');
     });
     this.walkBody?.addEventListener('click', (e) => this.onWalkClick(e));
     document.getElementById('run-close')?.addEventListener('click', () => this.closeRunPanel());
@@ -2071,11 +2063,14 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
 
   async resetRebuild() {
     if (!this.rebuild?.plan) return;
-    if (!this.confirmTwice('rebuild', 'Click ↺ again to discard this plan and start over')) return;
+    if (!this.confirmTwice('rebuild', 'Click again to discard this plan and start over')) return;
     await this.saveRebuild(null);
     this.renderRebuild();
   }
 
+  // One step at a time under the shared step bar: what to learn, which
+  // original files to study (they open in the reader), the task, your code,
+  // and hints and reviews in place. Marking a step done is its own act.
   renderRebuild() {
     const st = this.rebuild;
     const esc = (t) => this.escapeHtml(t || '');
@@ -2083,18 +2078,18 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       const core = pickCoreFiles(this.repoTree.items);
       const bytes = core.reduce((n, p) => n + (this.repoTree.sizes.get(p) || 0), 0);
       this.rebuildBody.innerHTML =
-        `<div class="rebuild-intro">` +
-          `<p>The best way to understand a codebase is to build a small version of it yourself. ` +
-          `Yavar sends the project's core files to the AI, which writes a plan of small steps. ` +
-          `For each step you study the original, write your own version, and get hints or a review.</p>` +
-          `<div class="rebuild-files"><strong>${core.length} file${core.length === 1 ? '' : 's'}</strong> ` +
-          `<span>(~${formatCount(estimateTokens(bytes))} tokens, picked automatically)</span>` +
-          `<div class="rebuild-file-list">${core.map(p => `<code>${esc(p)}</code>`).join(' ')}</div></div>` +
-          (this._planPending
-            ? `<div class="rebuild-wait"><span class="files-spinner"></span>The AI is writing your plan…<div class="rebuild-live"></div></div>`
-            : `<button type="button" class="files-send" data-rb="create"${core.length ? '' : ' disabled'}>Create my plan</button>`) +
-          `<button type="button" class="files-link-btn rebuild-load" data-rb="load">Already have a plan in the chat? Load it</button>` +
-        `</div>`;
+        `<p class="wk-summary">Build a small version of this project yourself, one step at a time. The AI reads its core files ` +
+          `and writes the plan; for each step you study the original, write your own, and ask for a hint or a review.</p>` +
+        `<div class="jr-head"><span class="rebuild-label">Core files it will read</span>` +
+          `<span class="jr-count">${core.length} · ~${formatCount(estimateTokens(bytes))} tokens</span></div>` +
+        `<div class="jr-files rb-core">${core.map(p =>
+          `<button type="button" class="jr-file" data-rb="open" data-path="${esc(p)}" title="Open ${esc(p)} in the reader">${esc(p.split('/').pop())}</button>`).join('')}</div>` +
+        (this._planPending
+          ? `<div class="rebuild-wait"><span class="files-spinner"></span>The AI is writing your plan…<div class="rebuild-live"></div></div>`
+          : `<div class="jr-actions rb-start">` +
+              `<button type="button" class="files-link-btn jr-link" data-rb="load">Load a plan already in the chat</button>` +
+              (core.length ? `<button type="button" class="files-send jr-primary" data-rb="create">Create my plan →</button>` : '') +
+            `</div>`);
       return;
     }
 
@@ -2102,46 +2097,47 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     const n = plan.steps.length;
     const i = Math.min(current, n - 1);
     const s = plan.steps[i];
-    const pct = Math.round((done.length / n) * 100);
     const lang = this.rebuildLang(plan);
-    const studyChips = (s.study || []).map(p => {
-      const ok = this.repoTree.fileSet.has(p);
-      return `<button type="button" class="files-start-chip${ok ? '' : ' missing'}" data-rb="study" data-path="${esc(p)}"${ok ? '' : ' disabled title="Not found in this repo"'}>${esc(p.split('/').pop())}</button>`;
-    }).join('');
+    const isDone = done.includes(i);
+    const study = (s.study || []).map(p => this.repoTree.fileSet.has(p)
+      ? `<button type="button" class="jr-file" data-rb="study" data-path="${esc(p)}" title="Open ${esc(p)} in the reader and explain it for this step">${esc(p.split('/').pop())}</button>`
+      : `<span class="jr-file is-missing" title="Not found in this repository">${esc(p.split('/').pop())}</span>`).join('');
 
     this.rebuildBody.innerHTML =
-      (plan.summary ? `<p class="rebuild-summary">${esc(plan.summary)}</p>` : '') +
-      `<div class="rebuild-progress" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100">` +
-        `<div class="rebuild-progress-bar" style="width:${pct}%"></div></div>` +
-      `<div class="rebuild-progress-label">${done.length} of ${n} steps done</div>` +
-      `<ol class="rebuild-steps">${plan.steps.map((x, k) =>
-        `<li class="${k === i ? 'current' : ''}${done.includes(k) ? ' done' : ''}" data-rb="goto" data-i="${k}">` +
-        `<span class="rebuild-step-dot">${done.includes(k) ? '✓' : k + 1}</span><span>${esc(x.title)}</span></li>`).join('')}</ol>` +
-      `<div class="rebuild-card">` +
-        `<div class="rebuild-card-kicker">Step ${i + 1} of ${n}</div>` +
-        `<h3>${esc(s.title)}</h3>` +
-        (s.goal ? `<p class="rebuild-goal">${esc(s.goal)}</p>` : '') +
-        (studyChips ? `<div class="rebuild-label">Study first</div><div class="files-start-list">${studyChips}</div>` : '') +
-        `<div class="rebuild-label">Your task</div><p class="rebuild-text">${esc(s.task)}</p>` +
-        (s.done_when ? `<div class="rebuild-label">Done when</div><p class="rebuild-text">${esc(s.done_when)}</p>` : '') +
-        `<div class="rebuild-label">Your code</div>` +
-        `<textarea class="rebuild-code" spellcheck="false" placeholder="Write or paste your version for this step…" data-i="${i}">${esc(code[i] || '')}</textarea>` +
-        `<div class="rebuild-actions">` +
-          `<button type="button" class="files-chip-btn" data-rb="hint">💡 Hint</button>` +
-          `<button type="button" class="files-chip-btn" data-rb="check">Check my code</button>` +
-          (lang ? `<button type="button" class="files-chip-btn" data-rb="try">▶ Try it</button>` : '') +
-          `<span class="rebuild-run-status"></span>` +
-        `</div>` +
-        `<pre class="run-output rebuild-out hidden" aria-label="Output of your code"></pre>` +
-        `<div class="rebuild-mentor"></div>` +
-        `<div class="rebuild-nav">` +
-          `<button type="button" class="files-link-btn" data-rb="prev"${i === 0 ? ' disabled' : ''}>← Previous</button>` +
-          `<button type="button" class="files-send" data-rb="next">${done.includes(i) ? (i === n - 1 ? 'All done' : 'Next step →') : (i === n - 1 ? 'Mark done 🎉' : 'Mark done & next →')}</button>` +
-        `</div>` +
+      this.stepBar({
+        act: 'rb', where: `Step ${i + 1} of ${n}`, first: i === 0,
+        pct: Math.round((done.length / n) * 100),
+        next: `<button type="button" class="wk-step" data-rb="fwd" aria-label="Next step"${i === n - 1 ? ' disabled' : ''}>›</button>`,
+        items: plan.steps.map((x, k) => ({ i: k, current: k === i, mark: done.includes(k) ? '✓' : k + 1, title: esc(x.title) })),
+        extra: `<button type="button" class="files-link-btn wk-redo" data-rb="reset">Start over with a new plan</button>`
+      }) +
+      (i === 0 && plan.summary ? `<p class="wk-summary">${esc(plan.summary)}</p>` : '') +
+      `<h3 class="wk-title">${esc(s.title)}</h3>` +
+      (s.goal ? `<p class="rb-goal">${esc(s.goal)}</p>` : '') +
+      (study ? `<div class="rebuild-label">Study first</div><div class="jr-files">${study}</div>` : '') +
+      `<div class="rebuild-label">Your task</div><p class="wk-explain">${esc(s.task)}</p>` +
+      (s.done_when ? `<div class="rebuild-label">Done when</div><p class="wk-explain">${esc(s.done_when)}</p>` : '') +
+      `<div class="rebuild-label">Your code</div>` +
+      `<textarea class="wk-typing rebuild-code" rows="1" spellcheck="false" aria-label="Your code for this step" ` +
+        `placeholder="Write your version of this step…">${esc(code[i] || '')}</textarea>` +
+      `<div class="wk-actions">` +
+        `<button type="button" class="run-ask" data-rb="hint">Hint</button>` +
+        `<button type="button" class="run-ask" data-rb="check">Review my code</button>` +
+        (lang ? `<button type="button" class="run-ask" data-rb="try" title="Ctrl+Enter">Run it</button>` : '') +
+        `<span class="rebuild-run-status"></span>` +
+      `</div>` +
+      `<pre class="run-output rebuild-out" aria-label="Output of your code"></pre>` +
+      `<div class="rebuild-mentor"></div>` +
+      `<div class="rb-done">` + (isDone
+        ? `<span class="rb-done-note">✓ Step done</span><button type="button" class="files-link-btn jr-link" data-rb="undone">Undo</button>`
+        : `<button type="button" class="files-send jr-primary" data-rb="done">${i === n - 1 ? 'Mark the last step done' : 'Mark done and continue →'}</button>`) +
       `</div>`;
 
     const ta = this.rebuildBody.querySelector('.rebuild-code');
-    ta?.addEventListener('input', () => {
+    const grow = () => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + ta.offsetHeight - ta.clientHeight + 'px'; };
+    grow();
+    ta.addEventListener('input', () => {
+      grow();
       clearTimeout(this._rbSave);
       this._rbSave = setTimeout(() => {
         const c = { ...(this.rebuild.code || {}) };
@@ -2149,15 +2145,15 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
         this.saveRebuild({ ...this.rebuild, code: c });
       }, 400);
     });
-    ta?.addEventListener('keydown', (e) => {
-      if (e.key === 'Tab') { e.preventDefault(); ta.setRangeText('    ', ta.selectionStart, ta.selectionEnd, 'end'); }
+    ta.addEventListener('keydown', (e) => {
+      if (e.key === 'Tab') { e.preventDefault(); ta.setRangeText('    ', ta.selectionStart, ta.selectionEnd, 'end'); grow(); }
       if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && lang) { e.preventDefault(); this.rebuildBody.querySelector('[data-rb="try"]')?.click(); }
     });
 
-    // Earlier hints and reviews for this step
+    // Earlier hints and reviews for this step, folded
     const mentor = this.rebuildBody.querySelector('.rebuild-mentor');
     for (const note of (st.mentor?.[i] || [])) {
-      const card = this.answerCard(mentor, { title: note.title, onUseCode: (c) => this.setStepCode(c), collapsible: true, openInChat: false, inline: true });
+      const card = this.answerCard(mentor, { title: note.title.replace(/^\p{Extended_Pictographic}️?‍?\p{Extended_Pictographic}?\s*/u, ''), onUseCode: (c) => this.setStepCode(c), collapsible: true, openInChat: false, inline: true });
       card.done(note.text);
       card.el.classList.add('collapsed');
     }
@@ -2181,30 +2177,40 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
   }
 
   async onRebuildClick(e) {
+    if (!e.target.closest('.wk-bar')) this.closeStepList(this.rebuildBody);
     const el = e.target.closest('[data-rb]');
     if (!el || el.disabled) return;
     const act = el.dataset.rb;
     const st = this.rebuild;
     if (act === 'create') return this.createRebuildPlan();
     if (act === 'load') return this.loadPlanFromChat();
+    if (act === 'open') return this.openRepoFile(this.fileRefFor(el.dataset.path));
     if (!st?.plan) return;
-    const i = Math.min(st.current || 0, st.plan.steps.length - 1);
+    const n = st.plan.steps.length;
+    const i = Math.min(st.current || 0, n - 1);
     const code = this.rebuildBody.querySelector('.rebuild-code')?.value || '';
+    const go = async (k, changes = {}) => {
+      await this.saveRebuild({ ...st, ...changes, current: k, code: { ...(st.code || {}), [i]: code } });
+      this.renderRebuild();
+      this.rebuildBody.scrollTop = 0;
+    };
 
-    if (act === 'goto') {
-      await this.saveRebuild({ ...st, current: Number(el.dataset.i) });
-      this.renderRebuild();
+    if (act === 'list') {
+      this.toggleStepList(this.rebuildBody, el);
+    } else if (act === 'reset') {
+      await this.resetRebuild();
+    } else if (act === 'goto') {
+      await go(Number(el.dataset.i));
     } else if (act === 'prev') {
-      await this.saveRebuild({ ...st, current: Math.max(0, i - 1) });
-      this.renderRebuild();
-    } else if (act === 'next') {
+      await go(Math.max(0, i - 1));
+    } else if (act === 'fwd') {
+      await go(Math.min(i + 1, n - 1));
+    } else if (act === 'done') {
       const done = [...new Set([...(st.done || []), i])];
-      const next = Math.min(i + 1, st.plan.steps.length - 1);
-      await this.saveRebuild({ ...st, done, current: next, code: { ...(st.code || {}), [i]: code } });
-      this.renderRebuild();
-      if (done.length === st.plan.steps.length && i === st.plan.steps.length - 1) {
-        this.showNotification('🎉 You rebuilt the whole plan. Try extending it with a feature of your own!');
-      }
+      await go(Math.min(i + 1, n - 1), { done });
+      if (done.length === n) this.showNotification('You rebuilt the whole plan. Try extending it with a feature of your own.');
+    } else if (act === 'undone') {
+      await go(i, { done: (st.done || []).filter(k => k !== i) });
     } else if (act === 'study') {
       // Explained right here in the step, like hints, so the plan stays open
       const path = el.dataset.path;
@@ -2215,7 +2221,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
         const [file] = await this.fetchRepoFilesMany([path]);
         if (file.error) throw new Error(file.error);
         const fname = name + '.md';
-        const title = '📖 ' + name;
+        const title = 'About ' + name;
         await this.showAnswerIn(this.rebuildBody.querySelector('.rebuild-mentor'), title,
           `The attached "${fname}" is \`${path}\` from ${this.repoDisplayName()}. I am rebuilding this project step by step ` +
           `and am on the step "${st.plan.steps[i].title}". ${readingPrompt('explain', { what: `\`${path}\``, repo: this.repoDisplayName() })}\n\n` +
@@ -2243,7 +2249,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
         if (files.length) attachments = [{ filename: `step-${i + 1}-original.md`, content: this.packFor(files) }];
         prompt = checkPrompt(st.plan, i, code, attachments.length > 0);
       }
-      const title = act === 'hint' ? '💡 Hint' : '🧑‍🏫 Review';
+      const title = act === 'hint' ? 'Hint' : 'Review of your code';
       el.disabled = true;
       await this.showAnswerIn(mentor, title, prompt, {
         attachments, via: 'chat', inline: true,
@@ -2255,7 +2261,6 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       // Run inline under the code, so hints and output stay in view together
       if (!code.trim()) { this.showNotification('Write some code first'); return; }
       const out = this.rebuildBody.querySelector('.rebuild-out');
-      out.classList.remove('hidden');
       el.disabled = true;
       await this.runSnippet({
         lang: this.rebuildLang(st.plan), code, outEl: out,
@@ -2306,6 +2311,41 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     this.rebuildPanel.classList.remove('hidden');
     this.renderRebuild();
     this.showNotification(`🛠 Plan ready: ${plan.steps.length} steps`);
+  }
+
+  // ----- The step bar, shared by the walkthrough and Build it yourself -----
+  // Pinned at the top of the sheet: a way back, where you are (the step list
+  // opens from it), Previous, and a forward control, over a thin progress
+  // line. `act` names the sheet's data attribute (wk, rb); titles are markup.
+  stepBar({ act, back = '', where, first, next, pct, items, extra = '' }) {
+    const a = `data-${act}`;
+    return `<div class="wk-bar"><div class="wk-row">${back}` +
+        `<button type="button" class="wk-where" ${a}="list" aria-expanded="false">${where}<span class="wk-chev" aria-hidden="true"></span></button>` +
+        `<span class="wk-steps"><button type="button" class="wk-step" ${a}="prev" aria-label="Previous"${first ? ' disabled' : ''}>‹</button>${next}</span>` +
+      `</div>` +
+      `<div class="wk-progress" aria-hidden="true"><i style="width:${pct}%"></i></div>` +
+      `<div class="wk-blocks" hidden><ol>${items.map(it =>
+        `<li><button type="button" class="${it.current ? 'is-current' : ''}" ${a}="goto" data-i="${it.i}"${it.current ? ' aria-current="step"' : ''}>` +
+        `<span class="wk-n">${it.mark}</span><span class="wk-t">${it.title}</span>${it.meta ? `<span class="wk-l">${it.meta}</span>` : ''}</button></li>`).join('')}</ol>` +
+      extra + `</div></div>`;
+  }
+
+  toggleStepList(body, btn) {
+    const list = body.querySelector('.wk-blocks');
+    list.hidden = !list.hidden;
+    btn.setAttribute('aria-expanded', String(!list.hidden));
+    if (!list.hidden) list.querySelector('.is-current')?.focus();
+  }
+
+  // Close the step list if it's open; true when it was
+  closeStepList(body, refocus = false) {
+    const list = body?.querySelector('.wk-blocks:not([hidden])');
+    if (!list) return false;
+    list.hidden = true;
+    const where = body.querySelector('.wk-where');
+    where?.setAttribute('aria-expanded', 'false');
+    if (refocus) where?.focus();
+    return true;
   }
 
   // ========== Walk through a file ==========
@@ -2460,25 +2500,16 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     const practised = (k) => typed[k]?.best >= 90;
 
     this.walkBody.innerHTML =
-      `<div class="wk-bar">` +
-        `<div class="wk-row">` + toMap +
-          `<button type="button" class="wk-where" data-wk="blocks" aria-expanded="false" aria-controls="wk-blocks">` +
-            `Block ${i + 1} of ${n}${range.start > 1 || range.end < total ? ` · lines ${range.start}-${range.end} of ${total}` : ''}<span class="wk-chev" aria-hidden="true"></span></button>` +
-          `<span class="wk-steps">` +
-            `<button type="button" class="wk-step" data-wk="prev" aria-label="Previous block"${i === 0 ? ' disabled' : ''}>‹</button>` +
-            (!last ? `<button type="button" class="wk-step" data-wk="next" aria-label="Next block">›</button>`
-              : more ? `<button type="button" class="wk-step wk-step-text" data-wk="continue">Next lines ›</button>`
-                : `<button type="button" class="wk-step wk-step-text" data-wk="finish">Finish file</button>`) +
-          `</span>` +
-        `</div>` +
-        `<div class="wk-progress" aria-hidden="true"><i style="width:${Math.round(((i + 1) / n) * 100)}%"></i></div>` +
-        `<div id="wk-blocks" class="wk-blocks" hidden>` +
-          `<ol>${blocks.map((x, k) =>
-            `<li><button type="button" class="${k === i ? 'is-current' : ''}" data-wk="goto" data-i="${k}"${k === i ? ' aria-current="step"' : ''}>` +
-            `<span class="wk-n">${practised(k) ? '✓' : k + 1}</span><span class="wk-t">${esc(x.title)}</span><span class="wk-l">${x.start}-${x.end}</span></button></li>`).join('')}</ol>` +
-          `<button type="button" class="files-link-btn wk-redo" data-wk="redo">Ask for a new walkthrough of this file</button>` +
-        `</div>` +
-      `</div>` +
+      this.stepBar({
+        act: 'wk', back: toMap,
+        where: `Block ${i + 1} of ${n}${range.start > 1 || range.end < total ? ` · lines ${range.start}-${range.end} of ${total}` : ''}`,
+        first: i === 0, pct: Math.round(((i + 1) / n) * 100),
+        next: !last ? `<button type="button" class="wk-step" data-wk="next" aria-label="Next block">›</button>`
+          : more ? `<button type="button" class="wk-step wk-step-text" data-wk="continue">Next lines ›</button>`
+            : `<button type="button" class="wk-step wk-step-text" data-wk="finish">Finish file</button>`,
+        items: blocks.map((x, k) => ({ i: k, current: k === i, mark: practised(k) ? '✓' : k + 1, title: esc(x.title), meta: `${x.start}-${x.end}` })),
+        extra: `<button type="button" class="files-link-btn wk-redo" data-wk="redo">Ask for a new walkthrough of this file</button>`
+      }) +
       (i === 0 && w.summary ? `<p class="wk-summary">${esc(w.summary)}</p>` : '') +
       `<div class="wk-meta"><span>Lines ${b.start}-${b.end}</span>` +
         `<button type="button" class="files-link-btn wk-show" data-wk="show">Show in reader</button></div>` +
@@ -2519,12 +2550,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
   }
 
   async onWalkClick(e) {
-    // A click outside the open block list closes it
-    const open = this.walkBody.querySelector('.wk-blocks:not([hidden])');
-    if (open && !e.target.closest('.wk-bar')) {
-      open.hidden = true;
-      this.walkBody.querySelector('.wk-where')?.setAttribute('aria-expanded', 'false');
-    }
+    if (!e.target.closest('.wk-bar')) this.closeStepList(this.walkBody);
     const el = e.target.closest('[data-wk]');
     if (!el || el.disabled) return;
     const act = el.dataset.wk;
@@ -2555,13 +2581,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       this.walkBody.scrollTop = 0;
       this.followWalk();
     };
-    if (act === 'blocks') {
-      const list = this.walkBody.querySelector('.wk-blocks');
-      list.hidden = !list.hidden;
-      el.setAttribute('aria-expanded', String(!list.hidden));
-      if (!list.hidden) list.querySelector('.is-current')?.focus();
-      return;
-    }
+    if (act === 'list') return this.toggleStepList(this.walkBody, el);
     if (act === 'goto') return go(Number(el.dataset.i));
     if (act === 'prev') return go(Math.max(0, i - 1));
     if (act === 'next') return go(Math.min(w.blocks.length - 1, i + 1));
