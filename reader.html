@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Yavar reader</title>
+  <link rel="stylesheet" href="styles/reader.css">
+</head>
+<body>
+  <!-- The file Yavar is talking about. The side panel decides what shows here. -->
+  <header class="rd-head">
+    <div class="rd-where">
+      <span id="rd-repo" class="rd-repo"></span>
+      <span id="rd-path" class="rd-path"></span>
+    </div>
+    <span id="rd-label" class="rd-label" hidden></span>
+    <a id="rd-github" class="rd-github" target="_blank" rel="noopener noreferrer" hidden>Open on GitHub</a>
+  </header>
+  <main id="rd-main" class="rd-main">
+    <div id="rd-empty" class="rd-empty">
+      <p>Nothing to show yet.</p>
+      <p>Click a file name in a Yavar answer, or start “Walk through” on a file, and it opens here with the lines highlighted.</p>
+    </div>
+    <div id="rd-code" class="rd-code" hidden>
+      <pre id="rd-gutter" class="rd-gutter" aria-hidden="true"></pre>
+      <div class="rd-src-scroll">
+        <div id="rd-src" class="rd-src">
+          <div id="rd-band" class="rd-band" hidden></div>
+          <pre><code id="rd-text"></code></pre>
+        </div>
+      </div>
+    </div>
+  </main>
+  <script type="module" src="src/reader.js"></script>
+</body>
+</html>
