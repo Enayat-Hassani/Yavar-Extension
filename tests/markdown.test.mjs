@@ -78,3 +78,10 @@ test('long code blocks start folded', () => {
   assert.match(renderMarkdown(long).html, /class="md-code is-folded"[\s\S]*Show all 25 lines/);
   assert.doesNotMatch(renderMarkdown('```js\nx\n```').html, /is-folded/);
 });
+
+import { stripChatArtifacts } from '../src/utils/markdown.js';
+
+test('drops ChatGPT citation markers', () => {
+  assert.equal(stripChatArtifacts('Uses Ghostscript and qpdf. :contentReference[oaicite:0]{index=0}'), 'Uses Ghostscript and qpdf. ');
+  assert.ok(!renderMarkdown('A fact.contentReference[oaicite:12]{index=12}').html.includes('oaicite'));
+});

@@ -2,6 +2,7 @@
 // step-by-step rebuild plan, and parse that plan. Pure functions (tested).
 
 import { isReadablePath, suggestStartFiles } from './github.js';
+import { stripChatArtifacts } from './markdown.js';
 
 const SOURCE_EXT = /\.(py|js|mjs|cjs|jsx|ts|tsx|go|rs|rb|php|java|kt|c|h|cpp|cc|hpp|cs|swift|dart|lua|ex|exs|scala|vue|svelte|sh)$/i;
 const TEST_PATH = /(^|\/)(tests?|__tests__|spec|specs|e2e|fixtures|examples?|docs?|benchmarks?)\//i;
@@ -77,7 +78,7 @@ function tryJson(text) {
 // The JSON values in an AI reply, most likely first: fenced blocks, then
 // everything from the first "{" to the last "}". Unparseable ones are skipped.
 export function jsonCandidates(text) {
-  const src = String(text || '');
+  const src = stripChatArtifacts(text);
   const raw = [];
   for (const m of src.matchAll(/```(?:json)?\s*\n([\s\S]*?)```/gi)) raw.push(m[1]);
   const first = src.indexOf('{');

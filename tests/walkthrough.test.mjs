@@ -73,3 +73,9 @@ test('parses quiz questions and drops ones without an answer', () => {
   assert.deepEqual(parseQuiz(reply), [{ q: 'What is x?', a: 'One.' }, { q: 'Why?', a: 'Because.' }]);
   assert.equal(parseQuiz('1. What is x?\nAnswer: one'), null);
 });
+
+test('chat citation markers do not reach the walkthrough', () => {
+  const w = parseWalkthrough('```json\n{"summary": "Prepares PDFs. :contentReference[oaicite:0]{index=0}", "blocks": [{"start": 1, "end": 2, "title": "A", "explain": "B:contentReference[oaicite:1]{index=1}"}]}\n```', { start: 1, end: 2 });
+  assert.equal(w.summary, 'Prepares PDFs.');
+  assert.equal(w.blocks[0].explain, 'B');
+});

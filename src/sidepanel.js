@@ -5,7 +5,7 @@ import { isPublicWebUrl } from './utils/net.js';
 import { loadTemplates, expandTemplate, varsInTemplate } from './utils/templates.js';
 import { renderMarkdown, runnableLang, highlight } from './utils/markdown.js';
 import { walkPrompt, parseWalkthrough, compareTyped, quizPrompt, parseQuiz } from './utils/walkthrough.js';
-import { journeyPrompt, parseJourney, nextCandidates, nextPrompt, parseNext } from './utils/journey.js';
+import { journeyPrompt, parseJourney, nextCandidates, nextPrompt, parseNext, connectionTree } from './utils/journey.js';
 import { DEFAULT_MODELS, loadModels as loadStoredModels } from './utils/models.js';
 import { captureLabel, captureMarkdown, hasCaptureText } from './utils/capture.js';
 import { suggestActions } from './utils/actions.js';
@@ -191,9 +191,17 @@ class YavarSidePanel {
     this.walkPanel = document.getElementById('walk-panel');
     this.walkBody = document.getElementById('walk-body');
     document.getElementById('walk-close')?.addEventListener('click', () => this.walkPanel.classList.add('hidden'));
-    document.getElementById('walk-reset')?.addEventListener('click', () => (this.walkView === 'map' ? this.resetJourney() : this.resetWalk()));
     this.walkPanel?.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') this.walkPanel.classList.add('hidden');
+      if (e.key !== 'Escape') return;
+      const list = this.walkBody.querySelector('.wk-blocks:not([hidden])');
+      if (list) {
+        list.hidden = true;
+        const where = this.walkBody.querySelector('.wk-where');
+        where?.setAttribute('aria-expanded', 'false');
+        where?.focus();
+        return;
+      }
+      this.walkPanel.classList.add('hidden');
     });
     this.walkBody?.addEventListener('click', (e) => this.onWalkClick(e));
     document.getElementById('run-close')?.addEventListener('click', () => this.closeRunPanel());
@@ -1231,22 +1239,22 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     }
     // On a GitHub repo the repo's actions stay here once the start page is gone
     const file = gh?.kind === 'blob' && gh.rest.length > 1 ? gh.rest[gh.rest.length - 1] : '';
+    // (Asking about chosen files lives in the + menu: "Files from this repository".)
     const repoItems = gh ? [
-      ...(file ? [{ id: 'walk_file', icon: icon('lines'), name: `Walk through ${file}`, desc: 'Line by line, highlighted as you go' }] : []),
+      ...(file ? [{ id: 'walk_file', icon: icon('lines'), name: `Read ${file}`, desc: 'Block by block, beside the code' }] : []),
       { id: 'explain_repo', icon: icon('compass'), name: 'Read this repository', desc: this._tabCtx.journey || 'The big picture, then file by file' },
-      { id: 'reader', icon: icon('book'), name: 'Browse files', desc: 'Read, explain or review any file' },
-      { id: 'changes', icon: icon('commit'), name: 'Recent changes', desc: 'What the latest commits are about' },
-      { id: 'rebuild', icon: icon('layers'), name: 'Build it yourself', desc: this._tabCtx.rebuild || 'Recreate a small version, step by step' }
+      { id: 'rebuild', icon: icon('layers'), name: 'Build it yourself', desc: this._tabCtx.rebuild || 'Recreate a small version, step by step' },
+      { id: 'changes', icon: icon('commit'), name: 'Recent changes', desc: 'What the latest commits are about' }
     ] : [];
     return [
       ...repoItems,
-      ...(gh ? [] : [{ id: 'read_folder', icon: icon('folder'), name: 'Read a project folder', desc: 'The big picture, then file by file' }]),
+      { id: 'read_folder', icon: icon('folder'), name: 'Read a project folder', desc: 'A project on this computer', divider: repoItems.length > 0 },
       { id: 'history', icon: icon('bookmark'), name: 'Saved answers', desc: 'Everything you saved, searchable', divider: true },
       { id: 'notes', icon: icon('note'), name: 'Notes', desc: 'Your scratchpad' },
-      { id: 'research_web', icon: icon('globe'), name: 'Web research', desc: 'Searches, reads sources, cites them' },
+      { id: 'research_web', icon: icon('globe'), name: 'Web research', desc: 'Searches, reads sources, cites them', divider: true },
       { id: 'videos', icon: icon('video'), name: 'Video research', desc: 'What the top YouTube videos say' },
       { id: 'run', icon: icon('code'), name: 'Code playground', desc: 'Run Python or JavaScript' },
-      { id: 'carry_over', icon: icon('forward'), name: 'Continue in a fresh chat', desc: 'Summarize this chat into a new one' },
+      { id: 'carry_over', icon: icon('forward'), name: 'Continue in a fresh chat', desc: 'Summarize this chat into a new one', divider: true },
       { id: 'settings', icon: icon('settings'), name: 'Settings' }
     ];
   }
@@ -1429,14 +1437,12 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     }
     if (id === 'answer:api') { this.useApi(); return; }
     const tools = {
-      reader: () => this.openPicker('repo'),
       changes: () => this.showRecentChanges(),
       rebuild: () => this.openRebuild(),
       add_page: () => this.attachActivePage(),
       attach_page: () => this.attachActivePage(),
       attach_file: () => this.quickAddActiveFile('add'),
       summarize_page: () => this.summarizeActivePage(),
-      add_file: () => this.quickAddActiveFile(),
       walk_file: () => this.walkActiveFile(),
       explain_diff: () => this.explainActiveDiff(),
       explain_repo: () => this.openJourney(),
@@ -2429,13 +2435,17 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     return sliceLines(await this.readRepoFile(w.path), b.start, b.end);
   }
 
+  // The code itself is in the reader tab; the panel holds what's said about
+  // it. A bar that stays at the top holds the way back to the map, where you
+  // are (the block list opens from it) and the steps, so a long answer never
+  // pushes them out of reach.
   async renderWalk() {
-    if (this.walkView === 'map') return;   // the map is showing; the walk renders when you return
+    if (this.walkView !== 'file') return;   // the map or the folder choice is showing; the walk renders when you return
     const w = this.walk;
     const esc = (t) => this.escapeHtml(t || '');
-    const back = this.journey ? `<button type="button" class="files-link-btn walk-back" data-wk="map">‹ Reading map</button>` : '';
+    const toMap = this.journey ? `<button type="button" class="wk-map" data-wk="map">‹ Map</button>` : '';
     if (!w?.blocks) {
-      this.walkBody.innerHTML = back + (w?.error
+      this.walkBody.innerHTML = (toMap ? `<div class="wk-bar">${toMap}</div>` : '') + (w?.error
         ? `<div class="rebuild-intro"><p>⚠️ Could not make the walkthrough: ${esc(w.error)}.</p>` +
           `<button type="button" class="files-send" data-wk="retry">Try again</button></div>`
         : `<div class="rebuild-wait"><span class="files-spinner"></span>The AI is splitting ${esc(w?.path?.split('/').pop())} into blocks…<div class="rebuild-live"></div></div>`);
@@ -2444,83 +2454,90 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     const { blocks, current: i, typed = {}, range, total } = w;
     const b = blocks[i];
     const n = blocks.length;
-    const pct = Math.round(((i + 1) / n) * 100);
-    const lang = langFromPath(w.path);
-    let code = '';
-    try { code = await this.walkBlockCode(); } catch (e) { code = '(could not read the file: ' + e.message + ')'; }
-    if (this.walk !== w || this.walkView === 'map') return;   // moved on while reading
-    const gutter = Array.from({ length: b.end - b.start + 1 }, (_, k) => b.start + k).join('\n');
+    const last = i === n - 1;
+    const more = last && range.end < total;
     const best = typed[i]?.best;
-    const more = i === n - 1 && range.end < total;
+    const practised = (k) => typed[k]?.best >= 90;
 
-    this.walkBody.innerHTML = back +
-      (w.summary ? `<p class="rebuild-summary">${esc(w.summary)}</p>` : '') +
-      `<div class="rebuild-progress" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100">` +
-        `<div class="rebuild-progress-bar" style="width:${pct}%"></div></div>` +
-      `<div class="rebuild-progress-label">Block ${i + 1} of ${n}` +
-        `${range.start > 1 || range.end < total ? ` · lines ${range.start}-${range.end} of ${total}` : ''}</div>` +
-      `<div class="rebuild-card">` +
-        `<div class="walk-card-head"><span class="rebuild-card-kicker">Lines ${b.start}-${b.end}</span>` +
-          `<button type="button" class="files-link-btn walk-show" data-wk="show" title="Highlight these lines in the reader">Show in reader</button>` +
+    this.walkBody.innerHTML =
+      `<div class="wk-bar">` +
+        `<div class="wk-row">` + toMap +
+          `<button type="button" class="wk-where" data-wk="blocks" aria-expanded="false" aria-controls="wk-blocks">` +
+            `Block ${i + 1} of ${n}${range.start > 1 || range.end < total ? ` · lines ${range.start}-${range.end} of ${total}` : ''}<span class="wk-chev" aria-hidden="true"></span></button>` +
+          `<span class="wk-steps">` +
+            `<button type="button" class="wk-step" data-wk="prev" aria-label="Previous block"${i === 0 ? ' disabled' : ''}>‹</button>` +
+            (!last ? `<button type="button" class="wk-step" data-wk="next" aria-label="Next block">›</button>`
+              : more ? `<button type="button" class="wk-step wk-step-text" data-wk="continue">Next lines ›</button>`
+                : `<button type="button" class="wk-step wk-step-text" data-wk="finish">Finish file</button>`) +
+          `</span>` +
         `</div>` +
-        `<h3>${esc(b.title)}</h3>` +
-        `<div class="walk-code" aria-label="Lines ${b.start} to ${b.end}"><pre class="walk-gutter" aria-hidden="true">${gutter}</pre>` +
-          `<pre class="walk-src"><code>${highlight(code, lang)}</code></pre></div>` +
-        (b.explain
-          ? `<p class="rebuild-text walk-explain">${esc(b.explain)}</p>`
-          : `<p class="rebuild-goal">The AI didn't explain these lines. Ask it with "Explain more".</p>`) +
-        `<div class="walk-notes"></div>` +
-        `<div class="rebuild-actions">` +
-          `<button type="button" class="files-chip-btn" data-wk="more">Explain more</button>` +
-          `<button type="button" class="files-chip-btn" data-wk="quiz">Quiz me</button>` +
-          `<button type="button" class="files-chip-btn" data-wk="type">Type it${best != null ? ` · best ${best}%` : ''}</button>` +
+        `<div class="wk-progress" aria-hidden="true"><i style="width:${Math.round(((i + 1) / n) * 100)}%"></i></div>` +
+        `<div id="wk-blocks" class="wk-blocks" hidden>` +
+          `<ol>${blocks.map((x, k) =>
+            `<li><button type="button" class="${k === i ? 'is-current' : ''}" data-wk="goto" data-i="${k}"${k === i ? ' aria-current="step"' : ''}>` +
+            `<span class="wk-n">${practised(k) ? '✓' : k + 1}</span><span class="wk-t">${esc(x.title)}</span><span class="wk-l">${x.start}-${x.end}</span></button></li>`).join('')}</ol>` +
+          `<button type="button" class="files-link-btn wk-redo" data-wk="redo">Ask for a new walkthrough of this file</button>` +
         `</div>` +
-        `<div class="walk-type hidden">` +
-          `<div class="rebuild-label">Type these lines from memory</div>` +
-          `<textarea class="rebuild-code" spellcheck="false" placeholder="Type the block without looking. Ctrl+Enter compares.">${esc(typed[i]?.text || '')}</textarea>` +
-          `<div class="rebuild-actions">` +
-            `<button type="button" class="files-chip-btn" data-wk="compare">Compare</button>` +
-            `<button type="button" class="files-chip-btn" data-wk="peek">Peek (3 s)</button>` +
-            `<button type="button" class="files-chip-btn" data-wk="feedback">Ask for feedback</button>` +
-          `</div>` +
-          `<div class="walk-result" aria-live="polite"></div>` +
-        `</div>` +
-        `<div class="rebuild-nav">` +
-          `<button type="button" class="files-link-btn" data-wk="prev"${i === 0 ? ' disabled' : ''}>← Previous</button>` +
-          (i < n - 1
-            ? `<button type="button" class="files-send" data-wk="next">Next block →</button>`
-            : more ? `<button type="button" class="files-send" data-wk="continue">Continue with lines ${range.end + 1}+ →</button>`
-              : `<button type="button" class="files-send" data-wk="finish">Finish this file →</button>`) +
-        `</div>` +
-        `<div class="walk-next" aria-live="polite"></div>` +
       `</div>` +
-      `<ol class="rebuild-steps walk-outline">${blocks.map((x, k) =>
-        `<li class="${k === i ? 'current' : ''}${typed[k]?.best >= 90 ? ' done' : ''}" data-wk="goto" data-i="${k}">` +
-        `<span class="rebuild-step-dot">${typed[k]?.best >= 90 ? '✓' : k + 1}</span><span>${esc(x.title)}</span>` +
-        `<span class="walk-lines">${x.start}-${x.end}</span></li>`).join('')}</ol>`;
+      (i === 0 && w.summary ? `<p class="wk-summary">${esc(w.summary)}</p>` : '') +
+      `<div class="wk-meta"><span>Lines ${b.start}-${b.end}</span>` +
+        `<button type="button" class="files-link-btn wk-show" data-wk="show">Show in reader</button></div>` +
+      `<h3 class="wk-title">${esc(b.title)}</h3>` +
+      (b.explain
+        ? `<p class="wk-explain">${esc(b.explain)}</p>`
+        : `<p class="wk-explain is-empty">The AI didn't explain these lines. Ask with Explain more.</p>`) +
+      `<div class="walk-notes"></div>` +
+      `<div class="wk-actions">` +
+        `<button type="button" class="run-ask" data-wk="more">Explain more</button>` +
+        `<button type="button" class="run-ask" data-wk="quiz">Quiz me</button>` +
+        `<button type="button" class="run-ask" data-wk="type" aria-expanded="false">Practise typing${best != null ? ` · best ${best}%` : ''}</button>` +
+      `</div>` +
+      `<div class="walk-type" hidden>` +
+        `<textarea class="wk-typing" rows="1" spellcheck="false" aria-label="Type lines ${b.start} to ${b.end}" ` +
+          `placeholder="Type lines ${b.start}-${b.end} here…">${esc(typed[i]?.text || '')}</textarea>` +
+        `<div class="wk-type-actions">` +
+          `<button type="button" class="wk-compare" data-wk="compare">Compare</button>` +
+          `<button type="button" class="run-ask" data-wk="feedback">Ask for feedback</button>` +
+          `<span class="wk-hint">Ctrl+Enter compares</span>` +
+        `</div>` +
+        `<div class="walk-result" aria-live="polite"></div>` +
+      `</div>` +
+      `<div class="walk-next" aria-live="polite"></div>`;
 
     // Earlier answers for this block, folded except the latest
     const notesEl = this.walkBody.querySelector('.walk-notes');
     const notes = w.notes?.[i] || [];
     notes.forEach((note, k) => this.renderWalkNote(notesEl, note, k < notes.length - 1));
 
-    const ta = this.walkBody.querySelector('.walk-type textarea');
+    const ta = this.walkBody.querySelector('.wk-typing');
+    const grow = () => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + ta.offsetHeight - ta.clientHeight + 'px'; };
+    ta.addEventListener('input', grow);
     ta.addEventListener('keydown', (e) => {
-      if (e.key === 'Tab') { e.preventDefault(); ta.setRangeText('    ', ta.selectionStart, ta.selectionEnd, 'end'); }
+      if (e.key === 'Tab') { e.preventDefault(); ta.setRangeText('    ', ta.selectionStart, ta.selectionEnd, 'end'); grow(); }
       if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); this.walkBody.querySelector('[data-wk="compare"]')?.click(); }
     });
   }
 
   async onWalkClick(e) {
+    // A click outside the open block list closes it
+    const open = this.walkBody.querySelector('.wk-blocks:not([hidden])');
+    if (open && !e.target.closest('.wk-bar')) {
+      open.hidden = true;
+      this.walkBody.querySelector('.wk-where')?.setAttribute('aria-expanded', 'false');
+    }
     const el = e.target.closest('[data-wk]');
     if (!el || el.disabled) return;
     const act = el.dataset.wk;
     const w = this.walk;
-    // The reading map, and moving between files
+    // Choosing a folder, the reading map, and moving between files
+    if (act === 'folder') return this.openFolderJourney(el.dataset.i);
+    if (act === 'folder-new') return this.openFolderJourney(null);
+    if (act === 'folders') return this.showFolderChoice();
     if (act === 'map') return this.showJourneyMap();
     if (act === 'walkfile') return this.startWalk(el.dataset.path);
     if (act === 'open') return this.openRepoFile(this.fileRefFor(el.dataset.path));
     if (act === 'journey-create') return this.createJourney();
+    if (act === 'journey-reset') return this.resetJourney();
     if (act === 'retry') return this.createWalk(w.path, w.lines, w.startAt);
     if (act === 'reveal') {
       const a = el.nextElementSibling;
@@ -2532,93 +2549,105 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     if (!w?.blocks) return;
     const i = w.current;
     const b = w.blocks[i];
-    const card = this.walkBody.querySelector('.rebuild-card');
     const go = async (k) => {
       await this.saveWalk({ ...w, current: k });
       await this.renderWalk();
       this.walkBody.scrollTop = 0;
       this.followWalk();
     };
+    if (act === 'blocks') {
+      const list = this.walkBody.querySelector('.wk-blocks');
+      list.hidden = !list.hidden;
+      el.setAttribute('aria-expanded', String(!list.hidden));
+      if (!list.hidden) list.querySelector('.is-current')?.focus();
+      return;
+    }
     if (act === 'goto') return go(Number(el.dataset.i));
     if (act === 'prev') return go(Math.max(0, i - 1));
     if (act === 'next') return go(Math.min(w.blocks.length - 1, i + 1));
     if (act === 'show') return this.followWalk();
+    if (act === 'redo') return this.resetWalk();
     if (act === 'continue') return this.createWalk(w.path, null, w.range.end + 1);
     if (act === 'finish') return this.finishWalkFile(el);
+    if (act === 'type') {
+      const box = this.walkBody.querySelector('.walk-type');
+      box.hidden = !box.hidden;
+      el.setAttribute('aria-expanded', String(!box.hidden));
+      if (!box.hidden) {
+        const ta = box.querySelector('textarea');
+        ta.dispatchEvent(new Event('input'));   // size it to what's already typed
+        ta.focus();
+      }
+      return;
+    }
 
     const code = await this.walkBlockCode();
     const repo = this.repoDisplayName();
     const where = `lines ${b.start}-${b.end} of \`${w.path}\`${repo ? ` from ${repo}` : ''}`;
     const block = fencedFile({ path: w.path, content: code, lines: b });
+    const typedText = this.walkBody.querySelector('.wk-typing')?.value || '';
 
-    if (act === 'type') {
-      card.classList.add('is-typing');
-      card.querySelector('.walk-type').classList.remove('hidden');
-      card.querySelector('.walk-type textarea').focus();
-    } else if (act === 'peek') {
-      card.classList.remove('is-typing');
-      clearTimeout(this._walkPeek);
-      this._walkPeek = setTimeout(() => card.classList.add('is-typing'), 3000);
-    } else if (act === 'compare') {
-      const text = card.querySelector('.walk-type textarea').value;
-      if (!text.trim()) { this.showNotification('Type the lines first'); return; }
-      const { accuracy, ops } = compareTyped(code, text);
+    if (act === 'compare') {
+      if (!typedText.trim()) { this.showNotification('Type the lines first'); return; }
+      const { accuracy, ops } = compareTyped(code, typedText);
       const bestSoFar = Math.max(accuracy, w.typed?.[i]?.best || 0);
-      await this.saveWalk({ ...w, typed: { ...(w.typed || {}), [i]: { best: bestSoFar, text } } });
-      card.querySelector('.walk-result').innerHTML =
+      await this.saveWalk({ ...w, typed: { ...(w.typed || {}), [i]: { best: bestSoFar, text: typedText } } });
+      this.walkBody.querySelector('.walk-result').innerHTML =
         `<div class="walk-score">${accuracy}% match${accuracy >= 90 ? ' ✓' : ''}` +
         `${accuracy < 100 ? ' <span>Highlighted lines are in the original but weren\'t matched in yours; faded ones are only in yours.</span>' : ''}</div>` +
         (accuracy < 100 ? `<pre class="walk-diff">${ops.map(o =>
           `<span class="is-${o.type}">${this.escapeHtml(o.text)}</span>`).join('')}</pre>` : '');
-      // The outline's tick and the button's best score
-      const li = this.walkBody.querySelector(`.walk-outline li[data-i="${i}"]`);
-      if (bestSoFar >= 90 && li) { li.classList.add('done'); li.querySelector('.rebuild-step-dot').textContent = '✓'; }
-      el.closest('.rebuild-card').querySelector('[data-wk="type"]').textContent = `Type it · best ${bestSoFar}%`;
-    } else if (act === 'more' || act === 'quiz' || act === 'feedback') {
-      const notesEl = card.querySelector('.walk-notes');
-      let prompt;
-      let label;
-      if (act === 'more') {
-        label = 'Explain more';
-        prompt = `I'm walking through ${where}, block by block. Explain this block in more depth, line by line: ` +
-          `what each line does and why, and anything that would surprise a beginner.` +
-          `${w.summary ? ` (The file as a whole: ${w.summary})` : ''}\n\n${LINE_NUMBER_NOTE}\n\n${block}\n\n${CITE_RULE}`;
-      } else if (act === 'quiz') {
-        label = 'Quiz';
-        prompt = quizPrompt(where, `${LINE_NUMBER_NOTE}\n\n${block}`);
+      this.walkBody.querySelector('[data-wk="type"]').textContent = `Practise typing · best ${bestSoFar}%`;
+      if (bestSoFar >= 90) {
+        const n = this.walkBody.querySelector(`.wk-blocks [data-i="${i}"] .wk-n`);
+        if (n) n.textContent = '✓';
+      }
+      return;
+    }
+    if (act !== 'more' && act !== 'quiz' && act !== 'feedback') return;
+
+    const notesEl = this.walkBody.querySelector('.walk-notes');
+    let prompt;
+    let label;
+    if (act === 'more') {
+      label = 'Explain more';
+      prompt = `I'm walking through ${where}, block by block. Explain this block in more depth, line by line: ` +
+        `what each line does and why, and anything that would surprise a beginner.` +
+        `${w.summary ? ` (The file as a whole: ${w.summary})` : ''}\n\n${LINE_NUMBER_NOTE}\n\n${block}\n\n${CITE_RULE}`;
+    } else if (act === 'quiz') {
+      label = 'Quiz';
+      prompt = quizPrompt(where, `${LINE_NUMBER_NOTE}\n\n${block}`);
+    } else {
+      if (!typedText.trim()) { this.showNotification('Type the lines first'); return; }
+      label = 'Feedback on your version';
+      const lang = langFromPath(w.path);
+      prompt = `I typed ${where} myself to practise.\n\nThe original:\n\n\`\`\`${lang}\n${code.replace(/\n$/, '')}\n\`\`\`\n\n` +
+        `Mine:\n\n\`\`\`${lang}\n${typedText.replace(/\n$/, '')}\n\`\`\`\n\n` +
+        `Would mine behave the same? List the differences that change behaviour first, then the ones that are only style. ` +
+        `Keep it short and encouraging.`;
+    }
+    // Earlier answers fold away so the new one reads in place
+    notesEl.querySelectorAll('.answer-card').forEach(c => c.classList.add('collapsed'));
+    el.disabled = true;
+    try {
+      if (act === 'quiz') {
+        const wait = document.createElement('div');
+        wait.className = 'walk-quiz is-writing';
+        wait.innerHTML = '<div class="answer-head"><span class="answer-title">Quiz</span><span class="answer-status">Writing 3 questions…</span></div>';
+        notesEl.appendChild(wait);
+        let reply = null;
+        try { reply = await this.askInPanel(prompt, { via: 'chat' }); } catch (err) { wait.querySelector('.answer-status').textContent = '⚠️ ' + err.message; return; }
+        wait.remove();
+        const quiz = parseQuiz(reply);
+        const note = quiz ? { label, quiz } : { label, text: reply };
+        this.renderWalkNote(notesEl, note, false);
+        await this.addWalkNote(w.path, i, note);
       } else {
-        const text = card.querySelector('.walk-type textarea').value;
-        if (!text.trim()) { this.showNotification('Type the lines first'); return; }
-        label = 'Feedback on your version';
-        const lang = langFromPath(w.path);
-        prompt = `I retyped ${where} from memory to practise.\n\nThe original:\n\n\`\`\`${lang}\n${code.replace(/\n$/, '')}\n\`\`\`\n\n` +
-          `Mine:\n\n\`\`\`${lang}\n${text.replace(/\n$/, '')}\n\`\`\`\n\n` +
-          `Would mine behave the same? List the differences that change behaviour first, then the ones that are only style. ` +
-          `Keep it short and encouraging.`;
+        const text = await this.showAnswerIn(notesEl, label, prompt, { via: 'chat', inline: true });
+        if (text) await this.addWalkNote(w.path, i, { label, text });
       }
-      // Earlier answers fold away so the new one reads in place
-      notesEl.querySelectorAll('.answer-card').forEach(c => c.classList.add('collapsed'));
-      el.disabled = true;
-      try {
-        if (act === 'quiz') {
-          const wait = document.createElement('div');
-          wait.className = 'walk-quiz is-writing';
-          wait.innerHTML = '<div class="answer-head"><span class="answer-title">Quiz</span><span class="answer-status">Writing 3 questions…</span></div>';
-          notesEl.appendChild(wait);
-          let reply = null;
-          try { reply = await this.askInPanel(prompt, { via: 'chat' }); } catch (err) { wait.querySelector('.answer-status').textContent = '⚠️ ' + err.message; return; }
-          wait.remove();
-          const quiz = parseQuiz(reply);
-          const note = quiz ? { label, quiz } : { label, text: reply };
-          this.renderWalkNote(notesEl, note, false);
-          await this.addWalkNote(w.path, i, note);
-        } else {
-          const text = await this.showAnswerIn(notesEl, label, prompt, { via: 'chat', inline: true });
-          if (text) await this.addWalkNote(w.path, i, { label, text });
-        }
-      } finally {
-        el.disabled = false;
-      }
+    } finally {
+      el.disabled = false;
     }
   }
 
@@ -2689,9 +2718,8 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
   // For the repo in the tab, the folder already open, or (folder: true) a folder you pick
   async openJourney({ folder = false } = {}) {
     try {
-      if (folder) {
-        if (!(await this.openLocalFolder({ reuse: true }))) return;
-      } else if (this._tabCtx?.gh) {
+      if (folder) return this.showFolderChoice();
+      if (this._tabCtx?.gh) {
         await this.ensureRepoTree();
       }
     } catch (e) {
@@ -2704,6 +2732,43 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     }
     this.journey = await this.loadJourney();
     this.walkPanel.classList.remove('hidden');
+    if (this.journey) this.showJourneyMap();
+    else await this.createJourney();
+  }
+
+  // "Read a project folder": the folders you read before, or a new one
+  async showFolderChoice() {
+    this.walkView = 'folders';
+    document.getElementById('walk-title').textContent = 'Reading';
+    document.getElementById('walk-sub').textContent = 'A project folder';
+    this.walkPanel.classList.remove('hidden');
+    let recent = window.showDirectoryPicker ? (await this.idbGet('recentFolders')) || [] : [];
+    // Folders opened before the recent list existed are only in lastFolder
+    if (!recent.length && window.showDirectoryPicker) {
+      const last = await this.idbGet('lastFolder');
+      if (last) recent = [{ name: last.name, handle: last, ts: 0 }];
+    }
+    this._recentFolders = recent;
+    let states = {};
+    try { states = await chrome.storage.local.get(recent.map(r => `journey:local/${r.name}`)); } catch (e) { /* no progress known */ }
+    const esc = (t) => this.escapeHtml(t || '');
+    this.walkBody.innerHTML =
+      (recent.length
+        ? `<div class="rebuild-label">Recent</div><ul class="jr-folders">${recent.map((r, k) => {
+            const status = this.journeyStatus(states[`journey:local/${r.name}`]);
+            return `<li><button type="button" class="jr-folder" data-wk="folder" data-i="${k}">` +
+              `<span class="jr-folder-name">${esc(r.name)}</span>${status ? `<span class="jr-folder-status">${esc(status)}</span>` : ''}` +
+              `<span class="home-chev" aria-hidden="true">›</span></button></li>`;
+          }).join('')}</ul>`
+        : `<p class="wk-summary">Pick a folder on this computer. Yavar gives you the big picture first, then walks you through it file by file.</p>`) +
+      `<div class="jr-actions"><button type="button" class="files-send jr-primary" data-wk="folder-new">Choose a folder…</button></div>`;
+  }
+
+  // i: index into the recent list, or null to pick a new folder
+  async openFolderJourney(i) {
+    const recent = i == null ? null : this._recentFolders?.[Number(i)];
+    if (!(await this.openLocalFolder(recent ? { handle: recent.handle } : {}))) return;
+    this.journey = await this.loadJourney();
     if (this.journey) this.showJourneyMap();
     else await this.createJourney();
   }
@@ -2765,46 +2830,73 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     }
   }
 
+  // The map: what the project is, the reading order (with where you are),
+  // its parts, and how the files connect
   renderJourney() {
     const esc = (t) => this.escapeHtml(t || '');
     const j = this.journey;
+    const local = this.repoTree?.source === 'local';
+    const other = local ? `<button type="button" class="files-link-btn jr-link" data-wk="folders">Read another folder</button>` : '';
     if (this._journeyPending || !j) {
       this.walkBody.innerHTML = this._journeyPending
         ? `<div class="rebuild-wait"><span class="files-spinner"></span>Reading the README and core files for the big picture…<div class="rebuild-live"></div></div>`
         : `<div class="rebuild-intro"><p>⚠️ Could not get an overview${this._journeyError ? `: ${esc(this._journeyError)}` : ''}.</p>` +
-          `<button type="button" class="files-send" data-wk="journey-create">Try again</button></div>`;
+          `<button type="button" class="files-send" data-wk="journey-create">Try again</button></div>` + other;
       return;
     }
     const done = new Set(j.done || []);
     const next = j.path.find(p => !done.has(p.file));
     const read = j.path.filter(p => done.has(p.file)).length;
-    const pct = Math.round((read / j.path.length) * 100);
     const chip = (f) => `<button type="button" class="jr-file" data-wk="open" data-path="${esc(f)}" title="Open ${esc(f)} in the reader">${esc(f.split('/').pop())}</button>`;
     this.walkBody.innerHTML =
       (j.summary ? `<p class="jr-summary">${esc(j.summary)}</p>` : '') +
-      (j.parts?.length
-        ? `<div class="rebuild-label">How it is organised</div><ul class="jr-parts">${j.parts.map(p =>
-            `<li><strong>${esc(p.name)}</strong> ${esc(p.role)}${p.files.length ? `<span class="jr-files">${p.files.map(chip).join('')}</span>` : ''}</li>`).join('')}</ul>`
-        : '') +
-      `<div class="rebuild-label">Reading order</div>` +
-      (read ? `<div class="rebuild-progress" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100">` +
-        `<div class="rebuild-progress-bar" style="width:${pct}%"></div></div>` +
-        `<div class="rebuild-progress-label">${read} of ${j.path.length} files read</div>` : '') +
+      `<div class="jr-head"><span class="rebuild-label">Reading order</span>` +
+        (read ? `<span class="jr-count">${read} of ${j.path.length} read</span>` : '') + `</div>` +
       `<ol class="rebuild-steps jr-path">${j.path.map((p, k) =>
         `<li class="${p === next ? 'current' : ''}${done.has(p.file) ? ' done' : ''}" data-wk="walkfile" data-path="${esc(p.file)}">` +
         `<span class="rebuild-step-dot">${done.has(p.file) ? '✓' : k + 1}</span>` +
         `<span class="jr-step"><code>${esc(p.file)}</code>${p.why ? `<span>${esc(p.why)}</span>` : ''}</span></li>`).join('')}</ol>` +
       (next
-        ? `<div class="rebuild-nav jr-nav"><span></span><button type="button" class="files-send" data-wk="walkfile" data-path="${esc(next.file)}">` +
+        ? `<div class="jr-actions"><button type="button" class="files-send jr-primary" data-wk="walkfile" data-path="${esc(next.file)}">` +
           `${read ? 'Continue with' : 'Start with'} ${esc(next.file.split('/').pop())} →</button></div>`
-        : '');
+        : '') +
+      (j.parts?.length
+        ? `<div class="rebuild-label">How it is organised</div><ul class="jr-parts">${j.parts.map(p =>
+            `<li><strong>${esc(p.name)}</strong> ${esc(p.role)}${p.files.length ? `<span class="jr-files">${p.files.map(chip).join('')}</span>` : ''}</li>`).join('')}</ul>`
+        : '') +
+      `<div class="jr-connections"></div>` +
+      `<div class="jr-foot">${other}<button type="button" class="files-link-btn jr-link" data-wk="journey-reset">Start over with a new overview</button></div>`;
+    this.renderConnections(j);
+  }
+
+  // Which file uses which, from the imports of the files in the reading order
+  // (read locally, no AI). Shown only when there is something to connect.
+  async renderConnections(j) {
+    const fileSet = this.repoTree.fileSet;
+    const order = j.path.map(p => p.file);
+    const importsOf = new Map();
+    try {
+      for (const f of (await this.fetchRepoFilesMany(order)).filter(f => !f.error)) {
+        importsOf.set(f.path, resolveImports(extractImports(f.content, f.path), f.path, fileSet));
+      }
+    } catch (e) { return; }
+    const box = this.walkBody.querySelector('.jr-connections');
+    if (!box || this.journey !== j || ![...importsOf.values()].some(list => list.length)) return;
+    const done = new Set(j.done || []);
+    const esc = (t) => this.escapeHtml(t || '');
+    const draw = (nodes) => `<ul>${nodes.map(n =>
+      `<li><button type="button" class="jr-node${n.repeat ? ' is-repeat' : ''}${done.has(n.file) ? ' is-read' : ''}" data-wk="walkfile" data-path="${esc(n.file)}" title="${esc(n.file)}">` +
+      `${esc(n.file.split('/').pop())}${done.has(n.file) ? ' <span aria-label="read">✓</span>' : ''}${n.repeat ? ' <span>(above)</span>' : ''}</button>` +
+      (n.children.length ? draw(n.children) : '') + `</li>`).join('')}</ul>`;
+    box.innerHTML = `<div class="rebuild-label">How the files connect</div><p class="jr-legend">Each file, then the files it uses.</p>` +
+      `<div class="jr-tree">${draw(connectionTree(order, importsOf))}</div>`;
   }
 
   // Mark the file read, then show where to go next, in place under the step
   async finishWalkFile(btn) {
     const path = this.walk.path;
     if (this.journey) await this.saveJourney({ ...this.journey, done: [...new Set([...(this.journey.done || []), path])] });
-    btn.closest('.rebuild-nav').hidden = true;
+    btn.hidden = true;   // done: Up next takes its place
     const box = this.walkBody.querySelector('.walk-next');
     const esc = (t) => this.escapeHtml(t || '');
     box.innerHTML = `<div class="rebuild-label">Up next</div><p class="rebuild-goal">Looking at what ${esc(path.split('/').pop())} uses…</p>`;
@@ -2835,6 +2927,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
         : `<p class="rebuild-goal">${j ? 'You have read every file in the reading order.' : 'Nothing else found that this file uses.'}</p>`);
     };
     draw();
+    box.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 
     // A free model chooses between several candidates; without one, the order stands
     if (candidates.length < 2) return;
@@ -2870,17 +2963,20 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
 
   // show: false loads the folder without opening the reader (the picker uses it)
   // Choose a folder (or reopen the last one) as the file source; true if loaded
-  async openLocalFolder({ reuse = false } = {}) {
+  // reuse: the folder you last opened, without asking; handle: a folder
+  // chosen from the recent list. Otherwise the system folder picker opens.
+  async openLocalFolder({ reuse = false, handle: chosen = null } = {}) {
     let tree;
     try {
       if (window.showDirectoryPicker) {
-        let handle = reuse ? await this.idbGet('lastFolder') : null;
+        let handle = chosen || (reuse ? await this.idbGet('lastFolder') : null);
         if (handle) {
           const perm = await handle.queryPermission({ mode: 'read' });
           if (perm !== 'granted' && (await handle.requestPermission({ mode: 'read' })) !== 'granted') handle = null;
         }
         if (!handle) handle = await window.showDirectoryPicker({ id: 'yavar-reader', mode: 'read' });
         this.idbSet('lastFolder', handle);
+        await this.rememberFolder(handle);
         this.showNotification(`Reading ${handle.name}…`);
         tree = await this.scanDirectoryHandle(handle);
       } else {
@@ -3002,6 +3098,18 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       req.onerror = () => reject(req.error);
     });
     return this._idb;
+  }
+
+  // The last few folders opened, newest first, for "Read a project folder"
+  async rememberFolder(handle) {
+    const recent = (await this.idbGet('recentFolders')) || [];
+    const others = [];
+    for (const r of recent) {
+      let same = r.name === handle.name;
+      try { same = same && await r.handle.isSameEntry(handle); } catch (e) { /* treat same name as same */ }
+      if (!same) others.push(r);
+    }
+    await this.idbSet('recentFolders', [{ name: handle.name, handle, ts: Date.now() }, ...others].slice(0, 6));
   }
 
   async idbGet(key) {
@@ -4161,12 +4269,10 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       ctx = `<div class="home-group">` +
         (gh.kind === 'pull' || gh.kind === 'commit'
           ? row('explain_diff', icon('diff'), gh.kind === 'pull' ? `Explain pull request #${gh.number}` : 'Explain this commit', 'The goal, each file, and what could go wrong') : '') +
-        (file ? row('add_file', icon('file'), `Explain ${file}`, 'The file open in your tab') : '') +
-        (file ? row('walk_file', icon('lines'), `Walk through ${file}`, 'Line by line, highlighted as you go') : '') +
+        (file ? row('walk_file', icon('lines'), `Read ${file}`, 'Block by block, beside the code') : '') +
         row('explain_repo', icon('compass'), 'Read this repository', this._tabCtx.journey || 'The big picture first, then file by file') +
-        row('reader', icon('book'), 'Browse files', 'Read, explain or review any file') +
-        row('changes', icon('commit'), 'Recent changes', 'What the latest commits are about') +
         row('rebuild', icon('layers'), 'Build it yourself', this._tabCtx.rebuild || 'Recreate a small version, step by step') +
+        row('changes', icon('commit'), 'Recent changes', 'What the latest commits are about') +
         `</div>`;
     } else if (usable) {
       let host = '';
@@ -4179,6 +4285,9 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
         `</div>`;
     } else {
       hero = { kicker: 'Yavar', title: 'Ask anything' };
+      ctx = `<div class="home-group">` +
+        row('read_folder', icon('folder'), 'Read a project folder', 'The big picture first, then file by file') +
+        `</div>`;
     }
     this.threadBody.innerHTML =
       `<div class="home">` +
@@ -4464,7 +4573,8 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       e.stopPropagation();
       const dir = e.target.closest('[data-pk-dir]');
       const file = e.target.closest('[data-pk-file]');
-      if (e.target.closest('[data-pk-local]')) { this.openPicker('local'); return; }
+      const local = e.target.closest('[data-pk-local]');
+      if (local) { this.openPicker('local', { choose: local.dataset.pkLocal === 'choose' }); return; }
       if (dir) {
         this._pk.dir = dir.dataset.pkDir;
         this.renderPicker();
@@ -4484,20 +4594,22 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     });
   }
 
-  async openPicker(source = 'repo') {
+  // choose: pick a different folder instead of reopening the last one
+  async openPicker(source = 'repo', { choose = false } = {}) {
     const pk = this.picker;
     if (!pk) return;
     this.setView('app');
     this._pk = { dir: '', q: '', sel: new Set(), ready: false };
     this.pickerSearch.value = '';
     document.getElementById('picker-sub').textContent = '';
+    document.getElementById('picker-change').hidden = true;
     document.getElementById('picker-crumbs').innerHTML = '';
     this.pickerList.innerHTML = '<div class="pk-empty"><span class="files-spinner"></span>Loading files…</div>';
     this.updatePickerFoot();
     pk.classList.remove('hidden');
     try {
       const ok = source === 'local'
-        ? await this.openLocalFolder({ reuse: true })
+        ? await this.openLocalFolder({ reuse: !choose })
         : await this.ensureRepoTree();
       if (!ok) {
         if (source === 'local') { this.closePicker(); return; }
@@ -4511,6 +4623,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     }
     this._pk.ready = true;
     document.getElementById('picker-sub').textContent = this.repoDisplayName();
+    document.getElementById('picker-change').hidden = this.repoTree?.source !== 'local';
     this.renderPicker();
     this.pickerSearch.focus();
   }
