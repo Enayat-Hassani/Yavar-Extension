@@ -198,10 +198,24 @@ class YavarSidePanel {
     });
     this.walkBody?.addEventListener('click', (e) => this.onWalkClick(e));
     for (const body of [this.rebuildBody, this.walkBody]) {
+      body?.addEventListener('click', (e) => {
+        if (e.target.closest('.wk-ask-open')) this.toggleAsk(body, true);
+      });
       body?.addEventListener('keydown', (e) => {
-        if (!e.target.matches('.wk-ask-input') || e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
-        e.preventDefault();
-        e.target.nextElementSibling.click();
+        if (!e.target.matches('.wk-ask-input') || e.isComposing) return;
+        if (e.key === 'Escape') {
+          e.stopPropagation();   // closes the field, not the sheet
+          this.toggleAsk(body, false, { refocus: true });
+        } else if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          e.target.nextElementSibling.click();
+        }
+      });
+      // Left empty: back to the actions. A question being written stays.
+      body?.addEventListener('focusout', (e) => {
+        const ask = e.target.closest?.('.wk-ask');
+        if (!ask || ask.contains(e.relatedTarget) || ask.querySelector('.wk-ask-input').value.trim()) return;
+        this.toggleAsk(body, false);
       });
       body?.addEventListener('input', (e) => {
         if (!e.target.matches('.wk-ask-input')) return;
@@ -2139,12 +2153,11 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
         ? `<span class="rb-done-note">✓ Step done</span><button type="button" class="files-link-btn jr-link" data-rb="undone">Undo</button>`
         : `<button type="button" class="files-send jr-primary" data-rb="done">${i === n - 1 ? 'Mark the last step done' : 'Mark done and continue →'}</button>`) +
       `</div>` +
-      `<div class="wk-dock">` +
+      `<div class="wk-dock">` + this.askBox('data-rb', 'Ask about this step…',
         `<button type="button" class="run-ask" data-rb="hint">Hint</button>` +
         `<button type="button" class="run-ask" data-rb="check">Review my code</button>` +
         (lang ? `<button type="button" class="run-ask" data-rb="try" title="Ctrl+Enter">Run it</button>` : '') +
-        `<span class="rebuild-run-status"></span>` +
-        this.askBox('data-rb', 'Ask about this step…') +
+        `<span class="rebuild-run-status"></span>`) +
       `</div>`;
 
     this._rbCode = this.makeCodeBox(this.rebuildBody.querySelector('.code-box'), {
@@ -2180,12 +2193,28 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     await this.saveRebuild({ ...st, mentor });
   }
 
-  // Your own question, under the quick actions in a dock: one line that
-  // grows as you type; Enter asks, Shift+Enter starts a new line
-  askBox(attr, placeholder) {
-    return `<div class="wk-ask"><textarea class="wk-ask-input" rows="1" placeholder="${placeholder}" aria-label="${placeholder}"></textarea>` +
+  // A dock's content: the quick actions, ending in a chat button that swaps
+  // them for a question field in the same row (so the dock doesn't grow).
+  // The field grows as you type; Enter asks, Shift+Enter starts a new line,
+  // and Escape, or leaving it empty, brings the actions back (toggleAsk).
+  askBox(attr, placeholder, actions) {
+    return `<div class="wk-acts">${actions}` +
+      `<button type="button" class="wk-ask-open" title="${placeholder.replace(/…$/, '')}" aria-label="${placeholder.replace(/…$/, '')}" aria-expanded="false">${icon('chat', 18)}</button></div>` +
+      `<div class="wk-ask" hidden><textarea class="wk-ask-input" rows="1" placeholder="${placeholder}" aria-label="${placeholder}"></textarea>` +
       `<button type="button" class="wk-ask-send" ${attr}="ask" title="Ask (Enter)" aria-label="Ask">` +
       `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"></path></svg></button></div>`;
+  }
+
+  toggleAsk(body, open, { refocus = false } = {}) {
+    const dock = body.querySelector('.wk-dock');
+    const ask = dock?.querySelector('.wk-ask');
+    if (!ask || ask.hidden === !open) return;
+    const btn = dock.querySelector('.wk-ask-open');
+    dock.classList.toggle('is-asking', open);
+    ask.hidden = !open;
+    btn.setAttribute('aria-expanded', String(open));
+    if (open) ask.querySelector('.wk-ask-input').focus();
+    else if (refocus) btn.focus();
   }
 
   // The question typed in a dock's ask field, cleared once taken; '' when empty
@@ -2601,11 +2630,10 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       `<div class="walk-notes"></div>` +
       `<div class="walk-next" aria-live="polite"></div>` +
       // Pinned to the bottom of the sheet, so answers never push them away
-      `<div class="wk-dock">` +
+      `<div class="wk-dock">` + this.askBox('data-wk', 'Ask about these lines…',
         `<button type="button" class="run-ask" data-wk="more">Explain more</button>` +
         `<button type="button" class="run-ask" data-wk="quiz">Quiz me</button>` +
-        `<button type="button" class="run-ask" data-wk="type" aria-expanded="false">Practise typing${best != null ? ` · best ${best}%` : ''}</button>` +
-        this.askBox('data-wk', 'Ask about these lines…') +
+        `<button type="button" class="run-ask" data-wk="type" aria-expanded="false">Practise typing${best != null ? ` · best ${best}%` : ''}</button>`) +
       `</div>`;
 
     // Earlier answers for this block, folded except the latest

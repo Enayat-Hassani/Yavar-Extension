@@ -2252,18 +2252,41 @@ button.lens-item:focus-visible {
 }
 .wk-dock .run-ask[aria-expanded="true"] { background: var(--accent-soft); }
 .wk-dock .rebuild-run-status { margin-left: auto; padding-right: 6px; }
-/* Your own question, on its own row under the quick actions */
+.wk-acts { flex: 1 0 100%; min-height: 36px; display: flex; flex-wrap: wrap; align-items: center; gap: 2px; }   /* as tall as the field, so swapping doesn't move the dock */
+.wk-ask-open {
+  margin-left: auto;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  color: var(--accent);        /* an action, like the text actions beside it */
+  background: none;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background var(--dur-quick);
+}
+.rebuild-run-status + .wk-ask-open { margin-left: 0; }
+.wk-ask-open:hover { background: var(--accent-soft); }
+.wk-ask-open:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.wk-dock.is-asking .wk-acts { display: none; }
+/* Your own question: takes the actions' row, sliding in from the chat button */
 .wk-ask {
   flex: 1 0 100%;
   display: flex;
   align-items: flex-end;
   gap: 6px;
-  margin-top: 6px;
-  padding: 4px 4px 4px 12px;
+  padding: 3px 3px 3px 12px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
-  transition: border-color var(--dur-quick);
+  transition: border-color var(--dur-quick), opacity var(--dur-base) var(--ease-out), translate var(--dur-base) var(--ease-out);
+}
+@starting-style { .wk-ask:not([hidden]) { opacity: 0; translate: 16px 0; } }
+.wk-ask[hidden] { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .wk-ask { transition: border-color var(--dur-quick), opacity var(--dur-quick); }
+  @starting-style { .wk-ask:not([hidden]) { translate: none; } }
 }
 .wk-ask:focus-within { border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); }
 .wk-ask-input {
