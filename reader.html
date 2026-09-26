@@ -4,6 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Yavar reader</title>
+  <link rel="stylesheet" href="lib/codemirror/codemirror.min.css">
+  <link rel="stylesheet" href="styles/editor.css">
   <link rel="stylesheet" href="styles/reader.css">
 </head>
 <body>
@@ -15,6 +17,11 @@
     </div>
     <span id="rd-label" class="rd-label" hidden></span>
     <a id="rd-github" class="rd-github" target="_blank" rel="noopener noreferrer" hidden>Open on GitHub</a>
+    <!-- A local file can be edited here and saved back to the folder -->
+    <span id="rd-status" class="rd-status" role="status" aria-live="polite"></span>
+    <button type="button" id="rd-edit" class="rd-btn" title="Edit this file and save it back to the folder" hidden>Edit</button>
+    <button type="button" id="rd-done" class="rd-btn" hidden>Done</button>
+    <button type="button" id="rd-save" class="rd-btn rd-btn-primary" title="Save to the folder (⌘S)" hidden>Save</button>
   </header>
   <main id="rd-main" class="rd-main">
     <div id="rd-empty" class="rd-empty">
@@ -30,7 +37,14 @@
         </div>
       </div>
     </div>
+    <div id="rd-editor" class="rd-editor" hidden></div>
   </main>
+  <script src="lib/codemirror/codemirror.min.js"></script>
+  <script src="lib/codemirror/xml.min.js"></script>
+  <script src="lib/codemirror/css.min.js"></script>
+  <script src="lib/codemirror/javascript.min.js"></script>
+  <script src="lib/codemirror/python.min.js"></script>
+  <script src="lib/codemirror/htmlmixed.min.js"></script>
   <script type="module" src="src/reader.js"></script>
 </body>
 </html>

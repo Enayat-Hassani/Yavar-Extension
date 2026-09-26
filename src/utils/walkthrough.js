@@ -3,6 +3,7 @@
 // you can retype a block from memory to practise. Pure functions (tested).
 
 import { jsonCandidates } from './rebuild.js';
+import { keywordInfo } from './markdown.js';
 
 // A gap the AI left between two blocks that is at most this many lines
 // (usually blank lines) joins the block before it instead of becoming its own
@@ -70,13 +71,35 @@ export function parseWalkthrough(text, range) {
   return null;
 }
 
+// The code without its comments, and in Python its docstrings (a string
+// alone on its lines), so practice asks for the code only. Strings are kept
+// whole, so a # or // inside one stays. The comment syntax is the one the
+// highlighter uses; markup and unknown languages are left as they are.
+export function stripComments(code, lang) {
+  const l = String(lang || '').toLowerCase();
+  if (!l || /^(html|xml|vue|svelte|markdown|md|json)$/.test(l)) return String(code || '');
+  const { fam, lineComment } = keywordInfo(l);
+  const comment = lineComment === '#' ? '#[^\\n]*' : lineComment === '--' ? '--[^\\n]*' : '\\/\\/[^\\n]*|\\/\\*[\\s\\S]*?\\*\\/';
+  const triple = fam === 'py' ? `"{3}[\\s\\S]*?"{3}|'{3}[\\s\\S]*?'{3}` : '(?!)';
+  const re = new RegExp(`(${comment})|(${triple})|("(?:[^"\\\\\\n]|\\\\.)*"|'(?:[^'\\\\\\n]|\\\\.)*'|\`(?:[^\`\\\\]|\\\\.)*\`)`, 'g');
+  const blankLines = (t) => t.replace(/[^\n]/g, '');   // keeps the line count
+  return String(code || '').replace(re, (tok, com, doc, str, at, all) => {
+    if (com) return blankLines(com);
+    if (!doc) return tok;
+    const lineStart = all.lastIndexOf('\n', at - 1) + 1;
+    const lineEnd = all.indexOf('\n', at + tok.length);
+    const alone = !all.slice(lineStart, at).trim() && !all.slice(at + tok.length, lineEnd < 0 ? undefined : lineEnd).trim();
+    return alone ? blankLines(doc) : tok;
+  });
+}
+
 // Compare code you typed from memory with the original, line by line,
-// ignoring indentation, spacing and blank lines.
+// ignoring comments (for a known `lang`), indentation, spacing and blank lines.
 // Returns { accuracy: 0-100, ops: [{ type: 'same' | 'missing' | 'extra', text }] }
 // where 'missing' lines are in the original only and 'extra' in yours only.
-export function compareTyped(original, typed) {
+export function compareTyped(original, typed, lang = '') {
   const norm = l => l.trim().replace(/\s+/g, ' ');
-  const lines = s => String(s || '').split('\n').map(l => ({ text: l.trim(), key: norm(l) })).filter(l => l.key);
+  const lines = s => stripComments(s, lang).split('\n').map(l => ({ text: l.trim(), key: norm(l) })).filter(l => l.key);
   const a = lines(original);
   const b = lines(typed);
 
@@ -119,4 +142,48 @@ export function parseQuiz(text) {
     if (items.length) return items;
   }
   return null;
+}
+
+// ---- Editing a file you're walking through ----
+// Saving an edit in the reader moves the lines after it. These find the lines
+// that changed and move line ranges (the walk's blocks, the highlighted
+// lines) to match, so the walk keeps pointing at the same code.
+
+// The changed lines, 1-based: from `start` to `endBefore` in the old text,
+// replaced by `start` to `endAfter` in the new. An insertion has
+// endBefore = start - 1, a deletion endAfter = start - 1. null if the same.
+export function editedLines(before, after) {
+  if (before === after) return null;
+  const a = before.split('\n');
+  const b = after.split('\n');
+  let p = 0;
+  while (p < a.length && p < b.length && a[p] === b[p]) p++;
+  let s = 0;
+  while (s < a.length - p && s < b.length - p && a[a.length - 1 - s] === b[b.length - 1 - s]) s++;
+  return { start: p + 1, endBefore: a.length - s, endAfter: b.length - s };
+}
+
+// A { start, end } range after the edit. Lines past it move by the change in
+// length; a range the edit touched gets `edited: true` and keeps its ends
+// outside the edit, so it still covers the new lines.
+export function shiftRange(range, edit) {
+  if (!edit) return range;
+  const d = edit.endAfter - edit.endBefore;
+  const at = (l, isEnd) => l < edit.start ? l : l > edit.endBefore ? l + d : isEnd ? edit.endAfter : edit.start;
+  const start = at(range.start, false);
+  const touched = range.start <= edit.endBefore && range.end >= edit.start;
+  return { ...range, start, end: Math.max(start, at(range.end, true)), ...(touched ? { edited: true } : {}) };
+}
+
+// A saved walk after the edit: its blocks, the lines it covers and the
+// file's length. A walk of a change, or one still being made, is unchanged.
+export function shiftWalk(walk, edit) {
+  if (!edit || !walk?.blocks || walk.change) return walk;
+  const { start, end } = shiftRange(walk.range, edit);
+  return {
+    ...walk,
+    blocks: walk.blocks.map(b => shiftRange(b, edit)),
+    range: { start, end },
+    total: walk.total + edit.endAfter - edit.endBefore
+  };
 }
