@@ -1,173 +1,52 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Yavar Icon Generator</title>
+  <meta charset="utf-8">
+  <title>Yavar icons</title>
   <style>
-    body {
-      font-family: system-ui, -apple-system, sans-serif;
-      background: #1a1a2e;
-      color: white;
-      padding: 40px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 20px;
-    }
-    h1 { margin-bottom: 20px; }
-    .icons-container {
-      display: flex;
-      gap: 40px;
-      align-items: center;
-    }
-    .icon-wrapper {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 10px;
-    }
-    canvas {
-      border: 2px solid #333;
-      border-radius: 12px;
-    }
-    button {
-      padding: 12px 24px;
-      background: #0071e3;
-      color: white;
-      border: none;
-      border-radius: 8px;
-      font-size: 14px;
-      cursor: pointer;
-      margin-top: 20px;
-    }
-    button:hover { background: #0077ED; }
-    .instructions {
-      background: #252542;
-      padding: 20px;
-      border-radius: 8px;
-      max-width: 500px;
-      font-size: 14px;
-      line-height: 1.6;
-    }
+    body { margin: 0; padding: 32px; font: 14px/1.5 -apple-system, system-ui, sans-serif; color: #1d1d1f; background: #f8f8fa; }
+    .row { display: flex; gap: 24px; align-items: end; margin: 16px 0 24px; }
+    figure { margin: 0; text-align: center; font-size: 12px; color: #6e6e73; }
+    canvas { display: block; margin-bottom: 6px; }
+    button { padding: 8px 14px; font: inherit; color: #fff; background: #0071e3; border: none; border-radius: 999px; cursor: pointer; }
   </style>
 </head>
 <body>
-  <h1>Yavar — Icon Generator</h1>
-
-  <div class="icons-container">
-    <div class="icon-wrapper">
-      <span>16x16</span>
-      <canvas id="canvas16" width="16" height="16"></canvas>
-    </div>
-    <div class="icon-wrapper">
-      <span>48x48</span>
-      <canvas id="canvas48" width="48" height="48"></canvas>
-    </div>
-    <div class="icon-wrapper">
-      <span>128x128</span>
-      <canvas id="canvas128" width="128" height="128"></canvas>
-    </div>
-  </div>
-
-  <button onclick="downloadIcons()">Download All Icons</button>
-
-  <div class="instructions">
-    <strong>Instructions:</strong>
-    <ol>
-      <li>Click "Download All Icons" button</li>
-      <li>Save the three PNG files to the <code>icons/</code> folder</li>
-      <li>Or right-click each canvas and "Save image as..."</li>
-    </ol>
-  </div>
-
-  <script>
-    function drawIcon(canvas) {
-      const ctx = canvas.getContext('2d');
-      const s = canvas.width;
-
-      ctx.clearRect(0, 0, s, s);
-
-      // --- Background: dark rounded square ---
-      const radius = s * 0.22;
-      ctx.beginPath();
-      ctx.roundRect(0, 0, s, s, radius);
-      const bg = ctx.createLinearGradient(0, 0, s, s);
-      bg.addColorStop(0, '#0a0a0a');
-      bg.addColorStop(1, '#1a1a1a');
-      ctx.fillStyle = bg;
-      ctx.fill();
-
-      // --- "Y" lettermark ---
-      const cx = s / 2;
-      const cy = s / 2;
-
-      // Scale-aware stroke
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-
-      // Y shape — two arms meeting at center, one stem going down
-      const armTop = s * 0.22;     // top of arms
-      const armSpread = s * 0.24;  // how wide the arms go
-      const meetY = s * 0.52;      // where arms meet
-      const stemBottom = s * 0.78; // bottom of stem
-
-      // Draw Y with gradient stroke
-      const yGrad = ctx.createLinearGradient(cx - armSpread, armTop, cx + armSpread, stemBottom);
-      yGrad.addColorStop(0, '#38bdf8');   // sky blue
-      yGrad.addColorStop(0.5, '#0071e3'); // Yavar blue
-      yGrad.addColorStop(1, '#6366f1');   // indigo
-
-      ctx.strokeStyle = yGrad;
-      ctx.lineWidth = Math.max(s * 0.09, 1.5);
-
-      // Left arm
-      ctx.beginPath();
-      ctx.moveTo(cx - armSpread, armTop);
-      ctx.lineTo(cx, meetY);
-      ctx.stroke();
-
-      // Right arm
-      ctx.beginPath();
-      ctx.moveTo(cx + armSpread, armTop);
-      ctx.lineTo(cx, meetY);
-      ctx.stroke();
-
-      // Stem
-      ctx.beginPath();
-      ctx.moveTo(cx, meetY);
-      ctx.lineTo(cx, stemBottom);
-      ctx.stroke();
-
-      // --- Accent dot (AI sparkle) ---
-      const dotRadius = s * 0.045;
-      const dotX = cx + armSpread + s * 0.04;
-      const dotY = armTop - s * 0.01;
-
-      ctx.beginPath();
-      ctx.arc(dotX, dotY, dotRadius, 0, Math.PI * 2);
-      ctx.fillStyle = '#38bdf8';
-      ctx.fill();
-
-      // Subtle glow behind dot
-      ctx.beginPath();
-      ctx.arc(dotX, dotY, dotRadius * 2.5, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(56, 189, 248, 0.15)';
-      ctx.fill();
+  <!-- Renders icons/logo.svg (48, 128) and icons/logo-small.svg (16, 32) to
+       the PNGs the manifest uses. Serve the extension folder over http (for
+       example "python3 -m http.server" in it), open this page, and click
+       Download; then move the files into icons/. -->
+  <h1>Yavar icons</h1>
+  <div class="row" id="row"></div>
+  <button type="button" id="download">Download PNGs</button>
+  <script type="module">
+    const SIZES = [[16, 'logo-small.svg'], [32, 'logo-small.svg'], [48, 'logo.svg'], [128, 'logo.svg']];
+    const load = (src) => new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = reject;
+      img.src = src;
+    });
+    const canvases = [];
+    for (const [size, src] of SIZES) {
+      const img = await load(src);
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = size;
+      canvas.getContext('2d').drawImage(img, 0, 0, size, size);
+      const fig = document.createElement('figure');
+      fig.append(canvas, `${size} px`);
+      document.getElementById('row').append(fig);
+      canvases.push([size, canvas]);
     }
-
-    // Draw all sizes
-    drawIcon(document.getElementById('canvas16'));
-    drawIcon(document.getElementById('canvas48'));
-    drawIcon(document.getElementById('canvas128'));
-
-    function downloadIcons() {
-      [16, 48, 128].forEach(size => {
-        const canvas = document.getElementById(`canvas${size}`);
-        const link = document.createElement('a');
-        link.download = `icon${size}.png`;
-        link.href = canvas.toDataURL('image/png');
-        link.click();
-      });
-    }
+    window.iconData = () => Object.fromEntries(canvases.map(([size, c]) => [size, c.toDataURL('image/png').split(',')[1]]));
+    document.getElementById('download').addEventListener('click', () => {
+      for (const [size, c] of canvases) {
+        const a = document.createElement('a');
+        a.download = `icon${size}.png`;
+        a.href = c.toDataURL('image/png');
+        a.click();
+      }
+    });
   </script>
 </body>
 </html>
