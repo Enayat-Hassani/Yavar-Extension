@@ -161,3 +161,9 @@ test('ignores code that is not a file of the repo, and ambiguous names', () => {
 test('reading prompts ask for citations the panel can link', () => {
   assert.ok(readingPrompt('explain', { what: '`x.js`', repo: 'o/r' }).endsWith(CITE_RULE));
 });
+
+test('TypeScript imports written as .js find their .ts files', () => {
+  const files = new Set(['source/index.ts', 'source/core/Ky.ts', 'source/utils/merge.ts', 'lib/plain.js']);
+  assert.deepEqual(resolveImports(["./core/Ky.js", "./utils/merge.js", "../lib/plain.js"], 'source/index.ts', files).sort(),
+    ['lib/plain.js', 'source/core/Ky.ts', 'source/utils/merge.ts']);
+});

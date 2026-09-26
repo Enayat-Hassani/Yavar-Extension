@@ -228,7 +228,10 @@ export function resolveImports(specs, fromPath, fileSet) {
       tryPaths(joinPath(dir, name), ['.rs', '/mod.rs']);
     } else if (spec.startsWith('.') || spec.startsWith('/')) {
       const base = spec.startsWith('/') ? spec.slice(1) : joinPath(dir, spec);
-      tryPaths(base, JS_SUFFIXES.concat(['.css', '.scss', '.h', '.hpp']));
+      // TypeScript written as ESM imports its own .ts files as "./x.js"
+      if (!tryPaths(base, JS_SUFFIXES.concat(['.css', '.scss', '.h', '.hpp'])) && /\.(m|c)?jsx?$/.test(base)) {
+        tryPaths(base.replace(/\.(m|c)?js(x?)$/, ''), ['.ts', '.tsx', '.mts', '.cts']);
+      }
     } else if (spec.startsWith('@/') || spec.startsWith('~/')) {
       // Common alias for src/
       tryPaths('src/' + spec.slice(2), JS_SUFFIXES);
