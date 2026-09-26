@@ -2120,21 +2120,21 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       `<div class="rebuild-label">Your code</div>` +
       `<textarea class="wk-typing rebuild-code" rows="1" spellcheck="false" aria-label="Your code for this step" ` +
         `placeholder="Write your version of this step…">${esc(code[i] || '')}</textarea>` +
-      `<div class="wk-actions">` +
-        `<button type="button" class="run-ask" data-rb="hint">Hint</button>` +
-        `<button type="button" class="run-ask" data-rb="check">Review my code</button>` +
-        (lang ? `<button type="button" class="run-ask" data-rb="try" title="Ctrl+Enter">Run it</button>` : '') +
-        `<span class="rebuild-run-status"></span>` +
-      `</div>` +
       `<pre class="run-output rebuild-out" aria-label="Output of your code"></pre>` +
       `<div class="rebuild-mentor"></div>` +
       `<div class="rb-done">` + (isDone
         ? `<span class="rb-done-note">✓ Step done</span><button type="button" class="files-link-btn jr-link" data-rb="undone">Undo</button>`
         : `<button type="button" class="files-send jr-primary" data-rb="done">${i === n - 1 ? 'Mark the last step done' : 'Mark done and continue →'}</button>`) +
+      `</div>` +
+      `<div class="wk-dock">` +
+        `<button type="button" class="run-ask" data-rb="hint">Hint</button>` +
+        `<button type="button" class="run-ask" data-rb="check">Review my code</button>` +
+        (lang ? `<button type="button" class="run-ask" data-rb="try" title="Ctrl+Enter">Run it</button>` : '') +
+        `<span class="rebuild-run-status"></span>` +
       `</div>`;
 
     const ta = this.rebuildBody.querySelector('.rebuild-code');
-    const grow = () => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + ta.offsetHeight - ta.clientHeight + 'px'; };
+    const grow = () => this.growTextarea(ta);
     grow();
     ta.addEventListener('input', () => {
       grow();
@@ -2330,6 +2330,16 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       extra + `</div></div>`;
   }
 
+  // A code box that starts one line tall and grows with what's typed; it
+  // scrolls only once it reaches its max-height
+  growTextarea(ta) {
+    ta.style.height = 'auto';
+    const want = ta.scrollHeight + ta.offsetHeight - ta.clientHeight;
+    const max = parseFloat(getComputedStyle(ta).maxHeight) || Infinity;
+    ta.style.height = Math.min(want, max) + 'px';
+    ta.style.overflowY = want > max ? 'auto' : 'hidden';
+  }
+
   toggleStepList(body, btn) {
     const list = body.querySelector('.wk-blocks');
     list.hidden = !list.hidden;
@@ -2517,12 +2527,6 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       (b.explain
         ? `<p class="wk-explain">${esc(b.explain)}</p>`
         : `<p class="wk-explain is-empty">The AI didn't explain these lines. Ask with Explain more.</p>`) +
-      `<div class="walk-notes"></div>` +
-      `<div class="wk-actions">` +
-        `<button type="button" class="run-ask" data-wk="more">Explain more</button>` +
-        `<button type="button" class="run-ask" data-wk="quiz">Quiz me</button>` +
-        `<button type="button" class="run-ask" data-wk="type" aria-expanded="false">Practise typing${best != null ? ` · best ${best}%` : ''}</button>` +
-      `</div>` +
       `<div class="walk-type" hidden>` +
         `<textarea class="wk-typing" rows="1" spellcheck="false" aria-label="Type lines ${b.start} to ${b.end}" ` +
           `placeholder="Type lines ${b.start}-${b.end} here…">${esc(typed[i]?.text || '')}</textarea>` +
@@ -2533,7 +2537,14 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
         `</div>` +
         `<div class="walk-result" aria-live="polite"></div>` +
       `</div>` +
-      `<div class="walk-next" aria-live="polite"></div>`;
+      `<div class="walk-notes"></div>` +
+      `<div class="walk-next" aria-live="polite"></div>` +
+      // Pinned to the bottom of the sheet, so answers never push them away
+      `<div class="wk-dock">` +
+        `<button type="button" class="run-ask" data-wk="more">Explain more</button>` +
+        `<button type="button" class="run-ask" data-wk="quiz">Quiz me</button>` +
+        `<button type="button" class="run-ask" data-wk="type" aria-expanded="false">Practise typing${best != null ? ` · best ${best}%` : ''}</button>` +
+      `</div>`;
 
     // Earlier answers for this block, folded except the latest
     const notesEl = this.walkBody.querySelector('.walk-notes');
@@ -2541,7 +2552,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     notes.forEach((note, k) => this.renderWalkNote(notesEl, note, k < notes.length - 1));
 
     const ta = this.walkBody.querySelector('.wk-typing');
-    const grow = () => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + ta.offsetHeight - ta.clientHeight + 'px'; };
+    const grow = () => this.growTextarea(ta);
     ta.addEventListener('input', grow);
     ta.addEventListener('keydown', (e) => {
       if (e.key === 'Tab') { e.preventDefault(); ta.setRangeText('    ', ta.selectionStart, ta.selectionEnd, 'end'); grow(); }
@@ -2596,7 +2607,8 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       if (!box.hidden) {
         const ta = box.querySelector('textarea');
         ta.dispatchEvent(new Event('input'));   // size it to what's already typed
-        ta.focus();
+        ta.focus({ preventScroll: true });
+        box.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
       }
       return;
     }
@@ -2655,6 +2667,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
         wait.className = 'walk-quiz is-writing';
         wait.innerHTML = '<div class="answer-head"><span class="answer-title">Quiz</span><span class="answer-status">Writing 3 questions…</span></div>';
         notesEl.appendChild(wait);
+        wait.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
         let reply = null;
         try { reply = await this.askInPanel(prompt, { via: 'chat' }); } catch (err) { wait.querySelector('.answer-status').textContent = '⚠️ ' + err.message; return; }
         wait.remove();
