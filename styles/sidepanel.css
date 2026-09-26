@@ -1100,6 +1100,23 @@ html, body {
 .answer-link:hover { color: var(--accent); text-decoration: underline; }
 .answer-card.collapsed .answer-body { max-height: 4.6em; overflow: hidden; mask-image: linear-gradient(#000 50%, transparent); }
 
+/* In place: an answer that belongs to what's above it (a walkthrough block,
+   a rebuild step) reads as a continuation, marked by a rule, not a new card */
+.answer-card.is-inline {
+  margin-top: 10px;
+  padding: 2px 0 2px 12px;
+  background: none;
+  border: none;
+  border-left: 2px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  border-radius: 0;
+  animation: fadeIn var(--dur-base) var(--ease-std) both;
+}
+.answer-card.is-inline.is-failed { border-left-color: var(--danger); }
+.answer-card.is-inline .answer-title { color: var(--accent); }
+.answer-card.is-inline .answer-foot { margin-top: 2px; }
+.answer-card.is-inline.collapsed { border-left-color: var(--border); }
+.answer-card.is-inline.collapsed .answer-foot { display: none; }
+
 .md { color: var(--text-primary); overflow-wrap: anywhere; }
 .md > :first-child { margin-top: 0; }
 .md p, .md ul, .md ol, .md blockquote { margin: 0 0 8px; }
@@ -2308,3 +2325,21 @@ button.lens-item:focus-visible {
 
 .walk-outline { margin-top: 14px; }
 .walk-lines { margin-left: auto; font-size: 11px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+
+/* Answers kept on a block sit between its explanation and its actions */
+.walk-notes:empty { display: none; }
+.walk-notes { margin-bottom: 4px; }
+.walk-quiz {
+  margin-top: 10px;
+  padding: 2px 0 2px 12px;
+  border-left: 2px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  animation: fadeIn var(--dur-base) var(--ease-std) both;
+}
+.walk-quiz .answer-title { color: var(--accent); }
+.walk-quiz ol { margin: 4px 0 0; padding-left: 18px; }
+.walk-quiz li { margin: 0 0 8px; }
+.walk-quiz li .md > :last-child { margin-bottom: 0; }
+.walk-reveal { margin: 2px 0 0; font-size: 12px; }
+.walk-reveal:hover { color: var(--accent); }
+.walk-quiz-a { margin-top: 4px; padding: 6px 8px; background: var(--surface-soft); border-radius: var(--r-sm); }
+.walk-quiz-a[hidden] { display: none; }

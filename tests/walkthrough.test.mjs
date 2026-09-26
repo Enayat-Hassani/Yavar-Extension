@@ -58,3 +58,18 @@ test('typing compare catches a changed line and a missing one', () => {
 test('typing nothing scores zero', () => {
   assert.equal(compareTyped('x = 1', '').accuracy, 0);
 });
+
+import { quizPrompt, parseQuiz } from '../src/utils/walkthrough.js';
+
+test('quiz prompt carries the code and asks for JSON', () => {
+  const p = quizPrompt('lines 1-3 of `a.py`', '```python\n1│ x = 1\n```');
+  assert.match(p, /lines 1-3 of `a\.py`/);
+  assert.match(p, /1│ x = 1/);
+  assert.match(p, /"questions"/);
+});
+
+test('parses quiz questions and drops ones without an answer', () => {
+  const reply = 'Here you go:\n```json\n{"questions": [{"q": "What is x?", "a": "One."}, {"question": "Why?", "answer": "Because."}, {"q": "No answer"}]}\n```';
+  assert.deepEqual(parseQuiz(reply), [{ q: 'What is x?', a: 'One.' }, { q: 'Why?', a: 'Because.' }]);
+  assert.equal(parseQuiz('1. What is x?\nAnswer: one'), null);
+});

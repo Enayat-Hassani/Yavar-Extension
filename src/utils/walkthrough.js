@@ -98,3 +98,25 @@ export function compareTyped(original, typed) {
   const total = Math.max(a.length, b.length);
   return { accuracy: total ? Math.round((100 * lcs[0][0]) / total) : 100, ops };
 }
+
+// Three questions on one block, with answers the panel keeps hidden until
+// you ask for them
+export function quizPrompt(where, block) {
+  return `Quiz me on ${where}:\n\n${block}\n\n` +
+    `Write 3 short questions, from what a line does to why it is written this way or what would break if it changed, ` +
+    `each with a short answer. Reply with ONLY one JSON code block, exactly in this shape:\n` +
+    '```json\n{"questions": [{"q": "the question", "a": "the answer"}]}\n```';
+}
+
+// [{ q, a }] from the AI's reply, or null
+export function parseQuiz(text) {
+  for (const obj of jsonCandidates(text)) {
+    const raw = Array.isArray(obj) ? obj : obj?.questions;
+    if (!Array.isArray(raw)) continue;
+    const items = raw
+      .map(x => ({ q: String(x?.q ?? x?.question ?? '').trim(), a: String(x?.a ?? x?.answer ?? '').trim() }))
+      .filter(x => x.q && x.a);
+    if (items.length) return items;
+  }
+  return null;
+}
