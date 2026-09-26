@@ -3,17 +3,22 @@
 
 import { isPublicWebUrl } from './utils/net.js';
 import { loadTemplates, expandTemplate, varsInTemplate } from './utils/templates.js';
-import { renderMarkdown, runnableLang } from './utils/markdown.js';
+import { renderMarkdown, runnableLang, highlight } from './utils/markdown.js';
+import { walkPrompt, parseWalkthrough, compareTyped, quizPrompt, parseQuiz } from './utils/walkthrough.js';
+import { cmModeFor, defineGenericMode } from './utils/codeEditor.js';
+import { journeyPrompt, parseJourney, nextCandidates, nextPrompt, parseNext, connectionTree } from './utils/journey.js';
 import { DEFAULT_MODELS, loadModels as loadStoredModels } from './utils/models.js';
 import { captureLabel, captureMarkdown, hasCaptureText } from './utils/capture.js';
 import { suggestActions } from './utils/actions.js';
+import { icon } from './utils/icons.js';
 import { transcriptMarkdown, turnsToMessages, HANDOFF_NOTE } from './utils/conversation.js';
 import { loadApiConfig, buildRoute, askRoute, askWithBudget } from './utils/llm.js';
 import { pickCoreFiles, planPrompt, hintPrompt, checkPrompt, parseRebuildPlan } from './utils/rebuild.js';
 import {
   parseGitHubUrl, refCandidates, rawFileUrl, encodePath, isReadablePath, estimateTokens, formatCount,
   sliceLines, extractImports, resolveImports, suggestStartFiles, buildPack, readingPrompt, READ_MODES,
-  fencedFile, parseCommitsAtom, commitsFromApi, timeAgo, LOCAL_SKIP_DIRS, isSecretPath
+  fencedFile, parseCommitsAtom, commitsFromApi, timeAgo, LOCAL_SKIP_DIRS, isSecretPath,
+  parseFileRef, CITE_RULE, LINE_NUMBER_NOTE, langFromPath
 } from './utils/github.js';
 
 // Session-storage keys other parts of the extension use to hand work to the panel
@@ -179,11 +184,19 @@ class YavarSidePanel {
     this.rebuildPanel = document.getElementById('rebuild-panel');
     this.rebuildBody = document.getElementById('rebuild-body');
     document.getElementById('rebuild-close')?.addEventListener('click', () => this.rebuildPanel.classList.add('hidden'));
-    document.getElementById('rebuild-reset')?.addEventListener('click', () => this.resetRebuild());
     this.rebuildPanel?.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') this.rebuildPanel.classList.add('hidden');
+      if (e.key !== 'Escape') return;
+      if (!this.closeStepList(this.rebuildBody, true)) this.rebuildPanel.classList.add('hidden');
     });
     this.rebuildBody?.addEventListener('click', (e) => this.onRebuildClick(e));
+    this.walkPanel = document.getElementById('walk-panel');
+    this.walkBody = document.getElementById('walk-body');
+    document.getElementById('walk-close')?.addEventListener('click', () => this.walkPanel.classList.add('hidden'));
+    this.walkPanel?.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      if (!this.closeStepList(this.walkBody, true)) this.walkPanel.classList.add('hidden');
+    });
+    this.walkBody?.addEventListener('click', (e) => this.onWalkClick(e));
     document.getElementById('run-close')?.addEventListener('click', () => this.closeRunPanel());
     this.runGo?.addEventListener('click', () => this.runCode());
     this.runStop?.addEventListener('click', () => this.stopCode());
@@ -557,9 +570,11 @@ class YavarSidePanel {
   // Under a finished answer: Copy, then Retry (onRetry), Save (saveAs), and
   // either "Ask <chat site>" (onAskChat, for API answers) or "Open in chat"
   // (openInChat, for answers the chat site wrote).
-  answerCard(container, { title, onUseCode = null, collapsible = false, saveAs = null, onRetry = null, onAskChat = null, openInChat = true } = {}) {
+  // inline: drawn as part of what it answers (a walkthrough block, a rebuild
+  // step) rather than as a separate card
+  answerCard(container, { title, onUseCode = null, collapsible = false, saveAs = null, onRetry = null, onAskChat = null, openInChat = true, inline = false } = {}) {
     const card = document.createElement('div');
-    card.className = 'answer-card is-writing';
+    card.className = 'answer-card is-writing' + (inline ? ' is-inline' : '');
     const icon = (d) => `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
     const act = (id, label, svg, extra = '') =>
       `<button type="button" class="answer-act" data-ans="${id}" title="${this.escapeHtml(label)}" aria-label="${this.escapeHtml(label)}"${extra}>${svg}</button>`;
@@ -575,7 +590,7 @@ class YavarSidePanel {
         (saveAs ? act('save', 'Keep in Saved answers', icon('<path d="M6 3h12v18l-6-4-6 4z"></path>')) : '') +
         (onAskChat
           ? `<button type="button" class="answer-chip" data-ans="askchat" title="Ask the same question in ${this.escapeHtml(chatName)} (free)">Ask ${this.escapeHtml(chatName)}</button>`
-          : openInChat ? `<button type="button" class="answer-chip" data-ans="chat" title="Show the chat (the answer is there too)">Open in chat</button>` : '') +
+          : openInChat && !inline ? `<button type="button" class="answer-chip" data-ans="chat" title="Show the chat (the answer is there too)">Open in chat</button>` : '') +
       `</div>`;
     container.appendChild(card);
     const body = card.querySelector('.answer-body');
@@ -583,11 +598,12 @@ class YavarSidePanel {
     let code = [];
     let pending = null;
     let finalText = '';
-    const paint = (text) => {
+    const paint = (text, final = false) => {
       const r = renderMarkdown(text);
       body.innerHTML = r.html;
       code = r.code;
       if (!onUseCode) body.querySelectorAll('[data-md-act="use"]').forEach(b => b.remove());
+      if (final) this.linkFileRefs(body);
     };
     // A button says what happened for a moment, then goes back
     const flash = (btn, cls) => {
@@ -595,6 +611,8 @@ class YavarSidePanel {
       setTimeout(() => btn.classList.remove(cls), 1400);
     };
     card.addEventListener('click', async (e) => {
+      const ref = e.target.closest('[data-file-ref]');
+      if (ref) { this.openRepoFile(JSON.parse(ref.dataset.fileRef)); return; }
       const btn = e.target.closest('[data-md-act], [data-ans]');
       if (!btn) return;
       const ans = btn.dataset.ans;
@@ -647,7 +665,7 @@ class YavarSidePanel {
       done: (text) => {
         pending = null;
         finalText = text;
-        paint(text);
+        paint(text, true);
         card.classList.remove('is-writing');
         status('');
         foot.hidden = false;
@@ -1162,6 +1180,8 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       url = tab?.url || '';
     } catch (e) { /* no tab: nothing to offer */ }
 
+    // The reader shows the repo you were already on: keep that context
+    if (url.startsWith(chrome.runtime.getURL('reader.html'))) return;
     // "Usable" = a real web page that isn't one of the AI chat sites themselves
     const isHttp = /^https?:\/\//i.test(url);
     const isAIHost = /(chatgpt\.com|chat\.openai\.com|claude\.ai|gemini\.google\.com)/i.test(url);
@@ -1170,11 +1190,12 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     const gh = parseGitHubUrl(url);
     // A plan you started for this repo, so the menus can offer to continue it
     let rebuild = null;
+    let journey = null;
     if (gh) {
-      const key = `rebuild:${gh.owner}/${gh.repo}`;
-      try { rebuild = (await chrome.storage.local.get(key))[key] || null; } catch (e) { /* no plan */ }
+      const keys = [`rebuild:${gh.owner}/${gh.repo}`, `journey:${gh.owner}/${gh.repo}`];
+      try { ({ [keys[0]]: rebuild = null, [keys[1]]: journey = null } = await chrome.storage.local.get(keys)); } catch (e) { /* none yet */ }
     }
-    this._tabCtx = { usable, gh, url, video, rebuild: this.rebuildStatus(rebuild) };
+    this._tabCtx = { usable, gh, url, video, rebuild: this.rebuildStatus(rebuild), journey: this.journeyStatus(journey) };
     this.renderHome();
   }
 
@@ -1185,12 +1206,12 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     if (kind === 'add') {
       const file = gh?.kind === 'blob' && gh.rest.length > 1 ? gh.rest[gh.rest.length - 1] : '';
       return [
-        ...(file ? [{ id: 'attach_file', icon: '📎', name: file, desc: 'Open in your tab' }] : []),
-        { id: 'pick_repo', icon: '📚', name: 'Files from this repository', desc: repo || 'Open a GitHub repository in your tab', disabled: !gh },
-        { id: 'pick_local', icon: '📁', name: 'Files from a folder', desc: 'A project on this computer' },
-        { id: 'attach_page', icon: video ? '🎬' : '📄', name: video ? "This video's transcript" : 'This page', desc: usable ? (video ? 'The captions of the video in your tab' : 'The text of the page in your tab') : 'Open a web page in your tab', disabled: !usable },
-        { id: 'screenshot_attach', icon: '📷', name: 'Screenshot', desc: usable ? 'Select an area of the page' : 'Open a web page in your tab', disabled: !usable },
-        { id: 'prompts', icon: '✨', name: 'Use a prompt', desc: 'Wrap your message in one of your templates' }
+        ...(file ? [{ id: 'attach_file', icon: icon('file'), name: file, desc: 'Open in your tab' }] : []),
+        { id: 'pick_repo', icon: icon('book'), name: 'Files from this repository', desc: repo || 'Open a GitHub repository in your tab', disabled: !gh },
+        { id: 'pick_local', icon: icon('folder'), name: 'Files from a folder', desc: 'A project on this computer' },
+        { id: 'attach_page', icon: icon(video ? 'video' : 'file'), name: video ? "This video's transcript" : 'This page', desc: usable ? (video ? 'The captions of the video in your tab' : 'The text of the page in your tab') : 'Open a web page in your tab', disabled: !usable },
+        { id: 'screenshot_attach', icon: icon('shot'), name: 'Screenshot', desc: usable ? 'Select an area of the page' : 'Open a web page in your tab', disabled: !usable },
+        { id: 'prompts', icon: icon('sparkle'), name: 'Use a prompt', desc: 'Wrap your message in one of your templates' }
       ];
     }
     if (kind === 'prompts') {
@@ -1210,21 +1231,24 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       ];
     }
     // On a GitHub repo the repo's actions stay here once the start page is gone
+    const file = gh?.kind === 'blob' && gh.rest.length > 1 ? gh.rest[gh.rest.length - 1] : '';
+    // (Asking about chosen files lives in the + menu: "Files from this repository".)
     const repoItems = gh ? [
-      { id: 'explain_repo', icon: '🧭', name: 'Tour this repository', desc: repo },
-      { id: 'reader', icon: '📚', name: 'Browse files', desc: 'Read, explain or review any file' },
-      { id: 'changes', icon: '🕘', name: 'Recent changes', desc: 'What the latest commits are about' },
-      { id: 'rebuild', icon: '🧱', name: 'Build it yourself', desc: this._tabCtx.rebuild || 'Recreate a small version, step by step' }
+      ...(file ? [{ id: 'walk_file', icon: icon('lines'), name: `Read ${file}`, desc: 'Block by block, beside the code' }] : []),
+      { id: 'explain_repo', icon: icon('compass'), name: 'Read this repository', desc: this._tabCtx.journey || 'The big picture, then file by file' },
+      { id: 'rebuild', icon: icon('layers'), name: 'Build it yourself', desc: this._tabCtx.rebuild || 'Recreate a small version, step by step' },
+      { id: 'changes', icon: icon('commit'), name: 'Recent changes', desc: 'What the latest commits are about' }
     ] : [];
     return [
       ...repoItems,
-      { id: 'history', icon: '🕘', name: 'Saved answers', desc: 'Everything you saved, searchable', divider: repoItems.length > 0 },
-      { id: 'notes', icon: '📝', name: 'Notes', desc: 'Your scratchpad' },
-      { id: 'research_web', icon: '🌐', name: 'Web research', desc: 'Searches, reads sources, cites them' },
-      { id: 'videos', icon: '🎬', name: 'Video research', desc: 'What the top YouTube videos say' },
-      { id: 'run', icon: '▶️', name: 'Code playground', desc: 'Run Python or JavaScript' },
-      { id: 'carry_over', icon: '🧳', name: 'Continue in a fresh chat', desc: 'Summarize this chat into a new one' },
-      { id: 'settings', icon: '⚙️', name: 'Settings' }
+      { id: 'read_folder', icon: icon('folder'), name: 'Read a project folder', desc: 'A project on this computer', divider: repoItems.length > 0 },
+      { id: 'history', icon: icon('bookmark'), name: 'Saved answers', desc: 'Everything you saved, searchable', divider: true },
+      { id: 'notes', icon: icon('note'), name: 'Notes', desc: 'Your scratchpad' },
+      { id: 'research_web', icon: icon('globe'), name: 'Web research', desc: 'Searches, reads sources, cites them', divider: true },
+      { id: 'videos', icon: icon('video'), name: 'Video research', desc: 'What the top YouTube videos say' },
+      { id: 'run', icon: icon('code'), name: 'Code playground', desc: 'Run Python or JavaScript' },
+      { id: 'carry_over', icon: icon('forward'), name: 'Continue in a fresh chat', desc: 'Summarize this chat into a new one', divider: true },
+      { id: 'settings', icon: icon('settings'), name: 'Settings' }
     ];
   }
 
@@ -1255,8 +1279,8 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     const q = m[1].toLowerCase();
     const pool = kind === 'slash'
       ? [
-          { id: 'new', icon: '✏️', name: 'New conversation' },
-          { id: 'chat', icon: '💬', name: 'Show the chat' },
+          { id: 'new', icon: icon('pen'), name: 'New conversation' },
+          { id: 'chat', icon: icon('chat'), name: 'Show the chat' },
           ...this.toolMenuItems('more'),
           ...this.toolMenuItems('prompts'),
           ...this.toolMenuItems('models').filter(t => (t.id.startsWith('model:') || t.id === 'answer:api') && !t.checked)
@@ -1406,16 +1430,16 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     }
     if (id === 'answer:api') { this.useApi(); return; }
     const tools = {
-      reader: () => this.openPicker('repo'),
       changes: () => this.showRecentChanges(),
       rebuild: () => this.openRebuild(),
       add_page: () => this.attachActivePage(),
       attach_page: () => this.attachActivePage(),
       attach_file: () => this.quickAddActiveFile('add'),
       summarize_page: () => this.summarizeActivePage(),
-      add_file: () => this.quickAddActiveFile(),
+      walk_file: () => this.walkActiveFile(),
       explain_diff: () => this.explainActiveDiff(),
-      explain_repo: () => this.explainRepo(),
+      explain_repo: () => this.openJourney(),
+      read_folder: () => this.openJourney({ folder: true }),
       history: () => this.toggleHistory(),
       notes: () => this.toggleNotes(),
       settings: () => chrome.runtime.openOptionsPage(),
@@ -1879,6 +1903,73 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     try { await chrome.storage.local.set({ [key]: [...this.readMarks].slice(-2000) }); } catch (e) { /* ignore */ }
   }
 
+  // ----- Opening the files an answer talks about -----
+  // Files open in the Yavar reader (reader.html), one tab that shows GitHub
+  // and local files alike, with the lines under discussion highlighted.
+
+  // Where a file of the loaded repo or folder lives, as the reader needs it
+  fileRefFor(path, lines = null) {
+    const t = this.repoTree;
+    return { source: t.source || 'github', owner: t.owner, repo: t.repo, ref: t.ref, path, lines };
+  }
+
+  // Inline code in an answer that names a file of the loaded repo or folder
+  // becomes a link. Where the file lives is stored on the link, so an old
+  // answer still opens the right file after you move on to another repo.
+  linkFileRefs(root) {
+    const t = this.repoTree;
+    if (!t) return;
+    root.querySelectorAll('code').forEach(el => {
+      if (el.closest('pre, a, button')) return;
+      const ref = parseFileRef(el.textContent, t.fileSet);
+      if (!ref) return;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'file-ref';
+      btn.dataset.fileRef = JSON.stringify(this.fileRefFor(ref.path, ref.lines));
+      const at = !ref.lines ? '' : ref.lines.end > ref.lines.start ? `, lines ${ref.lines.start}-${ref.lines.end}` : `, line ${ref.lines.start}`;
+      btn.title = `Open ${ref.path}${at} in the reader`;
+      el.replaceWith(btn);
+      btn.appendChild(el);
+    });
+  }
+
+  // Show a file in the reader tab with `lines` highlighted. `label` names what
+  // is highlighted (a walkthrough block). When several calls race (Next
+  // clicked quickly), only the latest is shown.
+  async openRepoFile({ source = 'github', owner, repo, ref, path, lines = null, label = '' }) {
+    const seq = (this._readerSeq = (this._readerSeq || 0) + 1);
+    try {
+      const t = this.repoTree;
+      const loaded = t && t.repo === repo && (t.owner || '') === (owner || '') && (t.ref || '') === (ref || '');
+      let content;
+      if (loaded) content = await this.readRepoFile(path);
+      else if (source === 'local') throw new Error('open that folder again first');
+      else content = await this.fetchRepoFile(owner, repo, path, ref, 2000000);
+      if (seq !== this._readerSeq) return;
+      await chrome.storage.session.set({ readerView: {
+        repo: { source, owner, repo, ref, name: owner ? `${owner}/${repo}` : repo },
+        path, content, lines, label, ts: Date.now()
+      } });
+      await this.showReaderTab();
+    } catch (e) {
+      this.showNotification('⚠️ Could not open ' + path.split('/').pop() + ': ' + e.message);
+    }
+  }
+
+  // Bring the reader tab forward, or open one next to the tab you're on
+  async showReaderTab() {
+    const base = chrome.runtime.getURL('reader.html');
+    const [tab] = await this.getActiveTabs();
+    const tabs = await chrome.tabs.query({ windowId: tab?.windowId });
+    const reader = tabs.find(x => (x.url || '').startsWith(base));
+    if (reader) {
+      if (!reader.active) await chrome.tabs.update(reader.id, { active: true });
+    } else {
+      await chrome.tabs.create({ url: base, windowId: tab?.windowId, index: tab ? tab.index + 1 : undefined, openerTabId: tab?.id });
+    }
+  }
+
   // ----- Panel -----
 
   async quickAddActiveFile(mode = null) {
@@ -1973,11 +2064,14 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
 
   async resetRebuild() {
     if (!this.rebuild?.plan) return;
-    if (!this.confirmTwice('rebuild', 'Click ↺ again to discard this plan and start over')) return;
+    if (!this.confirmTwice('rebuild', 'Click again to discard this plan and start over')) return;
     await this.saveRebuild(null);
     this.renderRebuild();
   }
 
+  // One step at a time under the shared step bar: what to learn, which
+  // original files to study (they open in the reader), the task, your code,
+  // and hints and reviews in place. Marking a step done is its own act.
   renderRebuild() {
     const st = this.rebuild;
     const esc = (t) => this.escapeHtml(t || '');
@@ -1985,18 +2079,18 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       const core = pickCoreFiles(this.repoTree.items);
       const bytes = core.reduce((n, p) => n + (this.repoTree.sizes.get(p) || 0), 0);
       this.rebuildBody.innerHTML =
-        `<div class="rebuild-intro">` +
-          `<p>The best way to understand a codebase is to build a small version of it yourself. ` +
-          `Yavar sends the project's core files to the AI, which writes a plan of small steps. ` +
-          `For each step you study the original, write your own version, and get hints or a review.</p>` +
-          `<div class="rebuild-files"><strong>${core.length} file${core.length === 1 ? '' : 's'}</strong> ` +
-          `<span>(~${formatCount(estimateTokens(bytes))} tokens, picked automatically)</span>` +
-          `<div class="rebuild-file-list">${core.map(p => `<code>${esc(p)}</code>`).join(' ')}</div></div>` +
-          (this._planPending
-            ? `<div class="rebuild-wait"><span class="files-spinner"></span>The AI is writing your plan…<div class="rebuild-live"></div></div>`
-            : `<button type="button" class="files-send" data-rb="create"${core.length ? '' : ' disabled'}>Create my plan</button>`) +
-          `<button type="button" class="files-link-btn rebuild-load" data-rb="load">Already have a plan in the chat? Load it</button>` +
-        `</div>`;
+        `<p class="wk-summary">Build a small version of this project yourself, one step at a time. The AI reads its core files ` +
+          `and writes the plan; for each step you study the original, write your own, and ask for a hint or a review.</p>` +
+        `<div class="jr-head"><span class="rebuild-label">Core files it will read</span>` +
+          `<span class="jr-count">${core.length} · ~${formatCount(estimateTokens(bytes))} tokens</span></div>` +
+        `<div class="jr-files rb-core">${core.map(p =>
+          `<button type="button" class="jr-file" data-rb="open" data-path="${esc(p)}" title="Open ${esc(p)} in the reader">${esc(p.split('/').pop())}</button>`).join('')}</div>` +
+        (this._planPending
+          ? `<div class="rebuild-wait"><span class="files-spinner"></span>The AI is writing your plan…<div class="rebuild-live"></div></div>`
+          : `<div class="jr-actions rb-start">` +
+              `<button type="button" class="files-link-btn jr-link" data-rb="load">Load a plan already in the chat</button>` +
+              (core.length ? `<button type="button" class="files-send jr-primary" data-rb="create">Create my plan →</button>` : '') +
+            `</div>`);
       return;
     }
 
@@ -2004,62 +2098,54 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     const n = plan.steps.length;
     const i = Math.min(current, n - 1);
     const s = plan.steps[i];
-    const pct = Math.round((done.length / n) * 100);
     const lang = this.rebuildLang(plan);
-    const studyChips = (s.study || []).map(p => {
-      const ok = this.repoTree.fileSet.has(p);
-      return `<button type="button" class="files-start-chip${ok ? '' : ' missing'}" data-rb="study" data-path="${esc(p)}"${ok ? '' : ' disabled title="Not found in this repo"'}>${esc(p.split('/').pop())}</button>`;
-    }).join('');
+    const isDone = done.includes(i);
+    const study = (s.study || []).map(p => this.repoTree.fileSet.has(p)
+      ? `<button type="button" class="jr-file" data-rb="study" data-path="${esc(p)}" title="Open ${esc(p)} in the reader and explain it for this step">${esc(p.split('/').pop())}</button>`
+      : `<span class="jr-file is-missing" title="Not found in this repository">${esc(p.split('/').pop())}</span>`).join('');
 
     this.rebuildBody.innerHTML =
-      (plan.summary ? `<p class="rebuild-summary">${esc(plan.summary)}</p>` : '') +
-      `<div class="rebuild-progress" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100">` +
-        `<div class="rebuild-progress-bar" style="width:${pct}%"></div></div>` +
-      `<div class="rebuild-progress-label">${done.length} of ${n} steps done</div>` +
-      `<ol class="rebuild-steps">${plan.steps.map((x, k) =>
-        `<li class="${k === i ? 'current' : ''}${done.includes(k) ? ' done' : ''}" data-rb="goto" data-i="${k}">` +
-        `<span class="rebuild-step-dot">${done.includes(k) ? '✓' : k + 1}</span><span>${esc(x.title)}</span></li>`).join('')}</ol>` +
-      `<div class="rebuild-card">` +
-        `<div class="rebuild-card-kicker">Step ${i + 1} of ${n}</div>` +
-        `<h3>${esc(s.title)}</h3>` +
-        (s.goal ? `<p class="rebuild-goal">${esc(s.goal)}</p>` : '') +
-        (studyChips ? `<div class="rebuild-label">Study first</div><div class="files-start-list">${studyChips}</div>` : '') +
-        `<div class="rebuild-label">Your task</div><p class="rebuild-text">${esc(s.task)}</p>` +
-        (s.done_when ? `<div class="rebuild-label">Done when</div><p class="rebuild-text">${esc(s.done_when)}</p>` : '') +
-        `<div class="rebuild-label">Your code</div>` +
-        `<textarea class="rebuild-code" spellcheck="false" placeholder="Write or paste your version for this step…" data-i="${i}">${esc(code[i] || '')}</textarea>` +
-        `<div class="rebuild-actions">` +
-          `<button type="button" class="files-chip-btn" data-rb="hint">💡 Hint</button>` +
-          `<button type="button" class="files-chip-btn" data-rb="check">Check my code</button>` +
-          (lang ? `<button type="button" class="files-chip-btn" data-rb="try">▶ Try it</button>` : '') +
-          `<span class="rebuild-run-status"></span>` +
-        `</div>` +
-        `<pre class="run-output rebuild-out hidden" aria-label="Output of your code"></pre>` +
-        `<div class="rebuild-mentor"></div>` +
-        `<div class="rebuild-nav">` +
-          `<button type="button" class="files-link-btn" data-rb="prev"${i === 0 ? ' disabled' : ''}>← Previous</button>` +
-          `<button type="button" class="files-send" data-rb="next">${done.includes(i) ? (i === n - 1 ? 'All done' : 'Next step →') : (i === n - 1 ? 'Mark done 🎉' : 'Mark done & next →')}</button>` +
-        `</div>` +
+      this.stepBar({
+        act: 'rb', where: `Step ${i + 1} of ${n}`, first: i === 0,
+        pct: Math.round((done.length / n) * 100),
+        next: `<button type="button" class="wk-step" data-rb="fwd" aria-label="Next step"${i === n - 1 ? ' disabled' : ''}>›</button>`,
+        items: plan.steps.map((x, k) => ({ i: k, current: k === i, mark: done.includes(k) ? '✓' : k + 1, title: esc(x.title) })),
+        extra: `<button type="button" class="files-link-btn wk-redo" data-rb="reset">Start over with a new plan</button>`
+      }) +
+      (i === 0 && plan.summary ? `<p class="wk-summary">${esc(plan.summary)}</p>` : '') +
+      `<h3 class="wk-title">${esc(s.title)}</h3>` +
+      (s.goal ? `<p class="rb-goal">${esc(s.goal)}</p>` : '') +
+      (study ? `<div class="rebuild-label">Study first</div><div class="jr-files">${study}</div>` : '') +
+      `<div class="rebuild-label">Your task</div><p class="wk-explain">${esc(s.task)}</p>` +
+      (s.done_when ? `<div class="rebuild-label">Done when</div><p class="wk-explain">${esc(s.done_when)}</p>` : '') +
+      `<div class="rebuild-label">Your code</div>` +
+      `<div class="code-box" aria-label="Your code for this step"></div>` +
+      `<pre class="run-output rebuild-out" aria-label="Output of your code"></pre>` +
+      `<div class="rebuild-mentor"></div>` +
+      `<div class="rb-done">` + (isDone
+        ? `<span class="rb-done-note">✓ Step done</span><button type="button" class="files-link-btn jr-link" data-rb="undone">Undo</button>`
+        : `<button type="button" class="files-send jr-primary" data-rb="done">${i === n - 1 ? 'Mark the last step done' : 'Mark done and continue →'}</button>`) +
+      `</div>` +
+      `<div class="wk-dock">` +
+        `<button type="button" class="run-ask" data-rb="hint">Hint</button>` +
+        `<button type="button" class="run-ask" data-rb="check">Review my code</button>` +
+        (lang ? `<button type="button" class="run-ask" data-rb="try" title="Ctrl+Enter">Run it</button>` : '') +
+        `<span class="rebuild-run-status"></span>` +
       `</div>`;
 
-    const ta = this.rebuildBody.querySelector('.rebuild-code');
-    ta?.addEventListener('input', () => {
-      clearTimeout(this._rbSave);
-      this._rbSave = setTimeout(() => {
-        const c = { ...(this.rebuild.code || {}) };
-        c[i] = ta.value;
-        this.saveRebuild({ ...this.rebuild, code: c });
-      }, 400);
-    });
-    ta?.addEventListener('keydown', (e) => {
-      if (e.key === 'Tab') { e.preventDefault(); ta.setRangeText('    ', ta.selectionStart, ta.selectionEnd, 'end'); }
-      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && lang) { e.preventDefault(); this.rebuildBody.querySelector('[data-rb="try"]')?.click(); }
+    this._rbCode = this.makeCodeBox(this.rebuildBody.querySelector('.code-box'), {
+      value: code[i] || '', lang: plan.language, placeholder: 'Write your version of this step…',
+      onChange: (value) => {
+        clearTimeout(this._rbSave);
+        this._rbSave = setTimeout(() => this.saveRebuild({ ...this.rebuild, code: { ...(this.rebuild.code || {}), [i]: value } }), 400);
+      },
+      onSubmit: () => this.rebuildBody.querySelector('[data-rb="try"]')?.click()
     });
 
-    // Earlier hints and reviews for this step
+    // Earlier hints and reviews for this step, folded
     const mentor = this.rebuildBody.querySelector('.rebuild-mentor');
     for (const note of (st.mentor?.[i] || [])) {
-      const card = this.answerCard(mentor, { title: note.title, onUseCode: (c) => this.setStepCode(c), collapsible: true, openInChat: false });
+      const card = this.answerCard(mentor, { title: note.title.replace(/^\p{Extended_Pictographic}️?‍?\p{Extended_Pictographic}?\s*/u, ''), onUseCode: (c) => this.setStepCode(c), collapsible: true, openInChat: false, inline: true });
       card.done(note.text);
       card.el.classList.add('collapsed');
     }
@@ -2067,11 +2153,9 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
 
   // Put code into the current step's editor (e.g. "Use in editor" on an answer)
   setStepCode(code) {
-    const ta = this.rebuildBody.querySelector('.rebuild-code');
-    if (!ta) return;
-    ta.value = code;
-    ta.dispatchEvent(new Event('input'));
-    ta.focus();
+    if (!this._rbCode) return;
+    this._rbCode.setValue(code);
+    this._rbCode.focus();
   }
 
   async addMentorNote(i, title, text) {
@@ -2083,45 +2167,57 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
   }
 
   async onRebuildClick(e) {
+    if (!e.target.closest('.wk-bar')) this.closeStepList(this.rebuildBody);
     const el = e.target.closest('[data-rb]');
     if (!el || el.disabled) return;
     const act = el.dataset.rb;
     const st = this.rebuild;
     if (act === 'create') return this.createRebuildPlan();
     if (act === 'load') return this.loadPlanFromChat();
+    if (act === 'open') return this.openRepoFile(this.fileRefFor(el.dataset.path));
     if (!st?.plan) return;
-    const i = Math.min(st.current || 0, st.plan.steps.length - 1);
-    const code = this.rebuildBody.querySelector('.rebuild-code')?.value || '';
+    const n = st.plan.steps.length;
+    const i = Math.min(st.current || 0, n - 1);
+    const code = this._rbCode?.getValue() || '';
+    const go = async (k, changes = {}) => {
+      await this.saveRebuild({ ...st, ...changes, current: k, code: { ...(st.code || {}), [i]: code } });
+      this.renderRebuild();
+      this.rebuildBody.scrollTop = 0;
+    };
 
-    if (act === 'goto') {
-      await this.saveRebuild({ ...st, current: Number(el.dataset.i) });
-      this.renderRebuild();
+    if (act === 'list') {
+      this.toggleStepList(this.rebuildBody, el);
+    } else if (act === 'reset') {
+      await this.resetRebuild();
+    } else if (act === 'goto') {
+      await go(Number(el.dataset.i));
     } else if (act === 'prev') {
-      await this.saveRebuild({ ...st, current: Math.max(0, i - 1) });
-      this.renderRebuild();
-    } else if (act === 'next') {
+      await go(Math.max(0, i - 1));
+    } else if (act === 'fwd') {
+      await go(Math.min(i + 1, n - 1));
+    } else if (act === 'done') {
       const done = [...new Set([...(st.done || []), i])];
-      const next = Math.min(i + 1, st.plan.steps.length - 1);
-      await this.saveRebuild({ ...st, done, current: next, code: { ...(st.code || {}), [i]: code } });
-      this.renderRebuild();
-      if (done.length === st.plan.steps.length && i === st.plan.steps.length - 1) {
-        this.showNotification('🎉 You rebuilt the whole plan. Try extending it with a feature of your own!');
-      }
+      await go(Math.min(i + 1, n - 1), { done });
+      if (done.length === n) this.showNotification('You rebuilt the whole plan. Try extending it with a feature of your own.');
+    } else if (act === 'undone') {
+      await go(i, { done: (st.done || []).filter(k => k !== i) });
     } else if (act === 'study') {
       // Explained right here in the step, like hints, so the plan stays open
       const path = el.dataset.path;
       const name = path.split('/').pop();
       el.disabled = true;
+      this.openRepoFile(this.fileRefFor(path));
       try {
         const [file] = await this.fetchRepoFilesMany([path]);
         if (file.error) throw new Error(file.error);
         const fname = name + '.md';
-        const title = '📖 ' + name;
+        const title = 'About ' + name;
         await this.showAnswerIn(this.rebuildBody.querySelector('.rebuild-mentor'), title,
           `The attached "${fname}" is \`${path}\` from ${this.repoDisplayName()}. I am rebuilding this project step by step ` +
           `and am on the step "${st.plan.steps[i].title}". ${readingPrompt('explain', { what: `\`${path}\``, repo: this.repoDisplayName() })}\n\n` +
           'Point out the parts that matter for this step. Do not write the step for me.', {
             attachments: [{ filename: fname, content: this.packFor([file]) }],
+            via: 'chat', inline: true,
             onUseCode: (c) => this.setStepCode(c),
             onDone: (text) => this.addMentorNote(i, title, text)
           });
@@ -2143,10 +2239,10 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
         if (files.length) attachments = [{ filename: `step-${i + 1}-original.md`, content: this.packFor(files) }];
         prompt = checkPrompt(st.plan, i, code, attachments.length > 0);
       }
-      const title = act === 'hint' ? '💡 Hint' : '🧑‍🏫 Review';
+      const title = act === 'hint' ? 'Hint' : 'Review of your code';
       el.disabled = true;
       await this.showAnswerIn(mentor, title, prompt, {
-        attachments,
+        attachments, via: 'chat', inline: true,
         onUseCode: (c) => this.setStepCode(c),
         onDone: (text) => this.addMentorNote(i, title, text)
       });
@@ -2155,7 +2251,6 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       // Run inline under the code, so hints and output stay in view together
       if (!code.trim()) { this.showNotification('Write some code first'); return; }
       const out = this.rebuildBody.querySelector('.rebuild-out');
-      out.classList.remove('hidden');
       el.disabled = true;
       await this.runSnippet({
         lang: this.rebuildLang(st.plan), code, outEl: out,
@@ -2188,8 +2283,11 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
           ? `<ol>${titles.map(t => `<li>${this.escapeHtml(t)}</li>`).join('')}</ol>`
           : '<span class="rebuild-live-hint">Reading the code…</span>';
       };
-      const reply = await this.askInPanel(planPrompt(this.repoDisplayName()), { attachments, onProgress });
-      await this.adoptPlan(reply);
+      const { value, text, tried } = await this.askForJson(planPrompt(this.repoDisplayName()), {
+        attachments, onProgress, live: this.rebuildBody, parse: parseRebuildPlan
+      });
+      if (!value) throw new Error(`couldn't find a plan in the replies (asked ${tried})`);
+      await this.adoptPlan(text);
     } catch (e) {
       this.showNotification('⚠️ ' + e.message + '. When the plan is in the chat, use "Load it".');
     } finally {
@@ -2206,6 +2304,788 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     this.rebuildPanel.classList.remove('hidden');
     this.renderRebuild();
     this.showNotification(`🛠 Plan ready: ${plan.steps.length} steps`);
+  }
+
+  // ----- The step bar, shared by the walkthrough and Build it yourself -----
+  // Pinned at the top of the sheet: a way back, where you are (the step list
+  // opens from it), Previous, and a forward control, over a thin progress
+  // line. `act` names the sheet's data attribute (wk, rb); titles are markup.
+  stepBar({ act, back = '', where, first, next, pct, items, extra = '' }) {
+    const a = `data-${act}`;
+    return `<div class="wk-bar"><div class="wk-row">${back}` +
+        `<button type="button" class="wk-where" ${a}="list" aria-expanded="false">${where}<span class="wk-chev" aria-hidden="true"></span></button>` +
+        `<span class="wk-steps"><button type="button" class="wk-step" ${a}="prev" aria-label="Previous"${first ? ' disabled' : ''}>‹</button>${next}</span>` +
+      `</div>` +
+      `<div class="wk-progress" aria-hidden="true"><i style="width:${pct}%"></i></div>` +
+      `<div class="wk-blocks" hidden><ol>${items.map(it =>
+        `<li><button type="button" class="${it.current ? 'is-current' : ''}" ${a}="goto" data-i="${it.i}"${it.current ? ' aria-current="step"' : ''}>` +
+        `<span class="wk-n">${it.mark}</span><span class="wk-t">${it.title}</span>${it.meta ? `<span class="wk-l">${it.meta}</span>` : ''}</button></li>`).join('')}</ol>` +
+      extra + `</div></div>`;
+  }
+
+  // A code editor with colours, line numbers and indentation (CodeMirror,
+  // like the runner) that starts one line tall and grows with the code.
+  // firstLine numbers it like the file (a block of lines 16-49 starts at 16);
+  // Ctrl/Cmd+Enter calls onSubmit.
+  makeCodeBox(host, { value = '', lang = '', firstLine = 1, placeholder = '', onChange = null, onSubmit = null }) {
+    defineGenericMode(CodeMirror);
+    const cm = CodeMirror(host, {
+      value, mode: cmModeFor(lang), theme: 'yavar', lineNumbers: true, firstLineNumber: firstLine,
+      lineWrapping: false, viewportMargin: Infinity, tabSize: 4, indentUnit: 4, indentWithTabs: false,
+      extraKeys: {
+        'Ctrl-Enter': () => onSubmit?.(),
+        'Cmd-Enter': () => onSubmit?.(),
+        Tab: (ed) => ed.somethingSelected() ? ed.indentSelection('add') : ed.replaceSelection(' '.repeat(ed.getOption('indentUnit')))
+      }
+    });
+    // CodeMirror 5 here has no placeholder addon: a hint shown while it's empty
+    const hint = document.createElement('span');
+    hint.className = 'code-box-hint';
+    hint.textContent = placeholder;
+    hint.setAttribute('aria-hidden', 'true');
+    host.appendChild(hint);
+    const empty = () => host.classList.toggle('is-empty', !cm.getValue());
+    cm.on('change', () => { empty(); onChange?.(cm.getValue()); });
+    empty();
+    requestAnimationFrame(() => {
+      cm.refresh();
+      hint.style.left = cm.getGutterElement().offsetWidth + 6 + 'px';
+    });
+    return cm;
+  }
+
+  toggleStepList(body, btn) {
+    const list = body.querySelector('.wk-blocks');
+    list.hidden = !list.hidden;
+    btn.setAttribute('aria-expanded', String(!list.hidden));
+    if (!list.hidden) list.querySelector('.is-current')?.focus();
+  }
+
+  // Close the step list if it's open; true when it was
+  closeStepList(body, refocus = false) {
+    const list = body?.querySelector('.wk-blocks:not([hidden])');
+    if (!list) return false;
+    list.hidden = true;
+    const where = body.querySelector('.wk-where');
+    where?.setAttribute('aria-expanded', 'false');
+    if (refocus) where?.focus();
+    return true;
+  }
+
+  // ========== Walk through a file ==========
+  // The AI splits a file into blocks of related lines; the sheet shows one
+  // block at a time with its explanation, and the reader tab highlights the
+  // same lines. Each block can be explained further, quizzed or retyped.
+  // Progress is kept per file (walk:<repo>:<path>).
+
+  walkKey(path) {
+    const k = this.readMarksKey();
+    return k ? `${k.replace(/^readMarks:/, 'walk:')}:${path}` : null;
+  }
+
+  async saveWalk(state) {
+    this.walk = state;
+    const key = this.walkKey(state.path);
+    if (key) try { await chrome.storage.local.set({ [key]: state }); } catch (e) { /* ignore */ }
+  }
+
+  // "Walk through <file>" on a GitHub file page (honours a #L10-L40 selection)
+  async walkActiveFile() {
+    try {
+      if (!(await this.ensureRepoTree()) || !this.activeRepoFile) {
+        this.showNotification('⚠️ Open a file on GitHub first');
+        return;
+      }
+    } catch (e) {
+      this.showNotification('⚠️ ' + e.message);
+      return;
+    }
+    const { path, lines } = this.activeRepoFile;
+    await this.startWalk(path, lines);
+  }
+
+  // Carry on with a saved walk that covers these lines, or ask for a new one
+  async startWalk(path, lines = null) {
+    if (!this.repoTree) return;
+    const key = this.walkKey(path);
+    let saved = null;
+    try { saved = key ? (await chrome.storage.local.get(key))[key] : null; } catch (e) { /* none */ }
+    const covers = saved?.blocks?.length && (!lines || (lines.start >= saved.range.start && lines.end <= saved.range.end));
+    this.journey = await this.loadJourney();   // for the way back to the map, and what's been read
+    this.walkView = 'file';
+    document.getElementById('walk-title').textContent = 'Walk through';
+    document.getElementById('walk-sub').textContent = path.split('/').pop();
+    this.walkPanel.classList.remove('hidden');
+    if (covers) {
+      const at = lines ? saved.blocks.findIndex(b => b.end >= lines.start) : saved.current;
+      await this.saveWalk({ ...saved, current: Math.max(0, at) });
+      this.renderWalk();
+      this.followWalk();
+      return;
+    }
+    await this.createWalk(path, lines);
+  }
+
+  async createWalk(path, lines = null, startAt = null) {
+    if (this._walkPending) return;
+    if (this.agent?.active) {   // both use the chat's single answer watch
+      this.showNotification('⚠️ Stop the running agent first');
+      return;
+    }
+    const MAX_LINES = 400;
+    this._walkPending = true;
+    this._walkRaw = '';
+    this.walk = { path, pending: true };
+    this.renderWalk();
+    try {
+      const content = (await this.readRepoFile(path)).replace(/\n$/, '');
+      const total = content.split('\n').length;
+      const start = lines?.start || startAt || 1;
+      const range = { start, end: Math.min(lines?.end || total, start + MAX_LINES - 1, total) };
+      const slice = sliceLines(content, range.start, range.end);
+      const file = { path, content: slice, lines: range };
+      const repo = this.repoDisplayName();
+      // Short files go inline, like the reader does; longer ones as one attachment
+      const inline = slice.length <= 4000;
+      const fname = path.split('/').pop() + '.md';
+      const prompt = inline
+        ? `${walkPrompt({ path, repo, range, source: 'Below is' })}\n\n${LINE_NUMBER_NOTE}\n\n${fencedFile(file)}`
+        : walkPrompt({ path, repo, range, source: `The attached "${fname}" is` });
+      const onProgress = (text) => {
+        const box = this.walkBody.querySelector('.rebuild-live');
+        if (!box) return;
+        const titles = [...text.matchAll(/"title"\s*:\s*"((?:[^"\\]|\\.)+)"/g)].map(m => m[1]);
+        box.innerHTML = titles.length
+          ? `<ol>${titles.map(t => `<li>${this.escapeHtml(t)}</li>`).join('')}</ol>`
+          : '<span class="rebuild-live-hint">Reading the code…</span>';
+      };
+      const { value: parsed, text, tried } = await this.askForJson(prompt, {
+        attachments: inline ? [] : [{ filename: fname, content: this.packFor([file]) }], onProgress, live: this.walkBody,
+        parse: (t) => parseWalkthrough(t, range)
+      });
+      if (!parsed) {
+        this._walkRaw = text;
+        throw new Error(`couldn't find the blocks in the replies (asked ${tried})`);
+      }
+      await this.saveWalk({ path, range, total, summary: parsed.summary, blocks: parsed.blocks, current: 0, typed: {}, created: Date.now() });
+      await this.markRead([path]);
+      this._readingContext = { label: repo, ts: Date.now() };
+      this.followWalk();
+    } catch (e) {
+      this.walk = { path, lines, startAt, error: e.message };
+    } finally {
+      this._walkPending = false;
+      this.renderWalk();
+    }
+  }
+
+  async resetWalk() {
+    const w = this.walk;
+    if (!w?.blocks || this._walkPending) return;
+    if (!this.confirmTwice('walk', 'Click ↺ again to ask for a new walkthrough of this file')) return;
+    const partial = w.range.start > 1 || w.range.end < w.total;
+    await this.createWalk(w.path, partial ? w.range : null);
+  }
+
+  // Highlight the current block in the reader
+  followWalk() {
+    const w = this.walk;
+    const b = w?.blocks?.[w.current];
+    if (!b || !this.repoTree) return;
+    this.openRepoFile({ ...this.fileRefFor(w.path, { start: b.start, end: b.end }),
+      label: `Block ${w.current + 1} of ${w.blocks.length} · ${b.title}` });
+  }
+
+  // The current block's code, from the cached file
+  async walkBlockCode() {
+    const w = this.walk;
+    const b = w.blocks[w.current];
+    return sliceLines(await this.readRepoFile(w.path), b.start, b.end);
+  }
+
+  // The code itself is in the reader tab; the panel holds what's said about
+  // it. A bar that stays at the top holds the way back to the map, where you
+  // are (the block list opens from it) and the steps, so a long answer never
+  // pushes them out of reach.
+  async renderWalk() {
+    if (this.walkView !== 'file') return;   // the map or the folder choice is showing; the walk renders when you return
+    const w = this.walk;
+    const esc = (t) => this.escapeHtml(t || '');
+    const toMap = this.journey ? `<button type="button" class="wk-map" data-wk="map">‹ Map</button>` : '';
+    if (!w?.blocks) {
+      this.walkBody.innerHTML = (toMap ? `<div class="wk-bar">${toMap}</div>` : '') + (w?.error
+        ? `<div class="rebuild-intro"><p>⚠️ Could not make the walkthrough: ${esc(w.error)}.</p>` +
+          `<button type="button" class="files-send jr-primary" data-wk="retry">Ask again</button></div>` +
+          this.replyDisclosure(this._walkRaw)
+        : `<div class="rebuild-wait"><span class="files-spinner"></span>The AI is splitting ${esc(w?.path?.split('/').pop())} into blocks…<div class="rebuild-live"></div></div>`);
+      return;
+    }
+    const { blocks, current: i, typed = {}, range, total } = w;
+    const b = blocks[i];
+    const n = blocks.length;
+    const last = i === n - 1;
+    const more = last && range.end < total;
+    const best = typed[i]?.best;
+    const practised = (k) => typed[k]?.best >= 90;
+
+    this.walkBody.innerHTML =
+      this.stepBar({
+        act: 'wk', back: toMap,
+        where: `Block ${i + 1} of ${n}${range.start > 1 || range.end < total ? ` · lines ${range.start}-${range.end} of ${total}` : ''}`,
+        first: i === 0, pct: Math.round(((i + 1) / n) * 100),
+        next: !last ? `<button type="button" class="wk-step" data-wk="next" aria-label="Next block">›</button>`
+          : more ? `<button type="button" class="wk-step wk-step-text" data-wk="continue">Next lines ›</button>`
+            : `<button type="button" class="wk-step wk-step-text" data-wk="finish">Finish file</button>`,
+        items: blocks.map((x, k) => ({ i: k, current: k === i, mark: practised(k) ? '✓' : k + 1, title: esc(x.title), meta: `${x.start}-${x.end}` })),
+        extra: `<button type="button" class="files-link-btn wk-redo" data-wk="redo">Ask for a new walkthrough of this file</button>`
+      }) +
+      (i === 0 && w.summary ? `<p class="wk-summary">${esc(w.summary)}</p>` : '') +
+      `<div class="wk-meta"><span>Lines ${b.start}-${b.end}</span>` +
+        `<button type="button" class="files-link-btn wk-show" data-wk="show">Show in reader</button></div>` +
+      `<h3 class="wk-title">${esc(b.title)}</h3>` +
+      (b.explain
+        ? `<p class="wk-explain">${esc(b.explain)}</p>`
+        : `<p class="wk-explain is-empty">The AI didn't explain these lines. Ask with Explain more.</p>`) +
+      `<div class="walk-type" hidden>` +
+        `<div class="code-box" aria-label="Type lines ${b.start} to ${b.end}"></div>` +
+        `<div class="wk-type-actions">` +
+          `<button type="button" class="wk-compare" data-wk="compare">Compare</button>` +
+          `<button type="button" class="run-ask" data-wk="feedback">Ask for feedback</button>` +
+          `<span class="wk-hint">Ctrl+Enter compares</span>` +
+        `</div>` +
+        `<div class="walk-result" aria-live="polite"></div>` +
+      `</div>` +
+      `<div class="walk-notes"></div>` +
+      `<div class="walk-next" aria-live="polite"></div>` +
+      // Pinned to the bottom of the sheet, so answers never push them away
+      `<div class="wk-dock">` +
+        `<button type="button" class="run-ask" data-wk="more">Explain more</button>` +
+        `<button type="button" class="run-ask" data-wk="quiz">Quiz me</button>` +
+        `<button type="button" class="run-ask" data-wk="type" aria-expanded="false">Practise typing${best != null ? ` · best ${best}%` : ''}</button>` +
+      `</div>`;
+
+    // Earlier answers for this block, folded except the latest
+    const notesEl = this.walkBody.querySelector('.walk-notes');
+    const notes = w.notes?.[i] || [];
+    notes.forEach((note, k) => this.renderWalkNote(notesEl, note, k < notes.length - 1));
+
+    this._walkCode = null;   // the practice editor is made when practice opens
+  }
+
+  async onWalkClick(e) {
+    if (!e.target.closest('.wk-bar')) this.closeStepList(this.walkBody);
+    const el = e.target.closest('[data-wk]');
+    if (!el || el.disabled) return;
+    const act = el.dataset.wk;
+    const w = this.walk;
+    // Choosing a folder, the reading map, and moving between files
+    if (act === 'folder') return this.openFolderJourney(el.dataset.i);
+    if (act === 'folder-new') return this.openFolderJourney(null);
+    if (act === 'folders') return this.showFolderChoice();
+    if (act === 'map') return this.showJourneyMap();
+    if (act === 'walkfile') return this.startWalk(el.dataset.path);
+    if (act === 'open') return this.openRepoFile(this.fileRefFor(el.dataset.path));
+    if (act === 'journey-create') return this.createJourney();
+    if (act === 'journey-reset') return this.resetJourney();
+    if (act === 'retry') return this.createWalk(w.path, w.lines, w.startAt);
+    if (act === 'reveal') {
+      const a = el.nextElementSibling;
+      a.hidden = !a.hidden;
+      el.setAttribute('aria-expanded', String(!a.hidden));
+      el.textContent = a.hidden ? 'Show answer' : 'Hide answer';
+      return;
+    }
+    if (!w?.blocks) return;
+    const i = w.current;
+    const b = w.blocks[i];
+    const go = async (k) => {
+      await this.saveWalk({ ...w, current: k });
+      await this.renderWalk();
+      this.walkBody.scrollTop = 0;
+      this.followWalk();
+    };
+    if (act === 'list') return this.toggleStepList(this.walkBody, el);
+    if (act === 'goto') return go(Number(el.dataset.i));
+    if (act === 'prev') return go(Math.max(0, i - 1));
+    if (act === 'next') return go(Math.min(w.blocks.length - 1, i + 1));
+    if (act === 'show') return this.followWalk();
+    if (act === 'redo') return this.resetWalk();
+    if (act === 'continue') return this.createWalk(w.path, null, w.range.end + 1);
+    if (act === 'finish') return this.finishWalkFile(el);
+    if (act === 'type') {
+      const box = this.walkBody.querySelector('.walk-type');
+      box.hidden = !box.hidden;
+      el.setAttribute('aria-expanded', String(!box.hidden));
+      if (!box.hidden) {
+        this._walkCode = this._walkCode || this.makeCodeBox(box.querySelector('.code-box'), {
+          value: w.typed?.[i]?.text || '', lang: langFromPath(w.path), firstLine: b.start,
+          placeholder: `Type lines ${b.start}-${b.end} here…`,
+          onSubmit: () => this.walkBody.querySelector('[data-wk="compare"]')?.click()
+        });
+        this._walkCode.focus();
+        box.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
+      return;
+    }
+
+    const code = await this.walkBlockCode();
+    const repo = this.repoDisplayName();
+    const where = `lines ${b.start}-${b.end} of \`${w.path}\`${repo ? ` from ${repo}` : ''}`;
+    const block = fencedFile({ path: w.path, content: code, lines: b });
+    const typedText = this._walkCode?.getValue() || '';
+
+    if (act === 'compare') {
+      if (!typedText.trim()) { this.showNotification('Type the lines first'); return; }
+      const { accuracy, ops } = compareTyped(code, typedText);
+      const bestSoFar = Math.max(accuracy, w.typed?.[i]?.best || 0);
+      await this.saveWalk({ ...w, typed: { ...(w.typed || {}), [i]: { best: bestSoFar, text: typedText } } });
+      this.walkBody.querySelector('.walk-result').innerHTML =
+        `<div class="walk-score">${accuracy}% match${accuracy >= 90 ? ' ✓' : ''}` +
+        `${accuracy < 100 ? ' <span>Highlighted lines are in the original but weren\'t matched in yours; faded ones are only in yours.</span>' : ''}</div>` +
+        (accuracy < 100 ? `<pre class="walk-diff">${ops.map(o =>
+          `<span class="is-${o.type}">${this.escapeHtml(o.text)}</span>`).join('')}</pre>` : '');
+      this.walkBody.querySelector('[data-wk="type"]').textContent = `Practise typing · best ${bestSoFar}%`;
+      if (bestSoFar >= 90) {
+        const n = this.walkBody.querySelector(`.wk-blocks [data-i="${i}"] .wk-n`);
+        if (n) n.textContent = '✓';
+      }
+      return;
+    }
+    if (act !== 'more' && act !== 'quiz' && act !== 'feedback') return;
+
+    const notesEl = this.walkBody.querySelector('.walk-notes');
+    let prompt;
+    let label;
+    if (act === 'more') {
+      label = 'Explain more';
+      prompt = `I'm walking through ${where}, block by block. Explain this block in more depth, line by line: ` +
+        `what each line does and why, and anything that would surprise a beginner.` +
+        `${w.summary ? ` (The file as a whole: ${w.summary})` : ''}\n\n${LINE_NUMBER_NOTE}\n\n${block}\n\n${CITE_RULE}`;
+    } else if (act === 'quiz') {
+      label = 'Quiz';
+      prompt = quizPrompt(where, `${LINE_NUMBER_NOTE}\n\n${block}`);
+    } else {
+      if (!typedText.trim()) { this.showNotification('Type the lines first'); return; }
+      label = 'Feedback on your version';
+      const lang = langFromPath(w.path);
+      prompt = `I typed ${where} myself to practise.\n\nThe original:\n\n\`\`\`${lang}\n${code.replace(/\n$/, '')}\n\`\`\`\n\n` +
+        `Mine:\n\n\`\`\`${lang}\n${typedText.replace(/\n$/, '')}\n\`\`\`\n\n` +
+        `Would mine behave the same? List the differences that change behaviour first, then the ones that are only style. ` +
+        `Keep it short and encouraging.`;
+    }
+    // Earlier answers fold away so the new one reads in place
+    notesEl.querySelectorAll('.answer-card').forEach(c => c.classList.add('collapsed'));
+    el.disabled = true;
+    try {
+      if (act === 'quiz') {
+        const wait = document.createElement('div');
+        wait.className = 'walk-quiz is-writing';
+        wait.innerHTML = '<div class="answer-head"><span class="answer-title">Quiz</span><span class="answer-status">Writing 3 questions…</span></div>';
+        notesEl.appendChild(wait);
+        wait.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        let reply = null;
+        try { reply = await this.askInPanel(prompt, { via: 'chat' }); } catch (err) { wait.querySelector('.answer-status').textContent = '⚠️ ' + err.message; return; }
+        wait.remove();
+        const quiz = parseQuiz(reply);
+        const note = quiz ? { label, quiz } : { label, text: reply };
+        this.renderWalkNote(notesEl, note, false);
+        await this.addWalkNote(w.path, i, note);
+      } else {
+        const text = await this.showAnswerIn(notesEl, label, prompt, { via: 'chat', inline: true });
+        if (text) await this.addWalkNote(w.path, i, { label, text });
+      }
+    } finally {
+      el.disabled = false;
+    }
+  }
+
+  // One answer kept on a block: a quiz (answers hidden until asked for) or text
+  renderWalkNote(container, note, folded) {
+    if (note.quiz) {
+      const el = document.createElement('div');
+      el.className = 'walk-quiz';
+      el.innerHTML = `<div class="answer-head"><span class="answer-title">${this.escapeHtml(note.label)}</span></div><ol>` +
+        note.quiz.map(({ q, a }) =>
+          `<li><div class="md">${renderMarkdown(q).html}</div>` +
+          `<button type="button" class="files-link-btn walk-reveal" data-wk="reveal" aria-expanded="false">Show answer</button>` +
+          `<div class="md walk-quiz-a" hidden>${renderMarkdown(a).html}</div></li>`).join('') + `</ol>`;
+      container.appendChild(el);
+      return;
+    }
+    const card = this.answerCard(container, { title: note.label, collapsible: true, openInChat: false, inline: true });
+    card.done(note.text);
+    if (folded) card.el.classList.add('collapsed');
+  }
+
+  async addWalkNote(path, i, note) {
+    const w = this.walk;
+    if (w?.path !== path || !w.blocks) return;   // moved to another file meanwhile
+    const notes = { ...(w.notes || {}) };
+    notes[i] = [...(notes[i] || []), note].slice(-4);
+    await this.saveWalk({ ...w, notes });
+  }
+
+  // ========== Reading a repository ==========
+  // The big picture first: the free chat reads the README and core files and
+  // returns what the project does, its parts and a reading order (the map).
+  // Each file is then walked block by block, and finishing one suggests the
+  // next: the reading order and the file's imports give the candidates, and a
+  // free API model (never the paid one) picks between them when one is set up.
+  // Kept per repo under journey:<repo>.
+
+  journeyKey() {
+    const k = this.readMarksKey();
+    return k ? k.replace(/^readMarks:/, 'journey:') : null;
+  }
+
+  async loadJourney() {
+    const key = this.journeyKey();
+    if (!key) return null;
+    try { return (await chrome.storage.local.get(key))[key] || null; } catch (e) { return null; }
+  }
+
+  async saveJourney(state) {
+    this.journey = state;
+    const key = this.journeyKey();
+    if (key) try { await chrome.storage.local.set({ [key]: state }); } catch (e) { /* ignore */ }
+    const gh = this._tabCtx?.gh;
+    if (gh && key === `journey:${gh.owner}/${gh.repo}`) {
+      this._tabCtx.journey = this.journeyStatus(state);
+      this.renderHome();
+    }
+  }
+
+  // "Continue · 2 of 7 files read" for a journey in progress, null when there is none
+  journeyStatus(state) {
+    const n = state?.path?.length;
+    if (!n) return null;
+    const read = state.path.filter(p => state.done?.includes(p.file)).length;
+    return read >= n ? `All ${n} files read` : `Continue · ${read} of ${n} files read`;
+  }
+
+  // For the repo in the tab, the folder already open, or (folder: true) a folder you pick
+  async openJourney({ folder = false } = {}) {
+    try {
+      if (folder) return this.showFolderChoice();
+      if (this._tabCtx?.gh) {
+        await this.ensureRepoTree();
+      }
+    } catch (e) {
+      this.showNotification('⚠️ ' + e.message);
+      return;
+    }
+    if (!this.repoTree) {
+      this.showNotification('Open a GitHub repository in your tab, or pick a project folder');
+      return;
+    }
+    this.journey = await this.loadJourney();
+    this.walkPanel.classList.remove('hidden');
+    if (this.journey) this.showJourneyMap();
+    else await this.createJourney();
+  }
+
+  // "Read a project folder": the folders you read before, or a new one
+  async showFolderChoice() {
+    this.walkView = 'folders';
+    document.getElementById('walk-title').textContent = 'Reading';
+    document.getElementById('walk-sub').textContent = 'A project folder';
+    this.walkPanel.classList.remove('hidden');
+    let recent = window.showDirectoryPicker ? (await this.idbGet('recentFolders')) || [] : [];
+    // Folders opened before the recent list existed are only in lastFolder
+    if (!recent.length && window.showDirectoryPicker) {
+      const last = await this.idbGet('lastFolder');
+      if (last) recent = [{ name: last.name, handle: last, ts: 0 }];
+    }
+    this._recentFolders = recent;
+    let states = {};
+    try { states = await chrome.storage.local.get(recent.map(r => `journey:local/${r.name}`)); } catch (e) { /* no progress known */ }
+    const esc = (t) => this.escapeHtml(t || '');
+    this.walkBody.innerHTML =
+      (recent.length
+        ? `<div class="rebuild-label">Recent</div><ul class="jr-folders">${recent.map((r, k) => {
+            const status = this.journeyStatus(states[`journey:local/${r.name}`]);
+            return `<li><button type="button" class="jr-folder" data-wk="folder" data-i="${k}">` +
+              `<span class="jr-folder-name">${esc(r.name)}</span>${status ? `<span class="jr-folder-status">${esc(status)}</span>` : ''}` +
+              `<span class="home-chev" aria-hidden="true">›</span></button></li>`;
+          }).join('')}</ul>`
+        : `<p class="wk-summary">Pick a folder on this computer. Yavar gives you the big picture first, then walks you through it file by file.</p>`) +
+      `<div class="jr-actions"><button type="button" class="files-send jr-primary" data-wk="folder-new">Choose a folder…</button></div>`;
+  }
+
+  // i: index into the recent list, or null to pick a new folder
+  async openFolderJourney(i) {
+    const recent = i == null ? null : this._recentFolders?.[Number(i)];
+    if (!(await this.openLocalFolder(recent ? { handle: recent.handle } : {}))) return;
+    this.journey = await this.loadJourney();
+    if (this.journey) this.showJourneyMap();
+    else await this.createJourney();
+  }
+
+  showJourneyMap() {
+    this.walkView = 'map';
+    this._journeyError = null;
+    document.getElementById('walk-title').textContent = 'Reading';
+    document.getElementById('walk-sub').textContent = this.repoDisplayName();
+    this.renderJourney();
+    this.walkBody.scrollTop = 0;
+  }
+
+  async resetJourney() {
+    if (!this.journey || this._journeyPending) return;
+    if (!this.confirmTwice('journey', 'Click ↺ again to ask for a new overview and reading order')) return;
+    await this.createJourney();
+  }
+
+  async createJourney() {
+    if (this._journeyPending) return;
+    if (this.agent?.active) {   // both use the chat's single answer watch
+      this.showNotification('⚠️ Stop the running agent first');
+      return;
+    }
+    this.walkView = 'map';
+    document.getElementById('walk-title').textContent = 'Reading';
+    document.getElementById('walk-sub').textContent = this.repoDisplayName();
+    this._journeyPending = true;
+    this._journeyError = null;
+    this._journeyRaw = '';
+    this.renderJourney();
+    const done = this.journey?.done || [];
+    try {
+      const readme = this.repoTree.items.find(i => i.type === 'blob' && /^readme(\.\w+)?$/i.test(i.path))?.path;
+      const paths = [...new Set([readme, ...pickCoreFiles(this.repoTree.items)].filter(Boolean))].slice(0, 12);
+      const files = (await this.fetchRepoFilesMany(paths)).filter(f => !f.error);
+      if (!files.length) throw new Error('could not read the project files');
+      const fname = `${this.repoTree.repo}-overview.md`.replace(/[^\w.-]+/g, '-');
+      // Show the reading order as the AI writes it
+      const onProgress = (text) => {
+        const box = this.walkBody.querySelector('.rebuild-live');
+        if (!box) return;
+        const found = [...text.matchAll(/"file"\s*:\s*"((?:[^"\\]|\\.)+)"/g)].map(m => m[1]);
+        box.innerHTML = found.length
+          ? `<ol>${found.map(f => `<li>${this.escapeHtml(f)}</li>`).join('')}</ol>`
+          : '<span class="rebuild-live-hint">Reading the code…</span>';
+      };
+      const { value: parsed, text, tried } = await this.askForJson(journeyPrompt(this.repoDisplayName(), fname), {
+        attachments: [{ filename: fname, content: this.packFor(files) }], onProgress, live: this.walkBody,
+        parse: (t) => parseJourney(t, this.repoTree.fileSet, this.repoTree.repo)
+      });
+      if (!parsed) {
+        this._journeyRaw = text;
+        throw new Error(`couldn't find a reading order of files from this project in the replies (asked ${tried})`);
+      }
+      await this.saveJourney({ ...parsed, done, created: Date.now() });
+      this._readingContext = { label: this.repoDisplayName(), ts: Date.now() };
+    } catch (e) {
+      this._journeyError = e.message;
+    } finally {
+      this._journeyPending = false;
+      if (this.walkView === 'map') this.renderJourney();
+    }
+  }
+
+  // The map: what the project is, the reading order (with where you are),
+  // its parts, and how the files connect
+  renderJourney() {
+    const esc = (t) => this.escapeHtml(t || '');
+    const j = this.journey;
+    const local = this.repoTree?.source === 'local';
+    const other = local ? `<button type="button" class="files-link-btn jr-link" data-wk="folders">Read another folder</button>` : '';
+    // A failed new overview says so, even when an older map exists
+    if (this._journeyPending || this._journeyError || !j) {
+      this.walkBody.innerHTML = this._journeyPending
+        ? `<div class="rebuild-wait"><span class="files-spinner"></span>Reading the README and core files for the big picture…<div class="rebuild-live"></div></div>`
+        : `<div class="rebuild-intro"><p>⚠️ Could not get an overview${this._journeyError ? `: ${esc(this._journeyError)}` : ''}.</p>` +
+          `<div class="jr-actions rb-start">` +
+            (j ? `<button type="button" class="files-link-btn jr-link" data-wk="map">Back to the current map</button>` : '<span></span>') +
+            `<button type="button" class="files-send jr-primary" data-wk="journey-create">Ask again</button></div></div>` +
+          this.replyDisclosure(this._journeyRaw) + other;
+      return;
+    }
+    const done = new Set(j.done || []);
+    const next = j.path.find(p => !done.has(p.file));
+    const read = j.path.filter(p => done.has(p.file)).length;
+    const chip = (f) => `<button type="button" class="jr-file" data-wk="open" data-path="${esc(f)}" title="Open ${esc(f)} in the reader">${esc(f.split('/').pop())}</button>`;
+    this.walkBody.innerHTML =
+      (j.summary ? `<p class="jr-summary">${esc(j.summary)}</p>` : '') +
+      `<div class="jr-head"><span class="rebuild-label">Reading order</span>` +
+        (read ? `<span class="jr-count">${read} of ${j.path.length} read</span>` : '') + `</div>` +
+      `<ol class="rebuild-steps jr-path">${j.path.map((p, k) =>
+        `<li class="${p === next ? 'current' : ''}${done.has(p.file) ? ' done' : ''}" data-wk="walkfile" data-path="${esc(p.file)}">` +
+        `<span class="rebuild-step-dot">${done.has(p.file) ? '✓' : k + 1}</span>` +
+        `<span class="jr-step"><code>${esc(p.file)}</code>${p.why ? `<span>${esc(p.why)}</span>` : ''}</span></li>`).join('')}</ol>` +
+      (next
+        ? `<div class="jr-actions"><button type="button" class="files-send jr-primary" data-wk="walkfile" data-path="${esc(next.file)}">` +
+          `${read ? 'Continue with' : 'Start with'} ${esc(next.file.split('/').pop())} →</button></div>`
+        : '') +
+      (j.parts?.length
+        ? `<div class="rebuild-label">How it is organised</div><ul class="jr-parts">${j.parts.map(p =>
+            `<li><strong>${esc(p.name)}</strong> ${esc(p.role)}${p.files.length ? `<span class="jr-files">${p.files.map(chip).join('')}</span>` : ''}</li>`).join('')}</ul>`
+        : '') +
+      `<div class="jr-connections"></div>` +
+      `<div class="jr-foot">${other}<button type="button" class="files-link-btn jr-link" data-wk="journey-reset">Start over with a new overview</button></div>`;
+    this.renderConnections(j);
+  }
+
+  // Which file uses which, from the imports of the files in the reading order
+  // (read locally, no AI). Shown only when there is something to connect.
+  async renderConnections(j) {
+    const fileSet = this.repoTree.fileSet;
+    const order = j.path.map(p => p.file);
+    const importsOf = new Map();
+    try {
+      for (const f of (await this.fetchRepoFilesMany(order)).filter(f => !f.error)) {
+        importsOf.set(f.path, resolveImports(extractImports(f.content, f.path), f.path, fileSet));
+      }
+    } catch (e) { return; }
+    const box = this.walkBody.querySelector('.jr-connections');
+    if (!box || this.journey !== j || ![...importsOf.values()].some(list => list.length)) return;
+    const done = new Set(j.done || []);
+    const esc = (t) => this.escapeHtml(t || '');
+    const draw = (nodes) => `<ul>${nodes.map(n =>
+      `<li><button type="button" class="jr-node${n.repeat ? ' is-repeat' : ''}${done.has(n.file) ? ' is-read' : ''}" data-wk="walkfile" data-path="${esc(n.file)}" title="${esc(n.file)}">` +
+      `${esc(n.file.split('/').pop())}${done.has(n.file) ? ' <span aria-label="read">✓</span>' : ''}${n.repeat ? ' <span>(above)</span>' : ''}</button>` +
+      (n.children.length ? draw(n.children) : '') + `</li>`).join('')}</ul>`;
+    box.innerHTML = `<div class="rebuild-label">How the files connect</div><p class="jr-legend">Each file, then the files it uses.</p>` +
+      `<div class="jr-tree">${draw(connectionTree(order, importsOf))}</div>`;
+  }
+
+  // Mark the file read, then show where to go next, in place under the step
+  async finishWalkFile(btn) {
+    const path = this.walk.path;
+    if (this.journey) await this.saveJourney({ ...this.journey, done: [...new Set([...(this.journey.done || []), path])] });
+    btn.hidden = true;   // done: Up next takes its place
+    const box = this.walkBody.querySelector('.walk-next');
+    const esc = (t) => this.escapeHtml(t || '');
+    box.innerHTML = `<div class="rebuild-label">Up next</div><p class="rebuild-goal">Looking at what ${esc(path.split('/').pop())} uses…</p>`;
+
+    const fileSet = this.repoTree.fileSet;
+    const j = this.journey;
+    let imports = [];
+    const importedBy = [];
+    try {
+      imports = resolveImports(extractImports(await this.readRepoFile(path), path), path, fileSet);
+      const others = (j?.path || []).map(p => p.file).filter(f => f !== path);
+      for (const f of (await this.fetchRepoFilesMany(others)).filter(f => !f.error)) {
+        if (resolveImports(extractImports(f.content, f.path), f.path, fileSet).includes(path)) importedBy.push(f.path);
+      }
+    } catch (e) { /* suggestions from the reading order alone */ }
+    const done = new Set([...(j?.done || []), path]);
+    let candidates = nextCandidates({ path: j?.path || [], current: path, done, imports, importedBy });
+
+    const draw = (pickedBy = '') => {
+      if (!box.isConnected) return;
+      const [first, ...rest] = candidates;
+      box.innerHTML = `<div class="rebuild-label">Up next</div>` + (first
+        ? `<button type="button" class="jr-next" data-wk="walkfile" data-path="${esc(first.file)}">` +
+            `<code>${esc(first.file)}</code><span>${esc(first.reason)}</span></button>` +
+          (pickedBy ? `<p class="jr-picked">Picked by ${esc(pickedBy)}</p>` : '') +
+          (rest.length ? `<div class="jr-also">Also related: ${rest.map(c =>
+            `<button type="button" class="jr-file" data-wk="walkfile" data-path="${esc(c.file)}" title="${esc(c.reason)}">${esc(c.file.split('/').pop())}</button>`).join('')}</div>` : '')
+        : `<p class="rebuild-goal">${j ? 'You have read every file in the reading order.' : 'Nothing else found that this file uses.'}</p>`);
+    };
+    draw();
+    box.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+
+    // A free model chooses between several candidates; without one, the order stands
+    if (candidates.length < 2) return;
+    try {
+      const route = buildRoute(await loadApiConfig()).filter(st => !st.paid);
+      if (!route.length) return;
+      const { text, step } = await askRoute(route, [{ role: 'user', content: nextPrompt({ summary: j?.summary || '', current: path, done, candidates }) }]);
+      const pick = parseNext(text, candidates);
+      if (!pick) return;
+      candidates = [{ file: pick.file, reason: pick.why }, ...candidates.filter(c => c.file !== pick.file)];
+      draw(step.label);
+    } catch (e) {
+      console.warn('[Yavar] No next-file pick:', e.message);   // the reading order stands
+    }
+  }
+
+  // A reply the chat site just gave, parsed with `parse`. If it doesn't
+  // parse, the chat's answer is read once more: the answer watch can settle
+  // before a long code block has finished rendering. Returns { value, text },
+  // value null when neither reading parses (text is kept for showing).
+  async parseChatReply(reply, parse) {
+    const first = parse(reply);
+    if (first) return { value: first, text: reply };
+    await new Promise(r => setTimeout(r, 1500));
+    let again = '';
+    try { again = await this.captureLastAnswerText(); } catch (e) { /* the first reading stands */ }
+    const second = again ? parse(again) : null;
+    // Show whichever reading holds more of the answer
+    const text = (second || again.length > String(reply || '').length) ? again : reply;
+    return { value: second, text };
+  }
+
+  // Teaching asks for a reply Yavar reads as JSON (a walkthrough, a reading
+  // map, a plan). One that fails is usually fine the second time, so before
+  // giving up, ask the same chat again, then another chat site, then the
+  // free API models (never the paid one). The chosen chat comes back after.
+  // `live`: the sheet whose .rebuild-live box shows what's happening.
+  // Returns { value, text, tried }: value null when replies came but none
+  // could be read (text: the fullest one, to show; tried: who was asked,
+  // "ChatGPT twice, Gemini"). Throws when no attempt got an answer at all.
+  async askForJson(prompt, { attachments = [], onProgress = null, parse, live = null }) {
+    const say = (msg) => {
+      const box = live?.querySelector('.rebuild-live');
+      if (box) box.innerHTML = `<span class="rebuild-live-hint">${this.escapeHtml(msg)}</span>`;
+    };
+    const home = this.getCurrentModel();
+    const other = ['gemini', 'chatgpt', 'claude']
+      .map(id => this.models.find(m => m.id === id && m.enabled)).find(m => m && m.id !== home?.id);
+    const free = buildRoute(await loadApiConfig()).filter(s => !s.paid);
+    const chatName = home?.name || 'the chat';
+    const attempts = [
+      { name: chatName },
+      { name: chatName, note: `That reply couldn't be read. Asking ${chatName} again…` },
+      other && { name: other.name, model: other.id, note: `Asking ${other.name} instead…` },
+      free.length && { name: 'a free API model', api: true, note: 'Asking a free API model…' }
+    ].filter(Boolean);
+    const asked = [];
+    let shown = '';
+    let answered = false;
+    try {
+      for (const a of attempts) {
+        if (a.note) say(a.note);
+        if (a.model) {
+          this.currentModelId = a.model;
+          this.loadCurrentAI();
+          this.updateModelPill();
+        }
+        asked.push(a.name);
+        let result;
+        try {
+          if (a.api) {
+            const files = attachments.map(f => `<file name="${f.filename}">\n${f.content}\n</file>`);
+            const { text } = await askRoute(free, [{ role: 'user', content: [...files, prompt].join('\n\n') }], { onDelta: onProgress });
+            result = { value: parse(text), text };
+          } else {
+            result = await this.parseChatReply(await this.askInPanel(prompt, { attachments, onProgress, via: 'chat' }), parse);
+          }
+        } catch (e) {
+          console.warn(`[Yavar] ${a.name} gave no answer:`, e.message);
+          continue;
+        }
+        if (result.value) return { ...result, tried: '' };
+        answered = true;
+        if (result.text.length > shown.length) shown = result.text;
+      }
+    } finally {
+      if (home && this.currentModelId !== home.id) {
+        this.currentModelId = home.id;
+        this.loadCurrentAI();
+        this.updateModelPill();
+      }
+    }
+    const tried = [...new Set(asked)].map(n => n + (asked.filter(x => x === n).length > 1 ? ' twice' : '')).join(', ');
+    if (!answered) throw new Error(`no answer came back (asked ${tried})`);
+    return { value: null, text: shown, tried };
+  }
+
+  // The AI's reply behind a "couldn't read it" error, folded, so you can see why
+  replyDisclosure(text) {
+    if (!String(text || '').trim()) return '';
+    return `<details class="raw-reply"><summary>Show the AI's reply</summary><pre>${this.escapeHtml(String(text).slice(0, 20000))}</pre></details>`;
   }
 
   // Read the chat's latest answer and resolve with its text
@@ -2227,17 +3107,20 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
 
   // show: false loads the folder without opening the reader (the picker uses it)
   // Choose a folder (or reopen the last one) as the file source; true if loaded
-  async openLocalFolder({ reuse = false } = {}) {
+  // reuse: the folder you last opened, without asking; handle: a folder
+  // chosen from the recent list. Otherwise the system folder picker opens.
+  async openLocalFolder({ reuse = false, handle: chosen = null } = {}) {
     let tree;
     try {
       if (window.showDirectoryPicker) {
-        let handle = reuse ? await this.idbGet('lastFolder') : null;
+        let handle = chosen || (reuse ? await this.idbGet('lastFolder') : null);
         if (handle) {
           const perm = await handle.queryPermission({ mode: 'read' });
           if (perm !== 'granted' && (await handle.requestPermission({ mode: 'read' })) !== 'granted') handle = null;
         }
         if (!handle) handle = await window.showDirectoryPicker({ id: 'yavar-reader', mode: 'read' });
         this.idbSet('lastFolder', handle);
+        await this.rememberFolder(handle);
         this.showNotification(`Reading ${handle.name}…`);
         tree = await this.scanDirectoryHandle(handle);
       } else {
@@ -2361,6 +3244,18 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     return this._idb;
   }
 
+  // The last few folders opened, newest first, for "Read a project folder"
+  async rememberFolder(handle) {
+    const recent = (await this.idbGet('recentFolders')) || [];
+    const others = [];
+    for (const r of recent) {
+      let same = r.name === handle.name;
+      try { same = same && await r.handle.isSameEntry(handle); } catch (e) { /* treat same name as same */ }
+      if (!same) others.push(r);
+    }
+    await this.idbSet('recentFolders', [{ name: handle.name, handle, ts: Date.now() }, ...others].slice(0, 6));
+  }
+
   async idbGet(key) {
     try {
       const db = await this.idb();
@@ -2470,6 +3365,8 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
 
   async sendRepoFiles(paths, mode = 'explain', lines = null) {
     if (!this.repoTree || !paths.length) return;
+    // One file, line by line: the guided walkthrough
+    if (mode === 'lines' && paths.length === 1) return this.startWalk(paths[0], lines);
     if (this._sendingFiles) return;
     this._sendingFiles = true;
     const { repo } = this.repoTree;
@@ -2510,8 +3407,8 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
         this.threadInput?.focus();
       } else if (single && single.content.length <= 4000) {
         // Small single file: inline, so the code is visible in the chat
-        const block = `\`${single.path}\`${single.lines ? ` (lines ${single.lines.start}-${single.lines.end})` : ''} from ${repoName}:\n\n` +
-          fencedFile(single);
+        const block = `\`${single.path}\`${single.lines ? ` (lines ${single.lines.start}-${single.lines.end})` : ''} from ${repoName}. ` +
+          `${LINE_NUMBER_NOTE}\n\n${fencedFile(single)}`;
         this.askInThread({ title: modeLabel, sub: repoName, label, prompt: `${block}\n\n${question}` });
       } else {
         // Several (or big) files: ONE attachment with a repo map, then the question
@@ -3111,6 +4008,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       theme: 'yavar',
       lineNumbers: true,
       lineWrapping: false,
+      viewportMargin: Infinity,   // the editor grows with the code (see .run-editor)
       tabSize: 4,
       indentUnit: 4,
       indentWithTabs: false,
@@ -3276,6 +4174,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     };
     const titles = { fix: 'Fix', explain: 'Why this output', next: 'Try next' };
     this.showAnswerIn(document.getElementById('run-answers'), titles[kind], asks[kind], {
+      via: 'chat', inline: true,
       onUseCode: (code) => { this.runEditor.setValue(code); this.runEditor.focus(); }
     });
   }
@@ -3283,7 +4182,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
   // Ask in the background and stream the answer into a card in `container`
   // via: 'chat' or 'api' to force a route; otherwise the model menu's choice
   async showAnswerIn(container, title, prompt, opts = {}) {
-    const { attachments = [], onUseCode = null, onDone = null, saveAs = null, collapsible = true, via = null } = opts;
+    const { attachments = [], onUseCode = null, onDone = null, saveAs = null, collapsible = true, via = null, inline = false } = opts;
     const api = (via || this.answerWith) === 'api';
     const inThread = container === this.threadBody;
     // Retry and "Ask <chat>" in the thread show as busy there, like any question
@@ -3302,7 +4201,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       }
     };
     const card = this.answerCard(container, {
-      title, onUseCode, collapsible, saveAs,
+      title, onUseCode, collapsible, saveAs, inline,
       onRetry: () => again(card, opts, true),
       // A second opinion from the chat site, which hasn't seen this conversation
       onAskChat: api ? () => again(card, { ...opts, via: 'chat', handoff: card.el }, false) : null
@@ -3513,24 +4412,26 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       hero = { kicker: 'GitHub repository', title: `${gh.owner}/${gh.repo}` };
       ctx = `<div class="home-group">` +
         (gh.kind === 'pull' || gh.kind === 'commit'
-          ? row('explain_diff', '⇄', gh.kind === 'pull' ? `Explain pull request #${gh.number}` : 'Explain this commit', 'The goal, each file, and what could go wrong') : '') +
-        (file ? row('add_file', '📄', `Explain ${file}`, 'The file open in your tab') : '') +
-        row('explain_repo', '🧭', 'Tour this repository', 'What it does, how it is organised, where to start') +
-        row('reader', '📚', 'Browse files', 'Read, explain or review any file') +
-        row('changes', '🕘', 'Recent changes', 'What the latest commits are about') +
-        row('rebuild', '🧱', 'Build it yourself', this._tabCtx.rebuild || 'Recreate a small version, step by step') +
+          ? row('explain_diff', icon('diff'), gh.kind === 'pull' ? `Explain pull request #${gh.number}` : 'Explain this commit', 'The goal, each file, and what could go wrong') : '') +
+        (file ? row('walk_file', icon('lines'), `Read ${file}`, 'Block by block, beside the code') : '') +
+        row('explain_repo', icon('compass'), 'Read this repository', this._tabCtx.journey || 'The big picture first, then file by file') +
+        row('rebuild', icon('layers'), 'Build it yourself', this._tabCtx.rebuild || 'Recreate a small version, step by step') +
+        row('changes', icon('commit'), 'Recent changes', 'What the latest commits are about') +
         `</div>`;
     } else if (usable) {
       let host = '';
       try { host = new URL(url).hostname.replace(/^www\./, ''); } catch (e) { /* ignore */ }
       hero = { kicker: host || 'This page', title: 'Start from this page' };
       ctx = `<div class="home-group">` +
-        row('summarize_page', '≡', 'Summarize', 'The main point and key details') +
-        row('attach_page', '💬', 'Ask about it', 'Attach the page, then ask your question') +
-        row('research_page', '🔎', 'Fact-check it', 'Compare its claims with other sources') +
+        row('summarize_page', icon('lines'), 'Summarize', 'The main point and key details') +
+        row('attach_page', icon('chat'), 'Ask about it', 'Attach the page, then ask your question') +
+        row('research_page', icon('search'), 'Fact-check it', 'Compare its claims with other sources') +
         `</div>`;
     } else {
       hero = { kicker: 'Yavar', title: 'Ask anything' };
+      ctx = `<div class="home-group">` +
+        row('read_folder', icon('folder'), 'Read a project folder', 'The big picture first, then file by file') +
+        `</div>`;
     }
     this.threadBody.innerHTML =
       `<div class="home">` +
@@ -3656,9 +4557,9 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
   // With a question already typed, it runs right away.
   composerTools() {
     return {
-      research_web: { icon: '🌐', name: 'Web research', placeholder: 'What should it research?', run: (t) => this.startResearchAgent(t) },
-      videos: { icon: '🎬', name: 'Video research', placeholder: 'A topic to research on YouTube', run: (t) => this.researchVideosOnTopic(t) },
-      research_page: { icon: '🔎', name: 'Fact-check this page', placeholder: 'Ask about the page, or press Enter to check all of it', allowEmpty: true, run: (t) => this.researchThisPage(t) }
+      research_web: { icon: icon('globe', 13), name: 'Web research', placeholder: 'What should it research?', run: (t) => this.startResearchAgent(t) },
+      videos: { icon: icon('video', 13), name: 'Video research', placeholder: 'A topic to research on YouTube', run: (t) => this.researchVideosOnTopic(t) },
+      research_page: { icon: icon('search', 13), name: 'Fact-check this page', placeholder: 'Ask about the page, or press Enter to check all of it', allowEmpty: true, run: (t) => this.researchThisPage(t) }
     };
   }
 
@@ -3694,7 +4595,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
         `<button type="button" data-clear-tool aria-label="Stop using ${this.escapeHtml(tool.name)}">×</button></span>`
       : '') + items.map((it, i) =>
       `<span class="composer-item${it.image ? ' is-image' : ''}" title="${this.escapeHtml(it.title || it.label)}">` +
-      (it.image ? `<img src="${it.image}" alt="">` : '<span class="composer-item-ico" aria-hidden="true">📎</span>') +
+      (it.image ? `<img src="${it.image}" alt="">` : `<span class="composer-item-ico">${icon('clip', 13)}</span>`) +
       `<span class="composer-item-name">${this.escapeHtml(it.label)}</span>` +
       (it.content ? `<span class="composer-item-size" title="About ${formatCount(estimateTokens(it.content.length))} tokens">${formatCount(estimateTokens(it.content.length))}</span>` : '') +
       `<button type="button" data-remove="${i}" aria-label="Remove ${this.escapeHtml(it.label)}">×</button></span>`).join('');
@@ -3792,37 +4693,6 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     }
   }
 
-  // A guided tour of the repo in the tab, from its README and core files
-  async explainRepo() {
-    try {
-      if (!(await this.ensureRepoTree())) { this.showNotification('⚠️ Open a GitHub repo first'); return; }
-    } catch (e) {
-      this.showNotification('⚠️ ' + e.message);
-      return;
-    }
-    const readme = this.repoTree.items.find(i => i.type === 'blob' && /^readme(\.\w+)?$/i.test(i.path))?.path;
-    const paths = [...new Set([readme, ...pickCoreFiles(this.repoTree.items)].filter(Boolean))].slice(0, 12);
-    this.showNotification('📚 Reading the core files…');
-    const files = (await this.fetchRepoFilesMany(paths)).filter(f => !f.error);
-    if (!files.length) { this.showNotification('⚠️ Could not read the repo files'); return; }
-    this.hideNotification();
-    const name = this.repoDisplayName();
-    const fname = `${this.repoTree.repo}-overview.md`.replace(/[^\w.-]+/g, '-');
-    this._readingContext = { label: name, ts: Date.now() };
-    this.askInThread({
-      title: name, sub: 'GitHub repository', label: 'Give me a tour of this repository',
-      items: [{ label: `${files.length} core files` }],
-      prompt: `The attached "${fname}" has the README and core files of ${name}, starting with a map of the repository.\n\n` +
-        'Give me a guided tour for someone new to this codebase:\n' +
-        '1. What the project does and who it is for, in 2-3 sentences.\n' +
-        '2. How it is organised: the main folders and files and what each is responsible for.\n' +
-        '3. How it works: follow one typical request or run from entry point to result, naming the files involved.\n' +
-        '4. The tech stack and any patterns worth learning.\n' +
-        '5. Which 3 files I should read first, in order, and why.',
-      attachments: [{ filename: fname, content: this.packFor(files) }]
-    });
-  }
-
   // ----- File picker (add repo / folder files to the message) -----
 
   setupPicker() {
@@ -3847,7 +4717,8 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       e.stopPropagation();
       const dir = e.target.closest('[data-pk-dir]');
       const file = e.target.closest('[data-pk-file]');
-      if (e.target.closest('[data-pk-local]')) { this.openPicker('local'); return; }
+      const local = e.target.closest('[data-pk-local]');
+      if (local) { this.openPicker('local', { choose: local.dataset.pkLocal === 'choose' }); return; }
       if (dir) {
         this._pk.dir = dir.dataset.pkDir;
         this.renderPicker();
@@ -3867,20 +4738,22 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     });
   }
 
-  async openPicker(source = 'repo') {
+  // choose: pick a different folder instead of reopening the last one
+  async openPicker(source = 'repo', { choose = false } = {}) {
     const pk = this.picker;
     if (!pk) return;
     this.setView('app');
     this._pk = { dir: '', q: '', sel: new Set(), ready: false };
     this.pickerSearch.value = '';
     document.getElementById('picker-sub').textContent = '';
+    document.getElementById('picker-change').hidden = true;
     document.getElementById('picker-crumbs').innerHTML = '';
     this.pickerList.innerHTML = '<div class="pk-empty"><span class="files-spinner"></span>Loading files…</div>';
     this.updatePickerFoot();
     pk.classList.remove('hidden');
     try {
       const ok = source === 'local'
-        ? await this.openLocalFolder({ reuse: true })
+        ? await this.openLocalFolder({ reuse: !choose })
         : await this.ensureRepoTree();
       if (!ok) {
         if (source === 'local') { this.closePicker(); return; }
@@ -3894,6 +4767,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     }
     this._pk.ready = true;
     document.getElementById('picker-sub').textContent = this.repoDisplayName();
+    document.getElementById('picker-change').hidden = this.repoTree?.source !== 'local';
     this.renderPicker();
     this.pickerSearch.focus();
   }
