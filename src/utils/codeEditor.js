@@ -62,3 +62,88 @@ export function defineGenericMode(CM) {
     };
   });
 }
+
+// ----- Closing brackets and quotes, as code editors do -----
+// Typing an opener adds its closer; typing a closer that's already next
+// steps over it; Backspace between an empty pair deletes both; Enter
+// between brackets puts the closer on its own line.
+
+const PAIRS = { '(': ')', '[': ']', '{': '}', "'": "'", '"': '"', '`': '`' };
+const QUOTES = new Set(["'", '"', '`']);
+
+// What typing `ch` does, from the text before and after the cursor on its
+// line: 'pair' (insert it and its closer, cursor between), 'skip' (step
+// over the same character already next) or null (type it as usual)
+export function bracketAction(ch, before, after) {
+  const next = after[0] || '';
+  const prev = before[before.length - 1] || '';
+  if ((ch === ')' || ch === ']' || ch === '}' || QUOTES.has(ch)) && next === ch) return 'skip';
+  if (!PAIRS[ch]) return null;
+  if (next && !/[\s)\]}:;,.]/.test(next)) return null;           // right before a word: no pair
+  if (QUOTES.has(ch) && /[\w'"`]/.test(prev)) return null;        // don't, a'b, closing a string
+  return 'pair';
+}
+
+// Backspace between an opener and its closer ("(|)") removes both
+export function deletesPair(before, after) {
+  const prev = before[before.length - 1];
+  return !!prev && PAIRS[prev] === after[0];
+}
+
+// The key map for a CodeMirror 5 editor (`CM` is the CodeMirror global)
+export function closeBracketKeys(CM) {
+  const single = (cm) => cm.listSelections().length === 1;
+  const around = (cm) => {
+    const cur = cm.getCursor();
+    const line = cm.getLine(cur.line);
+    return { cur, before: line.slice(0, cur.ch), after: line.slice(cur.ch) };
+  };
+  const keys = {};
+  for (const ch of [...Object.keys(PAIRS), ')', ']', '}']) {
+    keys[`'${ch}'`] = (cm) => {
+      if (!single(cm)) return CM.Pass;
+      if (cm.somethingSelected()) {
+        if (!PAIRS[ch]) return CM.Pass;
+        // Wrap what's selected, and keep it selected
+        const from = cm.getCursor('from');
+        const to = cm.getCursor('to');
+        cm.operation(() => {
+          cm.replaceRange(PAIRS[ch], to);
+          cm.replaceRange(ch, from);
+          cm.setSelection({ line: from.line, ch: from.ch + 1 }, { line: to.line, ch: to.ch + (to.line === from.line ? 1 : 0) });
+        });
+        return undefined;
+      }
+      const { cur, before, after } = around(cm);
+      const act = bracketAction(ch, before, after);
+      if (act === 'skip') cm.setCursor({ line: cur.line, ch: cur.ch + 1 });
+      else if (act === 'pair') cm.operation(() => {
+        cm.replaceSelection(ch + PAIRS[ch]);
+        cm.setCursor({ line: cur.line, ch: cur.ch + 1 });
+      });
+      else return CM.Pass;
+      return undefined;
+    };
+  }
+  keys.Backspace = (cm) => {
+    if (!single(cm) || cm.somethingSelected()) return CM.Pass;
+    const { cur, before, after } = around(cm);
+    if (!deletesPair(before, after)) return CM.Pass;
+    cm.replaceRange('', { line: cur.line, ch: cur.ch - 1 }, { line: cur.line, ch: cur.ch + 1 });
+    return undefined;
+  };
+  keys.Enter = (cm) => {
+    if (!single(cm) || cm.somethingSelected()) return CM.Pass;
+    const { cur, before, after } = around(cm);
+    const prev = before[before.length - 1];
+    if (!prev || !'([{'.includes(prev) || PAIRS[prev] !== after[0]) return CM.Pass;
+    const base = before.match(/^\s*/)[0];
+    const unit = ' '.repeat(cm.getOption('indentUnit'));
+    cm.operation(() => {
+      cm.replaceSelection(`\n${base}${unit}\n${base}`);
+      cm.setCursor({ line: cur.line + 1, ch: base.length + unit.length });
+    });
+    return undefined;
+  };
+  return keys;
+}

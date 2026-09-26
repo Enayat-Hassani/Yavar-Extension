@@ -957,22 +957,26 @@ html, body {
 .answer-status { display: inline-flex; align-items: center; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .answer-card.is-failed .answer-status { color: var(--danger); white-space: normal; }
 
-.answer-link[hidden] { display: none; }
-
-.answer-link {
-  margin-left: auto;
+.answer-card.collapsed .answer-body { max-height: 4.6em; overflow: hidden; mask-image: linear-gradient(#000 50%, transparent); cursor: pointer; }
+.answer-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
   padding: 0;
   font: inherit;
-  font-size: 11px;
-  color: var(--text-secondary);
+  color: inherit;
   background: none;
   border: none;
   cursor: pointer;
+  text-align: left;
 }
-
-.answer-link + .answer-link { margin-left: 8px; }
-.answer-link:hover { color: var(--accent); text-decoration: underline; }
-.answer-card.collapsed .answer-body { max-height: 4.6em; overflow: hidden; mask-image: linear-gradient(#000 50%, transparent); }
+.answer-toggle .answer-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.answer-chev { flex-shrink: 0; color: var(--text-secondary); transition: rotate var(--dur-quick) var(--ease-out); }
+.answer-card.collapsed .answer-chev { rotate: -90deg; }
+.answer-toggle:hover .answer-title { text-decoration: underline; }
+.answer-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-xs); }
+@media (prefers-reduced-motion: reduce) { .answer-chev { transition: none; } }
 
 /* In place: an answer that belongs to what's above it (a walkthrough block,
    a rebuild step) reads as a continuation, marked by a rule, not a new card */
@@ -2144,10 +2148,12 @@ button.lens-item:focus-visible {
   top: -14px;                 /* cancels .rebuild-body's top padding */
   z-index: 2;
   margin: -14px -16px 14px;
-  padding: 10px 16px 0;
+  padding: 6px 10px 0 16px;
   background: var(--bg-primary);
 }
 .wk-row { display: flex; align-items: center; gap: 10px; min-height: 30px; }
+/* The bar carries the sheet's name and ✕, so the header above it goes */
+.sheet:has(.wk-row) > .run-header { display: none; }
 
 .wk-map, .wk-where, .wk-step {
   font: inherit;
@@ -2161,13 +2167,17 @@ button.lens-item:focus-visible {
 }
 .wk-map { padding: 4px 2px; }
 .wk-map:hover { color: var(--accent); }
-.wk-where { display: inline-flex; align-items: center; gap: 6px; padding: 4px 6px; margin-left: -6px; font-weight: 600; color: var(--text-primary); }
+.wk-where { display: inline-flex; align-items: center; gap: 6px; min-width: 0; padding: 4px 6px; margin-left: -6px; font-weight: 600; color: var(--text-primary); }
+.wk-ctx, .wk-pos { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.wk-ctx { flex-shrink: 4; min-width: 3em; font-weight: 400; color: var(--text-secondary); }   /* the name gives way before the position */
+.wk-ctx:empty { display: none; }
+.wk-ctx + .wk-pos::before { content: '·'; margin-right: 6px; font-weight: 400; color: var(--text-secondary); }
 .wk-map + .wk-where { margin-left: 0; }
 .wk-where:hover { background: var(--fill-hover); }
 .wk-chev { width: 7px; height: 7px; margin-top: -3px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(45deg); opacity: 0.6; }
 .wk-where[aria-expanded="true"] .wk-chev { margin-top: 3px; transform: rotate(-135deg); }
 
-.wk-steps { display: flex; gap: 4px; margin-left: auto; }
+.wk-steps { display: flex; flex-shrink: 0; gap: 4px; margin-left: auto; }
 .wk-step {
   min-width: 30px;
   height: 30px;
@@ -2182,9 +2192,23 @@ button.lens-item:focus-visible {
 .wk-step:disabled { color: var(--text-secondary); background: none; opacity: 0.45; cursor: default; }
 .wk-step-text { padding: 0 12px; font-size: 12.5px; font-weight: 600; }
 .wk-step[hidden] { display: none; }
-.wk-map:focus-visible, .wk-where:focus-visible, .wk-step:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.wk-close {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  margin-left: -4px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: color var(--dur-quick) var(--ease-std), background var(--dur-quick) var(--ease-std);
+}
+.wk-close:hover { color: var(--text-primary); background: var(--fill-hover); }
+.wk-map:focus-visible, .wk-where:focus-visible, .wk-step:focus-visible, .wk-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
-.wk-progress { height: 2px; margin: 8px -16px 0; background: var(--border); }
+.wk-progress { height: 2px; margin: 6px -10px 0 -16px; background: var(--border); }
 .wk-progress i { display: block; height: 100%; background: var(--accent); transition: width var(--dur-base) var(--ease-std); }
 
 /* The block list opens under the bar and scrolls on its own */
@@ -2250,7 +2274,7 @@ button.lens-item:focus-visible {
   align-items: center;
   gap: 2px;
   margin: auto -16px -20px;    /* auto: the bottom edge even when the content is short */
-  padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+  padding: 3px 10px calc(3px + env(safe-area-inset-bottom));
   background: var(--bg-primary);
   border-top: 1px solid var(--border);
 }

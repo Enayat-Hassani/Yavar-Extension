@@ -5,7 +5,7 @@ import { isPublicWebUrl } from './utils/net.js';
 import { loadTemplates, expandTemplate, varsInTemplate } from './utils/templates.js';
 import { renderMarkdown, runnableLang } from './utils/markdown.js';
 import { walkPrompt, parseWalkthrough, compareTyped, quizPrompt, parseQuiz } from './utils/walkthrough.js';
-import { cmModeFor, defineGenericMode } from './utils/codeEditor.js';
+import { cmModeFor, defineGenericMode, closeBracketKeys } from './utils/codeEditor.js';
 import { journeyPrompt, parseJourney, nextCandidates, nextPrompt, parseNext, connectionTree } from './utils/journey.js';
 import { parseDiff, changeBlocks, changePack, changeWalkPrompt, parseChangeWalk, partContext } from './utils/changes.js';
 import { DEFAULT_MODELS, loadModels as loadStoredModels } from './utils/models.js';
@@ -607,10 +607,14 @@ class YavarSidePanel {
     const act = (id, label, svg, extra = '') =>
       `<button type="button" class="answer-act" data-ans="${id}" title="${this.escapeHtml(label)}" aria-label="${this.escapeHtml(label)}"${extra}>${svg}</button>`;
     const chatName = this.getCurrentModel()?.name || 'the chat';
+    // A foldable answer's title is its toggle, with a chevron that says which way it goes
+    const titleHtml = `<span class="answer-title">${this.escapeHtml(title)}</span>`;
     card.innerHTML =
-      `<div class="answer-head"><span class="answer-title">${this.escapeHtml(title)}</span>` +
-      `<span class="answer-status" aria-live="polite"></span>` +
-      (collapsible ? '<button type="button" class="answer-link" data-ans="toggle" title="Collapse / expand">▾</button>' : '') + `</div>` +
+      `<div class="answer-head">` + (collapsible
+        ? `<button type="button" class="answer-toggle" data-ans="toggle" aria-expanded="true">${titleHtml}` +
+          `<svg class="answer-chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg></button>`
+        : titleHtml) +
+      `<span class="answer-status" aria-live="polite"></span></div>` +
       `<div class="answer-body md"><div class="answer-wait" aria-label="Waiting for the answer"><i></i><i></i><i></i></div></div>` +
       `<div class="answer-foot" hidden>` +
         act('copy', 'Copy as Markdown', icon('<rect x="9" y="9" width="12" height="12" rx="2"></rect><path d="M5 15V5a2 2 0 0 1 2-2h10"></path>')) +
@@ -638,9 +642,15 @@ class YavarSidePanel {
       btn.classList.add(cls);
       setTimeout(() => btn.classList.remove(cls), 1400);
     };
+    // Folded from outside too (an older answer folds when a new one arrives)
+    const toggle = card.querySelector('.answer-toggle');
+    if (toggle) new MutationObserver(() => toggle.setAttribute('aria-expanded', String(!card.classList.contains('collapsed'))))
+      .observe(card, { attributes: true, attributeFilter: ['class'] });
     card.addEventListener('click', async (e) => {
       const ref = e.target.closest('[data-file-ref]');
       if (ref) { this.openRepoFile(JSON.parse(ref.dataset.fileRef)); return; }
+      // A folded answer's faded preview opens it
+      if (card.classList.contains('collapsed') && e.target.closest('.answer-body')) { card.classList.remove('collapsed'); return; }
       const btn = e.target.closest('[data-md-act], [data-ans]');
       if (!btn) return;
       const ans = btn.dataset.ans;
@@ -2145,7 +2155,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
 
     this.rebuildBody.innerHTML =
       this.stepBar({
-        act: 'rb', where: `Step ${i + 1} of ${n}`, first: i === 0,
+        act: 'rb', context: this.repoDisplayName(), where: `Step ${i + 1} of ${n}`, first: i === 0,
         pct: Math.round((done.length / n) * 100),
         next: `<button type="button" class="wk-step" data-rb="fwd" aria-label="Next step"${i === n - 1 ? ' disabled' : ''}>›</button>`,
         items: plan.steps.map((x, k) => ({ i: k, current: k === i, mark: done.includes(k) ? '✓' : k + 1, title: esc(x.title) })),
@@ -2245,6 +2255,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     if (!el || el.disabled) return;
     const act = el.dataset.rb;
     const st = this.rebuild;
+    if (act === 'close') return this.rebuildPanel.classList.add('hidden');
     if (act === 'create') return this.createRebuildPlan();
     if (act === 'load') return this.loadPlanFromChat();
     if (act === 'open') return this.openRepoFile(this.fileRefFor(el.dataset.path));
@@ -2383,14 +2394,18 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
   }
 
   // ----- The step bar, shared by the walkthrough and Build it yourself -----
-  // Pinned at the top of the sheet: a way back, where you are (the step list
-  // opens from it), Previous, and a forward control, over a thin progress
-  // line. `act` names the sheet's data attribute (wk, rb); titles are markup.
-  stepBar({ act, back = '', where, first, next, pct, items, extra = '' }) {
+  // Pinned at the top of the sheet: a way back, what you're reading and where
+  // you are in it (the step list opens from it), Previous, a forward control
+  // and ✕, over a thin progress line. It stands in for the sheet's header, so
+  // the answer gets the height. `act` names the sheet's data attribute (wk,
+  // rb); `context` is text, the other titles are markup.
+  stepBar({ act, back = '', context, where, first, next, pct, items, extra = '' }) {
     const a = `data-${act}`;
     return `<div class="wk-bar"><div class="wk-row">${back}` +
-        `<button type="button" class="wk-where" ${a}="list" aria-expanded="false">${where}<span class="wk-chev" aria-hidden="true"></span></button>` +
+        `<button type="button" class="wk-where" ${a}="list" aria-expanded="false">` +
+          `<span class="wk-ctx">${this.escapeHtml(context)}</span><span class="wk-pos">${where}</span><span class="wk-chev" aria-hidden="true"></span></button>` +
         `<span class="wk-steps"><button type="button" class="wk-step" ${a}="prev" aria-label="Previous"${first ? ' disabled' : ''}>‹</button>${next}</span>` +
+        `<button type="button" class="wk-close" ${a}="close" title="Close (Esc)" aria-label="Close">✕</button>` +
       `</div>` +
       `<div class="wk-progress" aria-hidden="true"><i style="width:${pct}%"></i></div>` +
       `<div class="wk-blocks" hidden><ol>${items.map(it =>
@@ -2414,6 +2429,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
         Tab: (ed) => ed.somethingSelected() ? ed.indentSelection('add') : ed.replaceSelection(' '.repeat(ed.getOption('indentUnit')))
       }
     });
+    cm.addKeyMap(closeBracketKeys(CodeMirror));
     // CodeMirror 5 here has no placeholder addon: a hint shown while it's empty
     const hint = document.createElement('span');
     hint.className = 'code-box-hint';
@@ -2682,7 +2698,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
 
     this.walkBody.innerHTML =
       this.stepBar({
-        act: 'wk', back: toMap,
+        act: 'wk', back: toMap, context: change ? change.label : w.path.split('/').pop(),
         where: change ? `Part ${i + 1} of ${n}`
           : `Block ${i + 1} of ${n}${range.start > 1 || range.end < total ? ` · lines ${range.start}-${range.end} of ${total}` : ''}`,
         first: i === 0, pct: Math.round(((i + 1) / n) * 100),
@@ -2738,6 +2754,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     if (!el || el.disabled) return;
     const act = el.dataset.wk;
     const w = this.walk;
+    if (act === 'close') return this.walkPanel.classList.add('hidden');
     // Choosing a folder, the reading map, and moving between files
     if (act === 'folder') return this.openFolderJourney(el.dataset.i);
     if (act === 'folder-new') return this.openFolderJourney(null);
@@ -4201,6 +4218,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
         Tab: (cm) => cm.somethingSelected() ? cm.indentSelection('add') : cm.replaceSelection(' '.repeat(cm.getOption('indentUnit')))
       }
     });
+    this.runEditor.addKeyMap(closeBracketKeys(CodeMirror));
     this.runEditor.on('change', () => {
       clearTimeout(this._runSaveTimer);
       this._runSaveTimer = setTimeout(() => {
