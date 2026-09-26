@@ -1,0 +1,24 @@
+/* The code editors' theme ("yavar"), shared by the side panel and the reader.
+   It follows the page's light / dark palette; each page defines the tokens
+   (--surface, --border, --text-*, --accent, --danger, --cm-*). */
+.cm-s-yavar.CodeMirror { background: var(--surface); color: var(--text-primary); }
+.cm-s-yavar .CodeMirror-gutters { background: var(--surface); border-right: 1px solid var(--border); }
+.cm-s-yavar .CodeMirror-linenumber { color: var(--text-secondary); opacity: 0.6; }
+.cm-s-yavar .CodeMirror-cursor { border-left: 2px solid var(--accent); }
+.cm-s-yavar div.CodeMirror-selected,
+.cm-s-yavar.CodeMirror-focused div.CodeMirror-selected { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.cm-s-yavar .CodeMirror-line::selection, .cm-s-yavar .CodeMirror-line > span::selection,
+.cm-s-yavar .CodeMirror-line > span > span::selection { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.cm-s-yavar .CodeMirror-placeholder { color: var(--text-secondary); }
+.cm-s-yavar .cm-keyword, .cm-s-yavar .cm-atom { color: var(--cm-keyword); }
+.cm-s-yavar .cm-string, .cm-s-yavar .cm-string-2 { color: var(--cm-string); }
+.cm-s-yavar .cm-comment { color: var(--cm-comment); font-style: italic; }
+.cm-s-yavar .cm-number { color: var(--cm-number); }
+.cm-s-yavar .cm-def { color: var(--cm-def); }
+.cm-s-yavar .cm-builtin, .cm-s-yavar .cm-variable-2, .cm-s-yavar .cm-variable-3, .cm-s-yavar .cm-type { color: var(--cm-builtin); }
+.cm-s-yavar .cm-property, .cm-s-yavar .cm-attribute { color: var(--cm-property); }
+.cm-s-yavar .cm-variable, .cm-s-yavar .cm-operator, .cm-s-yavar .cm-punctuation { color: var(--text-primary); }
+.cm-s-yavar .cm-meta, .cm-s-yavar .cm-qualifier { color: var(--text-secondary); }
+.cm-s-yavar .cm-tag { color: var(--cm-def); }
+.cm-s-yavar .cm-error { color: var(--danger); }
+.cm-s-yavar .CodeMirror-matchingbracket { outline: 1px solid var(--border); color: inherit !important; }

@@ -12,6 +12,7 @@ import { DEFAULT_MODELS, loadModels as loadStoredModels } from './utils/models.j
 import { captureLabel, captureMarkdown, hasCaptureText } from './utils/capture.js';
 import { suggestActions } from './utils/actions.js';
 import { icon } from './utils/icons.js';
+import { idbGet, idbSet } from './utils/idb.js';
 import { transcriptMarkdown, turnsToMessages, HANDOFF_NOTE, earlierAnswers } from './utils/conversation.js';
 import { loadApiConfig, buildRoute, askRoute, askWithBudget } from './utils/llm.js';
 import { pickCoreFiles, planPrompt, hintPrompt, askPrompt, checkPrompt, parseRebuildPlan } from './utils/rebuild.js';
@@ -1985,7 +1986,8 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
 
   // Show a file in the reader tab with `lines` highlighted. `label` names what
   // is highlighted (a walkthrough block). When several calls race (Next
-  // clicked quickly), only the latest is shown.
+  // clicked quickly), only the latest is shown. A local file carries its
+  // walk's storage key, so an edit saved in the reader can move the walk.
   async openRepoFile({ source = 'github', owner, repo, ref, path, lines = null, label = '' }) {
     const seq = (this._readerSeq = (this._readerSeq || 0) + 1);
     try {
@@ -1998,12 +2000,27 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       if (seq !== this._readerSeq) return;
       await chrome.storage.session.set({ readerView: {
         repo: { source, owner, repo, ref, name: owner ? `${owner}/${repo}` : repo },
-        path, content, lines, label, ts: Date.now()
+        path, content, lines, label, walkKey: source === 'local' ? this.walkKey(path) : null, ts: Date.now()
       } });
       await this.showReaderTab();
     } catch (e) {
       this.showNotification('⚠️ Could not open ' + path.split('/').pop() + ': ' + e.message);
     }
+  }
+
+  // The reader saved an edit to a local file. Cached copies of local files go
+  // (reading them again is cheap), and an open walk of that file takes the
+  // moved lines the reader stored for it.
+  async onFileEdited({ repo, path }) {
+    this.clearFileCache('local:');
+    const w = this.walk;
+    const t = this.repoTree;
+    if (!w?.blocks || w.change || w.path !== path || t?.source !== 'local' || t.repo !== repo) return;
+    const key = this.walkKey(path);
+    const saved = (await chrome.storage.local.get(key))[key];
+    if (!saved || this.walk !== w) return;
+    this.walk = saved;
+    if (!this.walkPanel.classList.contains('hidden')) this.renderWalk();
   }
 
   // Bring the reader tab forward, or open one next to the tab you're on
@@ -2692,7 +2709,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     // A change's parts each have their own file; a file's blocks share one
     const where = change
       ? `<span><code>${esc(b.path)}</code>${b.start ? ` · ${lines(b)}` : ` · ${b.status}`}</span>`
-      : `<span>Lines ${b.start}-${b.end}</span>`;
+      : `<span>Lines ${b.start}-${b.end}${b.edited ? ' · edited after this was explained' : ''}</span>`;
     const skippedNote = change && i === 0 && w.skipped?.length
       ? ` <span class="wk-skipped" title="${esc(w.skipped.join('\n'))}">Left out: ${w.skipped.length} lockfile, generated or binary file${w.skipped.length === 1 ? '' : 's'}.</span>` : '';
 
@@ -2727,7 +2744,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
         `<div class="wk-type-actions">` +
           `<button type="button" class="wk-compare" data-wk="compare">Compare</button>` +
           `<button type="button" class="run-ask" data-wk="feedback">Ask for feedback</button>` +
-          `<span class="wk-hint">Ctrl+Enter compares</span>` +
+          `<span class="wk-hint">Ctrl+Enter compares · comments don't count</span>` +
         `</div>` +
         `<div class="walk-result" aria-live="polite"></div>` +
       `</div>` +
@@ -2820,7 +2837,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
 
     if (act === 'compare') {
       if (!typedText.trim()) { this.showNotification('Type the lines first'); return; }
-      const { accuracy, ops } = compareTyped(code, typedText);
+      const { accuracy, ops } = compareTyped(code, typedText, langFromPath(b.path || w.path));
       const bestSoFar = Math.max(accuracy, w.typed?.[i]?.best || 0);
       await this.saveWalk({ ...w, typed: { ...(w.typed || {}), [i]: { best: bestSoFar, text: typedText } } });
       this.walkBody.querySelector('.walk-result').innerHTML =
@@ -2985,10 +3002,10 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     document.getElementById('walk-title').textContent = 'Reading';
     document.getElementById('walk-sub').textContent = 'A project folder';
     this.walkPanel.classList.remove('hidden');
-    let recent = window.showDirectoryPicker ? (await this.idbGet('recentFolders')) || [] : [];
+    let recent = window.showDirectoryPicker ? (await idbGet('recentFolders')) || [] : [];
     // Folders opened before the recent list existed are only in lastFolder
     if (!recent.length && window.showDirectoryPicker) {
-      const last = await this.idbGet('lastFolder');
+      const last = await idbGet('lastFolder');
       if (last) recent = [{ name: last.name, handle: last, ts: 0 }];
     }
     this._recentFolders = recent;
@@ -3309,13 +3326,13 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     let tree;
     try {
       if (window.showDirectoryPicker) {
-        let handle = chosen || (reuse ? await this.idbGet('lastFolder') : null);
+        let handle = chosen || (reuse ? await idbGet('lastFolder') : null);
         if (handle) {
           const perm = await handle.queryPermission({ mode: 'read' });
           if (perm !== 'granted' && (await handle.requestPermission({ mode: 'read' })) !== 'granted') handle = null;
         }
         if (!handle) handle = await window.showDirectoryPicker({ id: 'yavar-reader', mode: 'read' });
-        this.idbSet('lastFolder', handle);
+        idbSet('lastFolder', handle);
         await this.rememberFolder(handle);
         this.showNotification(`Reading ${handle.name}…`);
         tree = await this.scanDirectoryHandle(handle);
@@ -3429,45 +3446,16 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     return this.truncateText(await file.text(), maxChars);
   }
 
-  // Tiny IndexedDB key/value store (directory handles can't go in chrome.storage)
-  idb() {
-    this._idb = this._idb || new Promise((resolve, reject) => {
-      const req = indexedDB.open('yavar', 1);
-      req.onupgradeneeded = () => req.result.createObjectStore('kv');
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => reject(req.error);
-    });
-    return this._idb;
-  }
-
   // The last few folders opened, newest first, for "Read a project folder"
   async rememberFolder(handle) {
-    const recent = (await this.idbGet('recentFolders')) || [];
+    const recent = (await idbGet('recentFolders')) || [];
     const others = [];
     for (const r of recent) {
       let same = r.name === handle.name;
       try { same = same && await r.handle.isSameEntry(handle); } catch (e) { /* treat same name as same */ }
       if (!same) others.push(r);
     }
-    await this.idbSet('recentFolders', [{ name: handle.name, handle, ts: Date.now() }, ...others].slice(0, 6));
-  }
-
-  async idbGet(key) {
-    try {
-      const db = await this.idb();
-      return await new Promise((resolve) => {
-        const req = db.transaction('kv').objectStore('kv').get(key);
-        req.onsuccess = () => resolve(req.result || null);
-        req.onerror = () => resolve(null);
-      });
-    } catch (e) { return null; }
-  }
-
-  async idbSet(key, value) {
-    try {
-      const db = await this.idb();
-      db.transaction('kv', 'readwrite').objectStore('kv').put(value, key);
-    } catch (e) { /* not critical */ }
+    await idbSet('recentFolders', [{ name: handle.name, handle, ts: Date.now() }, ...others].slice(0, 6));
   }
 
   // A small preview card for a README: first paragraph, plus one-click actions.
@@ -5167,6 +5155,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       }
       if (areaName !== 'session') return;
 
+      if (changes.fileEdited?.newValue) this.onFileEdited(changes.fileEdited.newValue);
       if (PENDING_KEYS.some(k => changes[k]?.newValue !== undefined)) this.drainPending();
     });
   }
