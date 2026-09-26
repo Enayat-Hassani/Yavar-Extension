@@ -61,6 +61,37 @@ export function rawFileUrl(owner, repo, ref, path) {
   return `https://raw.githubusercontent.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${encodePath(ref)}/${encodePath(path)}`;
 }
 
+// The file's page on github.com, with lines highlighted by GitHub itself
+// (#L12-L30). "HEAD" works as the ref and means the default branch.
+export function blobUrl(owner, repo, ref, path, lines = null) {
+  const hash = !lines ? '' : `#L${lines.start}` + (lines.end > lines.start ? `-L${lines.end}` : '');
+  return `https://github.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/blob/${encodePath(ref)}/${encodePath(path)}${hash}`;
+}
+
+// Read a file reference out of the text of an inline code span in an
+// answer: "src/a.js", "src/a.js:12", "src/a.js:12-30", "src/a.js#L12-L30",
+// "src/a.js (lines 12-30)". A partial path ("a.js", "utils/a.js") counts
+// only when exactly one file in the tree ends with it.
+// Returns { path, lines } or null.
+export function parseFileRef(text, fileSet) {
+  const m = String(text || '').trim().match(
+    /^(.+?)(?:#L(\d+)(?:-L?(\d+))?|:L?(\d+)(?:\s*[-–]\s*L?(\d+))?|\s+\((?:lines?|L)\s*(\d+)(?:\s*[-–]\s*(\d+))?\))?$/i);
+  if (!m) return null;
+  const want = m[1].replace(/^\.?\//, '');
+  if (!want || want.length > 300 || !/^[\w.@+\-/ ]+$/.test(want) || want.endsWith('/')) return null;
+  let path = fileSet.has(want) ? want : null;
+  if (!path) {
+    const hits = [];
+    for (const p of fileSet) if (p.endsWith('/' + want) && hits.push(p) > 1) break;
+    if (hits.length !== 1) return null;
+    path = hits[0];
+  }
+  const a = Number(m[2] || m[4] || m[6]);
+  const b = Number(m[3] || m[5] || m[7] || a);
+  const lines = a ? { start: Math.min(a, b), end: Math.max(a, b) } : null;
+  return { path, lines };
+}
+
 // Files that are useless (or harmful) to paste into a chat.
 const BINARY_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'ico', 'bmp', 'tiff', 'psd', 'svgz',
   'mp3', 'mp4', 'mov', 'avi', 'webm', 'wav', 'ogg', 'flac', 'pdf', 'zip', 'gz', 'tgz', 'bz2', 'xz',
@@ -239,8 +270,17 @@ export const READ_MODES = [
   { id: 'add',     label: 'Just add', hint: 'Attach without a question' }
 ];
 
+// Asks for references that parseFileRef can read, so the panel can turn
+// them into links that open the file at those lines
+export const CITE_RULE = 'When you refer to code, cite it as `path/to/file.ext:START-END` in backticks, ' +
+  'using the full path from the repository and the line numbers shown in the code.';
+
 export function readingPrompt(mode, { what, repo }) {
-  const where = repo ? ` from the ${repo} repository` : '';
+  const prompt = modePrompt(mode, what, repo ? ` from the ${repo} repository` : '');
+  return prompt && `${prompt}\n\n${CITE_RULE}`;
+}
+
+function modePrompt(mode, what, where) {
   switch (mode) {
     case 'explain':
       return `I'm learning from ${what}${where}. Explain it for someone reading this codebase for the first time:\n` +
@@ -295,17 +335,24 @@ export function outlineTree(paths, selected, maxLines = 120) {
 }
 
 // A file's content in a Markdown code fence (a longer fence if the content
-// itself contains ```)
-export function fencedFile({ path, content }) {
+// itself contains ```). Each line starts with its number in the file
+// ("12│ "), so the AI can cite exact lines instead of counting.
+export function fencedFile({ path, content, lines }) {
   const fence = content.includes('```') ? '~~~~' : '```';
-  return `${fence}${langFromPath(path)}\n${content.replace(/\n$/, '')}\n${fence}`;
+  const rows = content.replace(/\n$/, '').split('\n');
+  const first = lines?.start || 1;
+  const width = String(first + rows.length - 1).length;
+  const body = rows.map((l, i) => `${String(first + i).padStart(width)}│${l ? ' ' + l : ''}`).join('\n');
+  return `${fence}${langFromPath(path)}\n${body}\n${fence}`;
 }
+
+export const LINE_NUMBER_NOTE = 'Each line of code starts with its line number and "│"; the numbers are not part of the code.';
 
 // One Markdown document holding several files, so a single chat message (and
 // a single attachment) carries them all.
 export function buildPack({ owner, repo, ref, files, treePaths = [] }) {
   const name = owner ? `${owner}/${repo}` : repo;   // local folders have no owner
-  const head = `# ${name}${ref ? ' @ ' + ref : ''}: ${files.length} file${files.length === 1 ? '' : 's'}\n`;
+  const head = `# ${name}${ref ? ' @ ' + ref : ''}: ${files.length} file${files.length === 1 ? '' : 's'}\n\n${LINE_NUMBER_NOTE}\n`;
   const map = treePaths.length
     ? `\n## Repository map\n\n\`\`\`\n${outlineTree(treePaths, files.map(f => f.path))}\n\`\`\`\n`
     : '';

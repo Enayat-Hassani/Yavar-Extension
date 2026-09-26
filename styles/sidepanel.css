@@ -1117,6 +1117,25 @@ html, body {
   border-radius: var(--r-sm);
 }
 
+/* A file the answer names: opens it in your tab at the cited lines */
+.file-ref {
+  display: inline;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+.file-ref code {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+  transition: background var(--dur-base) var(--ease-std);
+}
+.file-ref:hover code { background: var(--accent-soft); text-decoration: underline; }
+.file-ref:focus-visible { outline: none; }
+.file-ref:focus-visible code { outline: 2px solid var(--accent); outline-offset: 1px; }
+
 .md-code {
   margin: 8px 0;
   border: 1px solid var(--border);
@@ -2227,5 +2246,65 @@ button.lens-item:focus-visible {
 }
 
 /* One-tap actions for what's attached: they arrive one after another */
-.composer-mode { animation: msgIn 0.26s var(--ease-out) both; animation-delay: calc(var(--i, 0) * 40ms); }
+.composer-mode { animation: msgIn var(--dur-slow) var(--ease-out) both; animation-delay: calc(var(--i, 0) * 40ms); }
 @media (prefers-reduced-motion: reduce) { .composer-mode { animation: none; } }
+
+/* ========== Walk through a file ========== */
+.walk-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.walk-show { margin: 0; }
+.walk-show:hover { color: var(--accent); }
+
+/* Line numbers beside the block's code; only the code scrolls sideways */
+.walk-code {
+  display: flex;
+  margin: 8px 0 10px;
+  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+.walk-code pre { margin: 0; padding: 8px 10px; font: inherit; }
+.walk-gutter {
+  flex: none;
+  text-align: right;
+  color: var(--text-secondary);
+  opacity: 0.7;
+  border-right: 1px solid var(--border);
+  user-select: none;
+}
+.walk-src { flex: 1; min-width: 0; overflow-x: auto; }
+.walk-body .walk-src code { padding: 0; font: inherit; white-space: pre; background: none; border: none; }
+
+.walk-explain { margin-bottom: 4px; }
+
+/* Typing from memory hides the original (Peek shows it for a moment) */
+.rebuild-card.is-typing .walk-code { filter: blur(6px); user-select: none; pointer-events: none; }
+.walk-code { transition: filter var(--dur-base) var(--ease-std); }
+.walk-type.hidden { display: none; }
+.walk-type .rebuild-code { min-height: 120px; }
+.walk-result:empty { display: none; }
+.walk-result { margin-top: 10px; }
+.walk-score { font-weight: 600; margin-bottom: 6px; }
+.walk-score span { font-weight: 400; font-size: 12px; color: var(--text-secondary); }
+.walk-diff {
+  margin: 0;
+  padding: 8px 10px;
+  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  overflow-x: auto;
+}
+.walk-diff span { display: block; white-space: pre; }
+.walk-diff .is-same { color: var(--text-secondary); }
+.walk-diff .is-missing { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); }
+.walk-diff .is-extra { color: var(--success); background: color-mix(in srgb, var(--success) 10%, transparent); }
+
+.walk-outline { margin-top: 14px; }
+.walk-lines { margin-left: auto; font-size: 11px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
