@@ -4,7 +4,7 @@
 import { isPublicWebUrl } from './utils/net.js';
 import { loadTemplates, expandTemplate, varsInTemplate } from './utils/templates.js';
 import { renderMarkdown, runnableLang, highlight } from './utils/markdown.js';
-import { walkPrompt, parseWalkthrough, compareTyped } from './utils/walkthrough.js';
+import { walkPrompt, parseWalkthrough, compareTyped, quizPrompt, parseQuiz } from './utils/walkthrough.js';
 import { DEFAULT_MODELS, loadModels as loadStoredModels } from './utils/models.js';
 import { captureLabel, captureMarkdown, hasCaptureText } from './utils/capture.js';
 import { suggestActions } from './utils/actions.js';
@@ -568,9 +568,11 @@ class YavarSidePanel {
   // Under a finished answer: Copy, then Retry (onRetry), Save (saveAs), and
   // either "Ask <chat site>" (onAskChat, for API answers) or "Open in chat"
   // (openInChat, for answers the chat site wrote).
-  answerCard(container, { title, onUseCode = null, collapsible = false, saveAs = null, onRetry = null, onAskChat = null, openInChat = true } = {}) {
+  // inline: drawn as part of what it answers (a walkthrough block, a rebuild
+  // step) rather than as a separate card
+  answerCard(container, { title, onUseCode = null, collapsible = false, saveAs = null, onRetry = null, onAskChat = null, openInChat = true, inline = false } = {}) {
     const card = document.createElement('div');
-    card.className = 'answer-card is-writing';
+    card.className = 'answer-card is-writing' + (inline ? ' is-inline' : '');
     const icon = (d) => `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
     const act = (id, label, svg, extra = '') =>
       `<button type="button" class="answer-act" data-ans="${id}" title="${this.escapeHtml(label)}" aria-label="${this.escapeHtml(label)}"${extra}>${svg}</button>`;
@@ -586,7 +588,7 @@ class YavarSidePanel {
         (saveAs ? act('save', 'Keep in Saved answers', icon('<path d="M6 3h12v18l-6-4-6 4z"></path>')) : '') +
         (onAskChat
           ? `<button type="button" class="answer-chip" data-ans="askchat" title="Ask the same question in ${this.escapeHtml(chatName)} (free)">Ask ${this.escapeHtml(chatName)}</button>`
-          : openInChat ? `<button type="button" class="answer-chip" data-ans="chat" title="Show the chat (the answer is there too)">Open in chat</button>` : '') +
+          : openInChat && !inline ? `<button type="button" class="answer-chip" data-ans="chat" title="Show the chat (the answer is there too)">Open in chat</button>` : '') +
       `</div>`;
     container.appendChild(card);
     const body = card.querySelector('.answer-body');
@@ -2115,7 +2117,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     // Earlier hints and reviews for this step
     const mentor = this.rebuildBody.querySelector('.rebuild-mentor');
     for (const note of (st.mentor?.[i] || [])) {
-      const card = this.answerCard(mentor, { title: note.title, onUseCode: (c) => this.setStepCode(c), collapsible: true, openInChat: false });
+      const card = this.answerCard(mentor, { title: note.title, onUseCode: (c) => this.setStepCode(c), collapsible: true, openInChat: false, inline: true });
       card.done(note.text);
       card.el.classList.add('collapsed');
     }
@@ -2180,6 +2182,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
           `and am on the step "${st.plan.steps[i].title}". ${readingPrompt('explain', { what: `\`${path}\``, repo: this.repoDisplayName() })}\n\n` +
           'Point out the parts that matter for this step. Do not write the step for me.', {
             attachments: [{ filename: fname, content: this.packFor([file]) }],
+            via: 'chat', inline: true,
             onUseCode: (c) => this.setStepCode(c),
             onDone: (text) => this.addMentorNote(i, title, text)
           });
@@ -2204,7 +2207,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       const title = act === 'hint' ? '💡 Hint' : '🧑‍🏫 Review';
       el.disabled = true;
       await this.showAnswerIn(mentor, title, prompt, {
-        attachments,
+        attachments, via: 'chat', inline: true,
         onUseCode: (c) => this.setStepCode(c),
         onDone: (text) => this.addMentorNote(i, title, text)
       });
@@ -2246,7 +2249,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
           ? `<ol>${titles.map(t => `<li>${this.escapeHtml(t)}</li>`).join('')}</ol>`
           : '<span class="rebuild-live-hint">Reading the code…</span>';
       };
-      const reply = await this.askInPanel(planPrompt(this.repoDisplayName()), { attachments, onProgress });
+      const reply = await this.askInPanel(planPrompt(this.repoDisplayName()), { attachments, onProgress, via: 'chat' });
       await this.adoptPlan(reply);
     } catch (e) {
       this.showNotification('⚠️ ' + e.message + '. When the plan is in the chat, use "Load it".');
@@ -2350,7 +2353,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
           : '<span class="rebuild-live-hint">Reading the code…</span>';
       };
       const reply = await this.askInPanel(prompt, {
-        attachments: inline ? [] : [{ filename: fname, content: this.packFor([file]) }], onProgress
+        attachments: inline ? [] : [{ filename: fname, content: this.packFor([file]) }], onProgress, via: 'chat'
       });
       const parsed = parseWalkthrough(reply, range);
       if (!parsed) throw new Error("couldn't find the blocks in the AI's reply");
@@ -2429,6 +2432,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
         (b.explain
           ? `<p class="rebuild-text walk-explain">${esc(b.explain)}</p>`
           : `<p class="rebuild-goal">The AI didn't explain these lines. Ask it with "Explain more".</p>`) +
+        `<div class="walk-notes"></div>` +
         `<div class="rebuild-actions">` +
           `<button type="button" class="files-chip-btn" data-wk="more">Explain more</button>` +
           `<button type="button" class="files-chip-btn" data-wk="quiz">Quiz me</button>` +
@@ -2444,7 +2448,6 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
           `</div>` +
           `<div class="walk-result" aria-live="polite"></div>` +
         `</div>` +
-        `<div class="rebuild-mentor"></div>` +
         `<div class="rebuild-nav">` +
           `<button type="button" class="files-link-btn" data-wk="prev"${i === 0 ? ' disabled' : ''}>← Previous</button>` +
           (i < n - 1
@@ -2457,6 +2460,11 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
         `<li class="${k === i ? 'current' : ''}${typed[k]?.best >= 90 ? ' done' : ''}" data-wk="goto" data-i="${k}">` +
         `<span class="rebuild-step-dot">${typed[k]?.best >= 90 ? '✓' : k + 1}</span><span>${esc(x.title)}</span>` +
         `<span class="walk-lines">${x.start}-${x.end}</span></li>`).join('')}</ol>`;
+
+    // Earlier answers for this block, folded except the latest
+    const notesEl = this.walkBody.querySelector('.walk-notes');
+    const notes = w.notes?.[i] || [];
+    notes.forEach((note, k) => this.renderWalkNote(notesEl, note, k < notes.length - 1));
 
     const ta = this.walkBody.querySelector('.walk-type textarea');
     ta.addEventListener('keydown', (e) => {
@@ -2471,6 +2479,13 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     const act = el.dataset.wk;
     const w = this.walk;
     if (act === 'retry') return this.createWalk(w.path, w.lines, w.startAt);
+    if (act === 'reveal') {
+      const a = el.nextElementSibling;
+      a.hidden = !a.hidden;
+      el.setAttribute('aria-expanded', String(!a.hidden));
+      el.textContent = a.hidden ? 'Show answer' : 'Hide answer';
+      return;
+    }
     if (!w?.blocks) return;
     const i = w.current;
     const b = w.blocks[i];
@@ -2492,7 +2507,6 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     const repo = this.repoDisplayName();
     const where = `lines ${b.start}-${b.end} of \`${w.path}\`${repo ? ` from ${repo}` : ''}`;
     const block = fencedFile({ path: w.path, content: code, lines: b });
-    const mentor = this.walkBody.querySelector('.rebuild-mentor');
 
     if (act === 'type') {
       card.classList.add('is-typing');
@@ -2519,32 +2533,77 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       if (bestSoFar >= 90 && li) { li.classList.add('done'); li.querySelector('.rebuild-step-dot').textContent = '✓'; }
       el.closest('.rebuild-card').querySelector('[data-wk="type"]').textContent = `Type it · best ${bestSoFar}%`;
     } else if (act === 'more' || act === 'quiz' || act === 'feedback') {
+      const notesEl = card.querySelector('.walk-notes');
       let prompt;
-      let title;
+      let label;
       if (act === 'more') {
-        title = '📖 ' + b.title;
+        label = 'Explain more';
         prompt = `I'm walking through ${where}, block by block. Explain this block in more depth, line by line: ` +
           `what each line does and why, and anything that would surprise a beginner.` +
           `${w.summary ? ` (The file as a whole: ${w.summary})` : ''}\n\n${LINE_NUMBER_NOTE}\n\n${block}\n\n${CITE_RULE}`;
       } else if (act === 'quiz') {
-        title = '❓ Quiz';
-        prompt = `Quiz me on ${where}:\n\n${LINE_NUMBER_NOTE}\n\n${block}\n\n` +
-          `Ask 3 short questions, from what a line does to why it is written this way or what would break if it changed. ` +
-          `Then give the answers under a heading "Answers", so I can check myself.`;
+        label = 'Quiz';
+        prompt = quizPrompt(where, `${LINE_NUMBER_NOTE}\n\n${block}`);
       } else {
         const text = card.querySelector('.walk-type textarea').value;
         if (!text.trim()) { this.showNotification('Type the lines first'); return; }
-        title = '🧑‍🏫 Feedback';
+        label = 'Feedback on your version';
         const lang = langFromPath(w.path);
         prompt = `I retyped ${where} from memory to practise.\n\nThe original:\n\n\`\`\`${lang}\n${code.replace(/\n$/, '')}\n\`\`\`\n\n` +
           `Mine:\n\n\`\`\`${lang}\n${text.replace(/\n$/, '')}\n\`\`\`\n\n` +
           `Would mine behave the same? List the differences that change behaviour first, then the ones that are only style. ` +
           `Keep it short and encouraging.`;
       }
+      // Earlier answers fold away so the new one reads in place
+      notesEl.querySelectorAll('.answer-card').forEach(c => c.classList.add('collapsed'));
       el.disabled = true;
-      await this.showAnswerIn(mentor, title, prompt, {});
-      el.disabled = false;
+      try {
+        if (act === 'quiz') {
+          const wait = document.createElement('div');
+          wait.className = 'walk-quiz is-writing';
+          wait.innerHTML = '<div class="answer-head"><span class="answer-title">Quiz</span><span class="answer-status">Writing 3 questions…</span></div>';
+          notesEl.appendChild(wait);
+          let reply = null;
+          try { reply = await this.askInPanel(prompt, { via: 'chat' }); } catch (err) { wait.querySelector('.answer-status').textContent = '⚠️ ' + err.message; return; }
+          wait.remove();
+          const quiz = parseQuiz(reply);
+          const note = quiz ? { label, quiz } : { label, text: reply };
+          this.renderWalkNote(notesEl, note, false);
+          await this.addWalkNote(w.path, i, note);
+        } else {
+          const text = await this.showAnswerIn(notesEl, label, prompt, { via: 'chat', inline: true });
+          if (text) await this.addWalkNote(w.path, i, { label, text });
+        }
+      } finally {
+        el.disabled = false;
+      }
     }
+  }
+
+  // One answer kept on a block: a quiz (answers hidden until asked for) or text
+  renderWalkNote(container, note, folded) {
+    if (note.quiz) {
+      const el = document.createElement('div');
+      el.className = 'walk-quiz';
+      el.innerHTML = `<div class="answer-head"><span class="answer-title">${this.escapeHtml(note.label)}</span></div><ol>` +
+        note.quiz.map(({ q, a }) =>
+          `<li><div class="md">${renderMarkdown(q).html}</div>` +
+          `<button type="button" class="files-link-btn walk-reveal" data-wk="reveal" aria-expanded="false">Show answer</button>` +
+          `<div class="md walk-quiz-a" hidden>${renderMarkdown(a).html}</div></li>`).join('') + `</ol>`;
+      container.appendChild(el);
+      return;
+    }
+    const card = this.answerCard(container, { title: note.label, collapsible: true, openInChat: false, inline: true });
+    card.done(note.text);
+    if (folded) card.el.classList.add('collapsed');
+  }
+
+  async addWalkNote(path, i, note) {
+    const w = this.walk;
+    if (w?.path !== path || !w.blocks) return;   // moved to another file meanwhile
+    const notes = { ...(w.notes || {}) };
+    notes[i] = [...(notes[i] || []), note].slice(-4);
+    await this.saveWalk({ ...w, notes });
   }
 
   // Read the chat's latest answer and resolve with its text
@@ -3624,7 +3683,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
   // Ask in the background and stream the answer into a card in `container`
   // via: 'chat' or 'api' to force a route; otherwise the model menu's choice
   async showAnswerIn(container, title, prompt, opts = {}) {
-    const { attachments = [], onUseCode = null, onDone = null, saveAs = null, collapsible = true, via = null } = opts;
+    const { attachments = [], onUseCode = null, onDone = null, saveAs = null, collapsible = true, via = null, inline = false } = opts;
     const api = (via || this.answerWith) === 'api';
     const inThread = container === this.threadBody;
     // Retry and "Ask <chat>" in the thread show as busy there, like any question
@@ -3643,7 +3702,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       }
     };
     const card = this.answerCard(container, {
-      title, onUseCode, collapsible, saveAs,
+      title, onUseCode, collapsible, saveAs, inline,
       onRetry: () => again(card, opts, true),
       // A second opinion from the chat site, which hasn't seen this conversation
       onAskChat: api ? () => again(card, { ...opts, via: 'chat', handoff: card.el }, false) : null
