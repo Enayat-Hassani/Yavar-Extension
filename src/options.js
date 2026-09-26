@@ -215,7 +215,7 @@ class OptionsPage {
 
     this.modelsList.innerHTML = this.models.map(m => `
       <div class="model-row">
-        <span class="model-row-icon" aria-hidden="true">${this.escapeHtml(m.icon || '🌐')}</span>
+        <span class="model-row-icon" data-model="${this.escapeHtml(m.id)}" aria-hidden="true">${this.escapeHtml((m.name || '?').trim().charAt(0).toUpperCase())}</span>
         <span class="model-row-info">
           <span class="model-row-name">${this.escapeHtml(m.name)}</span>
           <span class="model-row-url">${this.escapeHtml(m.url)}</span>

@@ -7,6 +7,7 @@ import { renderMarkdown, runnableLang } from './utils/markdown.js';
 import { DEFAULT_MODELS, loadModels as loadStoredModels } from './utils/models.js';
 import { captureLabel, captureMarkdown, hasCaptureText } from './utils/capture.js';
 import { suggestActions } from './utils/actions.js';
+import { icon } from './utils/icons.js';
 import { transcriptMarkdown, turnsToMessages, HANDOFF_NOTE } from './utils/conversation.js';
 import { loadApiConfig, buildRoute, askRoute, askWithBudget } from './utils/llm.js';
 import { pickCoreFiles, planPrompt, hintPrompt, checkPrompt, parseRebuildPlan } from './utils/rebuild.js';
@@ -647,7 +648,7 @@ class YavarSidePanel {
       done: (text) => {
         pending = null;
         finalText = text;
-        paint(text);
+        paint(text, true);
         card.classList.remove('is-writing');
         status('');
         foot.hidden = false;
@@ -1185,12 +1186,12 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     if (kind === 'add') {
       const file = gh?.kind === 'blob' && gh.rest.length > 1 ? gh.rest[gh.rest.length - 1] : '';
       return [
-        ...(file ? [{ id: 'attach_file', icon: '📎', name: file, desc: 'Open in your tab' }] : []),
-        { id: 'pick_repo', icon: '📚', name: 'Files from this repository', desc: repo || 'Open a GitHub repository in your tab', disabled: !gh },
-        { id: 'pick_local', icon: '📁', name: 'Files from a folder', desc: 'A project on this computer' },
-        { id: 'attach_page', icon: video ? '🎬' : '📄', name: video ? "This video's transcript" : 'This page', desc: usable ? (video ? 'The captions of the video in your tab' : 'The text of the page in your tab') : 'Open a web page in your tab', disabled: !usable },
-        { id: 'screenshot_attach', icon: '📷', name: 'Screenshot', desc: usable ? 'Select an area of the page' : 'Open a web page in your tab', disabled: !usable },
-        { id: 'prompts', icon: '✨', name: 'Use a prompt', desc: 'Wrap your message in one of your templates' }
+        ...(file ? [{ id: 'attach_file', icon: icon('file'), name: file, desc: 'Open in your tab' }] : []),
+        { id: 'pick_repo', icon: icon('book'), name: 'Files from this repository', desc: repo || 'Open a GitHub repository in your tab', disabled: !gh },
+        { id: 'pick_local', icon: icon('folder'), name: 'Files from a folder', desc: 'A project on this computer' },
+        { id: 'attach_page', icon: icon(video ? 'video' : 'file'), name: video ? "This video's transcript" : 'This page', desc: usable ? (video ? 'The captions of the video in your tab' : 'The text of the page in your tab') : 'Open a web page in your tab', disabled: !usable },
+        { id: 'screenshot_attach', icon: icon('shot'), name: 'Screenshot', desc: usable ? 'Select an area of the page' : 'Open a web page in your tab', disabled: !usable },
+        { id: 'prompts', icon: icon('sparkle'), name: 'Use a prompt', desc: 'Wrap your message in one of your templates' }
       ];
     }
     if (kind === 'prompts') {
@@ -1211,20 +1212,20 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     }
     // On a GitHub repo the repo's actions stay here once the start page is gone
     const repoItems = gh ? [
-      { id: 'explain_repo', icon: '🧭', name: 'Tour this repository', desc: repo },
-      { id: 'reader', icon: '📚', name: 'Browse files', desc: 'Read, explain or review any file' },
-      { id: 'changes', icon: '🕘', name: 'Recent changes', desc: 'What the latest commits are about' },
-      { id: 'rebuild', icon: '🧱', name: 'Build it yourself', desc: this._tabCtx.rebuild || 'Recreate a small version, step by step' }
+      { id: 'explain_repo', icon: icon('compass'), name: 'Tour this repository', desc: repo },
+      { id: 'reader', icon: icon('book'), name: 'Browse files', desc: 'Read, explain or review any file' },
+      { id: 'changes', icon: icon('commit'), name: 'Recent changes', desc: 'What the latest commits are about' },
+      { id: 'rebuild', icon: icon('layers'), name: 'Build it yourself', desc: this._tabCtx.rebuild || 'Recreate a small version, step by step' }
     ] : [];
     return [
       ...repoItems,
-      { id: 'history', icon: '🕘', name: 'Saved answers', desc: 'Everything you saved, searchable', divider: repoItems.length > 0 },
-      { id: 'notes', icon: '📝', name: 'Notes', desc: 'Your scratchpad' },
-      { id: 'research_web', icon: '🌐', name: 'Web research', desc: 'Searches, reads sources, cites them' },
-      { id: 'videos', icon: '🎬', name: 'Video research', desc: 'What the top YouTube videos say' },
-      { id: 'run', icon: '▶️', name: 'Code playground', desc: 'Run Python or JavaScript' },
-      { id: 'carry_over', icon: '🧳', name: 'Continue in a fresh chat', desc: 'Summarize this chat into a new one' },
-      { id: 'settings', icon: '⚙️', name: 'Settings' }
+      { id: 'history', icon: icon('bookmark'), name: 'Saved answers', desc: 'Everything you saved, searchable', divider: repoItems.length > 0 },
+      { id: 'notes', icon: icon('note'), name: 'Notes', desc: 'Your scratchpad' },
+      { id: 'research_web', icon: icon('globe'), name: 'Web research', desc: 'Searches, reads sources, cites them' },
+      { id: 'videos', icon: icon('video'), name: 'Video research', desc: 'What the top YouTube videos say' },
+      { id: 'run', icon: icon('code'), name: 'Code playground', desc: 'Run Python or JavaScript' },
+      { id: 'carry_over', icon: icon('forward'), name: 'Continue in a fresh chat', desc: 'Summarize this chat into a new one' },
+      { id: 'settings', icon: icon('settings'), name: 'Settings' }
     ];
   }
 
@@ -1255,8 +1256,8 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     const q = m[1].toLowerCase();
     const pool = kind === 'slash'
       ? [
-          { id: 'new', icon: '✏️', name: 'New conversation' },
-          { id: 'chat', icon: '💬', name: 'Show the chat' },
+          { id: 'new', icon: icon('pen'), name: 'New conversation' },
+          { id: 'chat', icon: icon('chat'), name: 'Show the chat' },
           ...this.toolMenuItems('more'),
           ...this.toolMenuItems('prompts'),
           ...this.toolMenuItems('models').filter(t => (t.id.startsWith('model:') || t.id === 'answer:api') && !t.checked)
@@ -3513,21 +3514,21 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       hero = { kicker: 'GitHub repository', title: `${gh.owner}/${gh.repo}` };
       ctx = `<div class="home-group">` +
         (gh.kind === 'pull' || gh.kind === 'commit'
-          ? row('explain_diff', '⇄', gh.kind === 'pull' ? `Explain pull request #${gh.number}` : 'Explain this commit', 'The goal, each file, and what could go wrong') : '') +
-        (file ? row('add_file', '📄', `Explain ${file}`, 'The file open in your tab') : '') +
-        row('explain_repo', '🧭', 'Tour this repository', 'What it does, how it is organised, where to start') +
-        row('reader', '📚', 'Browse files', 'Read, explain or review any file') +
-        row('changes', '🕘', 'Recent changes', 'What the latest commits are about') +
-        row('rebuild', '🧱', 'Build it yourself', this._tabCtx.rebuild || 'Recreate a small version, step by step') +
+          ? row('explain_diff', icon('diff'), gh.kind === 'pull' ? `Explain pull request #${gh.number}` : 'Explain this commit', 'The goal, each file, and what could go wrong') : '') +
+        (file ? row('add_file', icon('file'), `Explain ${file}`, 'The file open in your tab') : '') +
+        row('explain_repo', icon('compass'), 'Tour this repository', 'What it does, how it is organised, where to start') +
+        row('reader', icon('book'), 'Browse files', 'Read, explain or review any file') +
+        row('changes', icon('commit'), 'Recent changes', 'What the latest commits are about') +
+        row('rebuild', icon('layers'), 'Build it yourself', this._tabCtx.rebuild || 'Recreate a small version, step by step') +
         `</div>`;
     } else if (usable) {
       let host = '';
       try { host = new URL(url).hostname.replace(/^www\./, ''); } catch (e) { /* ignore */ }
       hero = { kicker: host || 'This page', title: 'Start from this page' };
       ctx = `<div class="home-group">` +
-        row('summarize_page', '≡', 'Summarize', 'The main point and key details') +
-        row('attach_page', '💬', 'Ask about it', 'Attach the page, then ask your question') +
-        row('research_page', '🔎', 'Fact-check it', 'Compare its claims with other sources') +
+        row('summarize_page', icon('lines'), 'Summarize', 'The main point and key details') +
+        row('attach_page', icon('chat'), 'Ask about it', 'Attach the page, then ask your question') +
+        row('research_page', icon('search'), 'Fact-check it', 'Compare its claims with other sources') +
         `</div>`;
     } else {
       hero = { kicker: 'Yavar', title: 'Ask anything' };
@@ -3656,9 +3657,9 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
   // With a question already typed, it runs right away.
   composerTools() {
     return {
-      research_web: { icon: '🌐', name: 'Web research', placeholder: 'What should it research?', run: (t) => this.startResearchAgent(t) },
-      videos: { icon: '🎬', name: 'Video research', placeholder: 'A topic to research on YouTube', run: (t) => this.researchVideosOnTopic(t) },
-      research_page: { icon: '🔎', name: 'Fact-check this page', placeholder: 'Ask about the page, or press Enter to check all of it', allowEmpty: true, run: (t) => this.researchThisPage(t) }
+      research_web: { icon: icon('globe', 13), name: 'Web research', placeholder: 'What should it research?', run: (t) => this.startResearchAgent(t) },
+      videos: { icon: icon('video', 13), name: 'Video research', placeholder: 'A topic to research on YouTube', run: (t) => this.researchVideosOnTopic(t) },
+      research_page: { icon: icon('search', 13), name: 'Fact-check this page', placeholder: 'Ask about the page, or press Enter to check all of it', allowEmpty: true, run: (t) => this.researchThisPage(t) }
     };
   }
 
@@ -3694,7 +3695,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
         `<button type="button" data-clear-tool aria-label="Stop using ${this.escapeHtml(tool.name)}">×</button></span>`
       : '') + items.map((it, i) =>
       `<span class="composer-item${it.image ? ' is-image' : ''}" title="${this.escapeHtml(it.title || it.label)}">` +
-      (it.image ? `<img src="${it.image}" alt="">` : '<span class="composer-item-ico" aria-hidden="true">📎</span>') +
+      (it.image ? `<img src="${it.image}" alt="">` : `<span class="composer-item-ico">${icon('clip', 13)}</span>`) +
       `<span class="composer-item-name">${this.escapeHtml(it.label)}</span>` +
       (it.content ? `<span class="composer-item-size" title="About ${formatCount(estimateTokens(it.content.length))} tokens">${formatCount(estimateTokens(it.content.length))}</span>` : '') +
       `<button type="button" data-remove="${i}" aria-label="Remove ${this.escapeHtml(it.label)}">×</button></span>`).join('');
