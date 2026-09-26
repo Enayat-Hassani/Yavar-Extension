@@ -37,16 +37,21 @@ const FAMILY = {
 };
 const kwCache = new Map();
 
+// A language's keyword family: its keywords and how a line comment starts.
+// Shared by highlight() and the code boxes' editor mode, so both colour the
+// same words.
+export function keywordInfo(lang) {
+  const fam = FAMILY[String(lang || '').toLowerCase()] || 'c';
+  if (!kwCache.has(fam)) kwCache.set(fam, new Set(KEYWORDS[fam].split(' ')));
+  return { fam, keywords: kwCache.get(fam), lineComment: fam === 'py' || fam === 'sh' ? '#' : fam === 'sql' ? '--' : '//' };
+}
+
 export function highlight(code, lang) {
   const l = String(lang || '').toLowerCase();
   if (/^(text|txt|plain|plaintext|output|markdown|md)?$/.test(l) && l !== '') return esc(code);
-  const fam = FAMILY[l] || 'c';
-  if (!kwCache.has(fam)) kwCache.set(fam, new Set(KEYWORDS[fam].split(' ')));
-  const kws = kwCache.get(fam);
-  const hashComments = fam === 'py' || fam === 'sh';
-  const sqlComments = fam === 'sql';
+  const { fam, keywords: kws, lineComment } = keywordInfo(l);
   const re = new RegExp([
-    hashComments ? '(#[^\\n]*)' : sqlComments ? '(--[^\\n]*)' : '(\\/\\/[^\\n]*|\\/\\*[\\s\\S]*?\\*\\/)',
+    lineComment === '#' ? '(#[^\\n]*)' : lineComment === '--' ? '(--[^\\n]*)' : '(\\/\\/[^\\n]*|\\/\\*[\\s\\S]*?\\*\\/)',
     '("(?:[^"\\\\\\n]|\\\\.)*"|\'(?:[^\'\\\\\\n]|\\\\.)*\'|`(?:[^`\\\\]|\\\\.)*`)',
     '(\\b\\d+(?:\\.\\d+)?\\b)',
     '([A-Za-z_$][\\w$]*)'

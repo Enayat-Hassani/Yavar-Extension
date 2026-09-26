@@ -2265,22 +2265,29 @@ button.lens-item:focus-visible {
 /* Practice: type the block while the reader shows it. One line to start, grows. */
 .walk-type { margin-top: 8px; }
 .walk-type[hidden] { display: none; }
-.wk-typing {
-  display: block;
-  width: 100%;
-  min-height: 36px;
-  max-height: 50vh;
-  padding: 8px 10px;
-  font: 12.5px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  color: var(--text-primary);
+.code-box {
+  position: relative;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
-  resize: none;
-  overflow: auto;
-  tab-size: 4;
+  overflow: hidden;
+  transition: border-color var(--dur-quick) var(--ease-std), box-shadow var(--dur-quick) var(--ease-std);
 }
-.wk-typing:focus { outline: none; border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); box-shadow: 0 0 0 3px var(--accent-soft); }
+.code-box:focus-within { border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); box-shadow: 0 0 0 3px var(--accent-soft); }
+.code-box .CodeMirror { height: auto; font: 12.5px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.code-box .CodeMirror-scroll { min-height: 36px; max-height: 50vh; }
+.code-box .CodeMirror-lines { padding: 8px 0; }
+.code-box .CodeMirror-linenumber { padding: 0 8px 0 10px; }
+.code-box-hint {
+  position: absolute;
+  top: 8px;
+  left: 44px;
+  font: 12.5px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--text-secondary);
+  pointer-events: none;
+  display: none;
+}
+.code-box.is-empty .code-box-hint { display: block; }
 .wk-type-actions { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
 .wk-compare {
   height: 28px;
