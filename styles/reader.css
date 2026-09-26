@@ -14,6 +14,10 @@
   --cm-string: #c41a16;
   --cm-comment: #707f8c;
   --cm-number: #1c00cf;
+  --cm-def: #0f68a0;
+  --cm-builtin: #804fb8;
+  --cm-property: #3e8087;
+  --danger: #ff3b30;
   --r-sm: 6px;
   --r-md: 8px;
   --dur-base: 200ms;
@@ -36,6 +40,10 @@
     --cm-string: #ff8170;
     --cm-comment: #7f8c98;
     --cm-number: #d9c97c;
+    --cm-def: #6bdfff;
+    --cm-builtin: #dabaff;
+    --cm-property: #78c2b3;
+    --danger: #ff453a;
     color-scheme: dark;
   }
 }
@@ -113,6 +121,38 @@ body {
   min-height: 0;
   overflow: auto;
 }
+
+/* Editing a local file: quiet Edit and Done, a filled Save once there's
+   something to save */
+.rd-status { flex: none; font-size: 12px; color: var(--text-secondary); }
+.rd-status.is-error { flex: 0 1 auto; min-width: 0; color: var(--danger); }
+.rd-btn {
+  flex: none;
+  padding: 4px 12px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  background: none;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background var(--dur-base) var(--ease-std), color var(--dur-base) var(--ease-std);
+}
+.rd-btn:hover { background: var(--band); }
+.rd-btn-primary { color: var(--on-accent); background: var(--accent); }
+.rd-btn-primary:hover { background: color-mix(in srgb, var(--accent) 86%, black); }
+.rd-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.rd-btn[hidden] { display: none; }
+
+.rd-main:has(> .rd-editor:not([hidden])) { overflow: hidden; }
+.rd-editor { height: 100%; }
+.rd-editor[hidden] { display: none; }
+.rd-editor .CodeMirror { height: 100%; font: 12.5px/var(--line) ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.rd-editor .CodeMirror-lines { padding: 16px 0 40vh; }
+.rd-editor .CodeMirror-linenumber { padding: 0 12px 0 16px; }
+/* The lines under discussion, carried along as you edit */
+.rd-edit-band { background: var(--band); box-shadow: inset 3px 0 var(--accent); }
 
 .rd-empty {
   max-width: 420px;

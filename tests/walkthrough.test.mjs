@@ -101,3 +101,48 @@ test('chat citation markers do not reach the walkthrough', () => {
   assert.equal(w.summary, 'Prepares PDFs.');
   assert.equal(w.blocks[0].explain, 'B');
 });
+
+import { editedLines, shiftRange, shiftWalk } from '../src/utils/walkthrough.js';
+
+const file = (n) => Array.from({ length: n }, (_, i) => `line ${i + 1}`);
+
+test('an edit is found by the lines it changed', () => {
+  const a = file(10);
+  assert.equal(editedLines(a.join('\n'), a.join('\n')), null);
+  // Lines 4-5 deleted
+  assert.deepEqual(editedLines(a.join('\n'), [...a.slice(0, 3), ...a.slice(5)].join('\n')), { start: 4, endBefore: 5, endAfter: 3 });
+  // Two lines inserted after line 6
+  assert.deepEqual(editedLines(a.join('\n'), [...a.slice(0, 6), 'x', 'y', ...a.slice(6)].join('\n')), { start: 7, endBefore: 6, endAfter: 8 });
+  // Line 2 rewritten
+  const b = [...a]; b[1] = 'changed';
+  assert.deepEqual(editedLines(a.join('\n'), b.join('\n')), { start: 2, endBefore: 2, endAfter: 2 });
+});
+
+test('ranges after an edit move by its length; ranges before it stay', () => {
+  const del = { start: 4, endBefore: 6, endAfter: 3 };   // lines 4-6 removed
+  assert.deepEqual(shiftRange({ start: 1, end: 3 }, del), { start: 1, end: 3 });
+  assert.deepEqual(shiftRange({ start: 10, end: 20, title: 'T' }, del), { start: 7, end: 17, title: 'T' });
+});
+
+test('a range the edit touched covers the new lines and is marked', () => {
+  // Three lines deleted inside a block
+  assert.deepEqual(shiftRange({ start: 2, end: 10 }, { start: 4, endBefore: 6, endAfter: 3 }), { start: 2, end: 7, edited: true });
+  // Two lines added inside a block
+  assert.deepEqual(shiftRange({ start: 2, end: 10 }, { start: 5, endBefore: 4, endAfter: 6 }), { start: 2, end: 12, edited: true });
+  // Lines added right after a block don't touch it
+  assert.deepEqual(shiftRange({ start: 2, end: 10 }, { start: 11, endBefore: 10, endAfter: 12 }), { start: 2, end: 10 });
+  // A whole block deleted shrinks to one line where it was
+  assert.deepEqual(shiftRange({ start: 4, end: 6 }, { start: 4, endBefore: 6, endAfter: 3 }), { start: 4, end: 4, edited: true });
+});
+
+test('a saved walk follows the edit', () => {
+  const walk = { path: 'a.py', total: 30, range: { start: 1, end: 30 }, current: 1, notes: { 1: ['kept'] },
+    blocks: [{ start: 1, end: 10, title: 'A' }, { start: 11, end: 20, title: 'B' }, { start: 21, end: 30, title: 'C' }] };
+  const edit = editedLines(file(30).join('\n'), [...file(30).slice(0, 13), ...file(30).slice(16)].join('\n'));   // lines 14-16 removed
+  const w = shiftWalk(walk, edit);
+  assert.deepEqual(w.blocks.map(b => [b.start, b.end, !!b.edited]), [[1, 10, false], [11, 17, true], [18, 27, false]]);
+  assert.deepEqual(w.range, { start: 1, end: 27 });
+  assert.equal(w.total, 27);
+  assert.deepEqual(w.notes, walk.notes);
+  assert.equal(shiftWalk({ change: {}, blocks: [] }, edit).blocks.length, 0);
+});
