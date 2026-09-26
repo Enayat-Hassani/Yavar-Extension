@@ -74,6 +74,18 @@ function tryJson(text) {
   } catch { return null; }
 }
 
+// The JSON values in an AI reply, most likely first: fenced blocks, then
+// everything from the first "{" to the last "}". Unparseable ones are skipped.
+export function jsonCandidates(text) {
+  const src = String(text || '');
+  const raw = [];
+  for (const m of src.matchAll(/```(?:json)?\s*\n([\s\S]*?)```/gi)) raw.push(m[1]);
+  const first = src.indexOf('{');
+  const last = src.lastIndexOf('}');
+  if (first >= 0 && last > first) raw.push(src.slice(first, last + 1));
+  return raw.map(c => tryJson(c.trim())).filter(v => v != null);
+}
+
 function normaliseStep(s, i) {
   if (!s || typeof s !== 'object') return null;
   const str = v => (v == null ? '' : Array.isArray(v) ? v.join('\n') : String(v)).trim();
@@ -89,14 +101,7 @@ function normaliseStep(s, i) {
 // a Markdown list of "Step N: title" sections. Returns null if nothing usable.
 export function parseRebuildPlan(text) {
   const src = String(text || '');
-  const candidates = [];
-  for (const m of src.matchAll(/```(?:json)?\s*\n([\s\S]*?)```/gi)) candidates.push(m[1]);
-  const first = src.indexOf('{');
-  const last = src.lastIndexOf('}');
-  if (first >= 0 && last > first) candidates.push(src.slice(first, last + 1));
-
-  for (const c of candidates) {
-    const obj = tryJson(c.trim());
+  for (const obj of jsonCandidates(src)) {
     const rawSteps = Array.isArray(obj) ? obj : obj?.steps;
     if (!Array.isArray(rawSteps) || !rawSteps.length) continue;
     const steps = rawSteps.map(normaliseStep).filter(Boolean);

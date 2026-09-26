@@ -3,7 +3,8 @@
 
 import { isPublicWebUrl } from './utils/net.js';
 import { loadTemplates, expandTemplate, varsInTemplate } from './utils/templates.js';
-import { renderMarkdown, runnableLang } from './utils/markdown.js';
+import { renderMarkdown, runnableLang, highlight } from './utils/markdown.js';
+import { walkPrompt, parseWalkthrough, compareTyped } from './utils/walkthrough.js';
 import { DEFAULT_MODELS, loadModels as loadStoredModels } from './utils/models.js';
 import { captureLabel, captureMarkdown, hasCaptureText } from './utils/capture.js';
 import { suggestActions } from './utils/actions.js';
@@ -14,7 +15,8 @@ import { pickCoreFiles, planPrompt, hintPrompt, checkPrompt, parseRebuildPlan } 
 import {
   parseGitHubUrl, refCandidates, rawFileUrl, encodePath, isReadablePath, estimateTokens, formatCount,
   sliceLines, extractImports, resolveImports, suggestStartFiles, buildPack, readingPrompt, READ_MODES,
-  fencedFile, parseCommitsAtom, commitsFromApi, timeAgo, LOCAL_SKIP_DIRS, isSecretPath
+  fencedFile, parseCommitsAtom, commitsFromApi, timeAgo, LOCAL_SKIP_DIRS, isSecretPath,
+  blobUrl, parseFileRef, CITE_RULE, LINE_NUMBER_NOTE, langFromPath
 } from './utils/github.js';
 
 // Session-storage keys other parts of the extension use to hand work to the panel
@@ -185,6 +187,14 @@ class YavarSidePanel {
       if (e.key === 'Escape') this.rebuildPanel.classList.add('hidden');
     });
     this.rebuildBody?.addEventListener('click', (e) => this.onRebuildClick(e));
+    this.walkPanel = document.getElementById('walk-panel');
+    this.walkBody = document.getElementById('walk-body');
+    document.getElementById('walk-close')?.addEventListener('click', () => this.walkPanel.classList.add('hidden'));
+    document.getElementById('walk-reset')?.addEventListener('click', () => this.resetWalk());
+    this.walkPanel?.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') this.walkPanel.classList.add('hidden');
+    });
+    this.walkBody?.addEventListener('click', (e) => this.onWalkClick(e));
     document.getElementById('run-close')?.addEventListener('click', () => this.closeRunPanel());
     this.runGo?.addEventListener('click', () => this.runCode());
     this.runStop?.addEventListener('click', () => this.stopCode());
@@ -584,11 +594,12 @@ class YavarSidePanel {
     let code = [];
     let pending = null;
     let finalText = '';
-    const paint = (text) => {
+    const paint = (text, final = false) => {
       const r = renderMarkdown(text);
       body.innerHTML = r.html;
       code = r.code;
       if (!onUseCode) body.querySelectorAll('[data-md-act="use"]').forEach(b => b.remove());
+      if (final) this.linkFileRefs(body);
     };
     // A button says what happened for a moment, then goes back
     const flash = (btn, cls) => {
@@ -596,6 +607,8 @@ class YavarSidePanel {
       setTimeout(() => btn.classList.remove(cls), 1400);
     };
     card.addEventListener('click', async (e) => {
+      const ref = e.target.closest('[data-file-ref]');
+      if (ref) { this.openRepoFile(JSON.parse(ref.dataset.fileRef)); return; }
       const btn = e.target.closest('[data-md-act], [data-ans]');
       if (!btn) return;
       const ans = btn.dataset.ans;
@@ -1211,7 +1224,9 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       ];
     }
     // On a GitHub repo the repo's actions stay here once the start page is gone
+    const file = gh?.kind === 'blob' && gh.rest.length > 1 ? gh.rest[gh.rest.length - 1] : '';
     const repoItems = gh ? [
+      ...(file ? [{ id: 'walk_file', icon: icon('lines'), name: `Walk through ${file}`, desc: 'Line by line, highlighted in your tab' }] : []),
       { id: 'explain_repo', icon: icon('compass'), name: 'Tour this repository', desc: repo },
       { id: 'reader', icon: icon('book'), name: 'Browse files', desc: 'Read, explain or review any file' },
       { id: 'changes', icon: icon('commit'), name: 'Recent changes', desc: 'What the latest commits are about' },
@@ -1415,6 +1430,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       attach_file: () => this.quickAddActiveFile('add'),
       summarize_page: () => this.summarizeActivePage(),
       add_file: () => this.quickAddActiveFile(),
+      walk_file: () => this.walkActiveFile(),
       explain_diff: () => this.explainActiveDiff(),
       explain_repo: () => this.explainRepo(),
       history: () => this.toggleHistory(),
@@ -1880,6 +1896,45 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     try { await chrome.storage.local.set({ [key]: [...this.readMarks].slice(-2000) }); } catch (e) { /* ignore */ }
   }
 
+  // ----- Opening the files an answer talks about -----
+
+  // Inline code in an answer that names a file of the loaded GitHub repo
+  // becomes a link. The repo is stored on the link, so an old answer still
+  // opens the right repo after you move on to another one.
+  linkFileRefs(root) {
+    const t = this.repoTree;
+    if (!t || t.source === 'local') return;
+    root.querySelectorAll('code').forEach(el => {
+      if (el.closest('pre, a, button')) return;
+      const ref = parseFileRef(el.textContent, t.fileSet);
+      if (!ref) return;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'file-ref';
+      btn.dataset.fileRef = JSON.stringify({ owner: t.owner, repo: t.repo, ref: t.ref, path: ref.path, lines: ref.lines });
+      const at = !ref.lines ? '' : ref.lines.end > ref.lines.start ? `, lines ${ref.lines.start}-${ref.lines.end}` : `, line ${ref.lines.start}`;
+      btn.title = `Open ${ref.path}${at} in your tab`;
+      el.replaceWith(btn);
+      btn.appendChild(el);
+    });
+  }
+
+  // Show the file in your tab with the lines highlighted (GitHub does the
+  // highlighting). The tab you're in is reused only if it's already on this
+  // repo, so a page you were reading isn't replaced.
+  async openRepoFile({ owner, repo, ref, path, lines = null }) {
+    const url = blobUrl(owner, repo, ref, path, lines);
+    try {
+      const [tab] = await this.getActiveTabs();
+      const gh = parseGitHubUrl(tab?.url || '');
+      const same = gh && gh.owner.toLowerCase() === owner.toLowerCase() && gh.repo.toLowerCase() === repo.toLowerCase();
+      if (same) await chrome.tabs.update(tab.id, { url });
+      else await chrome.tabs.create({ url, windowId: tab?.windowId });
+    } catch (e) {
+      this.showNotification('⚠️ Could not open ' + path.split('/').pop() + ': ' + e.message);
+    }
+  }
+
   // ----- Panel -----
 
   async quickAddActiveFile(mode = null) {
@@ -2113,6 +2168,8 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       const path = el.dataset.path;
       const name = path.split('/').pop();
       el.disabled = true;
+      const t = this.repoTree;
+      if (t.source !== 'local') this.openRepoFile({ owner: t.owner, repo: t.repo, ref: t.ref, path });
       try {
         const [file] = await this.fetchRepoFilesMany([path]);
         if (file.error) throw new Error(file.error);
@@ -2207,6 +2264,287 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     this.rebuildPanel.classList.remove('hidden');
     this.renderRebuild();
     this.showNotification(`🛠 Plan ready: ${plan.steps.length} steps`);
+  }
+
+  // ========== Walk through a file ==========
+  // The AI splits a file into blocks of related lines; the sheet shows one
+  // block at a time with its explanation, and your GitHub tab highlights the
+  // same lines. Each block can be explained further, quizzed or retyped.
+  // Progress is kept per file (walk:<repo>:<path>).
+
+  walkKey(path) {
+    const k = this.readMarksKey();
+    return k ? `${k.replace(/^readMarks:/, 'walk:')}:${path}` : null;
+  }
+
+  async saveWalk(state) {
+    this.walk = state;
+    const key = this.walkKey(state.path);
+    if (key) try { await chrome.storage.local.set({ [key]: state }); } catch (e) { /* ignore */ }
+  }
+
+  // "Walk through <file>" on a GitHub file page (honours a #L10-L40 selection)
+  async walkActiveFile() {
+    try {
+      if (!(await this.ensureRepoTree()) || !this.activeRepoFile) {
+        this.showNotification('⚠️ Open a file on GitHub first');
+        return;
+      }
+    } catch (e) {
+      this.showNotification('⚠️ ' + e.message);
+      return;
+    }
+    const { path, lines } = this.activeRepoFile;
+    await this.startWalk(path, lines);
+  }
+
+  // Carry on with a saved walk that covers these lines, or ask for a new one
+  async startWalk(path, lines = null) {
+    if (!this.repoTree) return;
+    const key = this.walkKey(path);
+    let saved = null;
+    try { saved = key ? (await chrome.storage.local.get(key))[key] : null; } catch (e) { /* none */ }
+    const covers = saved?.blocks?.length && (!lines || (lines.start >= saved.range.start && lines.end <= saved.range.end));
+    document.getElementById('walk-sub').textContent = path.split('/').pop();
+    this.walkPanel.classList.remove('hidden');
+    if (covers) {
+      const at = lines ? saved.blocks.findIndex(b => b.end >= lines.start) : saved.current;
+      await this.saveWalk({ ...saved, current: Math.max(0, at) });
+      this.renderWalk();
+      this.followWalk();
+      return;
+    }
+    await this.createWalk(path, lines);
+  }
+
+  async createWalk(path, lines = null, startAt = null) {
+    if (this._walkPending) return;
+    if (this.agent?.active) {   // both use the chat's single answer watch
+      this.showNotification('⚠️ Stop the running agent first');
+      return;
+    }
+    const MAX_LINES = 400;
+    this._walkPending = true;
+    this.walk = { path, pending: true };
+    this.renderWalk();
+    try {
+      const content = (await this.readRepoFile(path)).replace(/\n$/, '');
+      const total = content.split('\n').length;
+      const start = lines?.start || startAt || 1;
+      const range = { start, end: Math.min(lines?.end || total, start + MAX_LINES - 1, total) };
+      const slice = sliceLines(content, range.start, range.end);
+      const file = { path, content: slice, lines: range };
+      const repo = this.repoDisplayName();
+      // Short files go inline, like the reader does; longer ones as one attachment
+      const inline = slice.length <= 4000;
+      const fname = path.split('/').pop() + '.md';
+      const prompt = inline
+        ? `${walkPrompt({ path, repo, range, source: 'Below is' })}\n\n${LINE_NUMBER_NOTE}\n\n${fencedFile(file)}`
+        : walkPrompt({ path, repo, range, source: `The attached "${fname}" is` });
+      const onProgress = (text) => {
+        const box = this.walkBody.querySelector('.rebuild-live');
+        if (!box) return;
+        const titles = [...text.matchAll(/"title"\s*:\s*"((?:[^"\\]|\\.)+)"/g)].map(m => m[1]);
+        box.innerHTML = titles.length
+          ? `<ol>${titles.map(t => `<li>${this.escapeHtml(t)}</li>`).join('')}</ol>`
+          : '<span class="rebuild-live-hint">Reading the code…</span>';
+      };
+      const reply = await this.askInPanel(prompt, {
+        attachments: inline ? [] : [{ filename: fname, content: this.packFor([file]) }], onProgress
+      });
+      const parsed = parseWalkthrough(reply, range);
+      if (!parsed) throw new Error("couldn't find the blocks in the AI's reply");
+      await this.saveWalk({ path, range, total, summary: parsed.summary, blocks: parsed.blocks, current: 0, typed: {}, created: Date.now() });
+      await this.markRead([path]);
+      this._readingContext = { label: repo, ts: Date.now() };
+      this.followWalk();
+    } catch (e) {
+      this.walk = { path, lines, startAt, error: e.message };
+    } finally {
+      this._walkPending = false;
+      this.renderWalk();
+    }
+  }
+
+  async resetWalk() {
+    const w = this.walk;
+    if (!w?.blocks || this._walkPending) return;
+    if (!this.confirmTwice('walk', 'Click ↺ again to ask for a new walkthrough of this file')) return;
+    const partial = w.range.start > 1 || w.range.end < w.total;
+    await this.createWalk(w.path, partial ? w.range : null);
+  }
+
+  // Highlight the current block in your tab (GitHub repos only)
+  followWalk() {
+    const w = this.walk;
+    const t = this.repoTree;
+    const b = w?.blocks?.[w.current];
+    if (!b || !t || t.source === 'local') return;
+    this.openRepoFile({ owner: t.owner, repo: t.repo, ref: t.ref, path: w.path, lines: { start: b.start, end: b.end } });
+  }
+
+  // The current block's code, from the cached file
+  async walkBlockCode() {
+    const w = this.walk;
+    const b = w.blocks[w.current];
+    return sliceLines(await this.readRepoFile(w.path), b.start, b.end);
+  }
+
+  async renderWalk() {
+    const w = this.walk;
+    const esc = (t) => this.escapeHtml(t || '');
+    if (!w?.blocks) {
+      this.walkBody.innerHTML = w?.error
+        ? `<div class="rebuild-intro"><p>⚠️ Could not make the walkthrough: ${esc(w.error)}.</p>` +
+          `<button type="button" class="files-send" data-wk="retry">Try again</button></div>`
+        : `<div class="rebuild-wait"><span class="files-spinner"></span>The AI is splitting ${esc(w?.path?.split('/').pop())} into blocks…<div class="rebuild-live"></div></div>`;
+      return;
+    }
+    const { blocks, current: i, typed = {}, range, total } = w;
+    const b = blocks[i];
+    const n = blocks.length;
+    const pct = Math.round(((i + 1) / n) * 100);
+    const lang = langFromPath(w.path);
+    let code = '';
+    try { code = await this.walkBlockCode(); } catch (e) { code = '(could not read the file: ' + e.message + ')'; }
+    if (this.walk !== w) return;   // moved on while reading
+    const gutter = Array.from({ length: b.end - b.start + 1 }, (_, k) => b.start + k).join('\n');
+    const best = typed[i]?.best;
+    const more = i === n - 1 && range.end < total;
+    const github = this.repoTree?.source !== 'local';
+
+    this.walkBody.innerHTML =
+      (w.summary ? `<p class="rebuild-summary">${esc(w.summary)}</p>` : '') +
+      `<div class="rebuild-progress" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100">` +
+        `<div class="rebuild-progress-bar" style="width:${pct}%"></div></div>` +
+      `<div class="rebuild-progress-label">Block ${i + 1} of ${n}` +
+        `${range.start > 1 || range.end < total ? ` · lines ${range.start}-${range.end} of ${total}` : ''}</div>` +
+      `<div class="rebuild-card">` +
+        `<div class="walk-card-head"><span class="rebuild-card-kicker">Lines ${b.start}-${b.end}</span>` +
+          (github ? `<button type="button" class="files-link-btn walk-show" data-wk="show" title="Highlight these lines in your tab">Show in tab</button>` : '') +
+        `</div>` +
+        `<h3>${esc(b.title)}</h3>` +
+        `<div class="walk-code" aria-label="Lines ${b.start} to ${b.end}"><pre class="walk-gutter" aria-hidden="true">${gutter}</pre>` +
+          `<pre class="walk-src"><code>${highlight(code, lang)}</code></pre></div>` +
+        (b.explain
+          ? `<p class="rebuild-text walk-explain">${esc(b.explain)}</p>`
+          : `<p class="rebuild-goal">The AI didn't explain these lines. Ask it with "Explain more".</p>`) +
+        `<div class="rebuild-actions">` +
+          `<button type="button" class="files-chip-btn" data-wk="more">Explain more</button>` +
+          `<button type="button" class="files-chip-btn" data-wk="quiz">Quiz me</button>` +
+          `<button type="button" class="files-chip-btn" data-wk="type">Type it${best != null ? ` · best ${best}%` : ''}</button>` +
+        `</div>` +
+        `<div class="walk-type hidden">` +
+          `<div class="rebuild-label">Type these lines from memory</div>` +
+          `<textarea class="rebuild-code" spellcheck="false" placeholder="Type the block without looking. Ctrl+Enter compares.">${esc(typed[i]?.text || '')}</textarea>` +
+          `<div class="rebuild-actions">` +
+            `<button type="button" class="files-chip-btn" data-wk="compare">Compare</button>` +
+            `<button type="button" class="files-chip-btn" data-wk="peek">Peek (3 s)</button>` +
+            `<button type="button" class="files-chip-btn" data-wk="feedback">Ask for feedback</button>` +
+          `</div>` +
+          `<div class="walk-result" aria-live="polite"></div>` +
+        `</div>` +
+        `<div class="rebuild-mentor"></div>` +
+        `<div class="rebuild-nav">` +
+          `<button type="button" class="files-link-btn" data-wk="prev"${i === 0 ? ' disabled' : ''}>← Previous</button>` +
+          (i < n - 1
+            ? `<button type="button" class="files-send" data-wk="next">Next block →</button>`
+            : more ? `<button type="button" class="files-send" data-wk="continue">Continue with lines ${range.end + 1}+ →</button>`
+              : `<button type="button" class="files-send" data-wk="done">Done 🎉</button>`) +
+        `</div>` +
+      `</div>` +
+      `<ol class="rebuild-steps walk-outline">${blocks.map((x, k) =>
+        `<li class="${k === i ? 'current' : ''}${typed[k]?.best >= 90 ? ' done' : ''}" data-wk="goto" data-i="${k}">` +
+        `<span class="rebuild-step-dot">${typed[k]?.best >= 90 ? '✓' : k + 1}</span><span>${esc(x.title)}</span>` +
+        `<span class="walk-lines">${x.start}-${x.end}</span></li>`).join('')}</ol>`;
+
+    const ta = this.walkBody.querySelector('.walk-type textarea');
+    ta.addEventListener('keydown', (e) => {
+      if (e.key === 'Tab') { e.preventDefault(); ta.setRangeText('    ', ta.selectionStart, ta.selectionEnd, 'end'); }
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); this.walkBody.querySelector('[data-wk="compare"]')?.click(); }
+    });
+  }
+
+  async onWalkClick(e) {
+    const el = e.target.closest('[data-wk]');
+    if (!el || el.disabled) return;
+    const act = el.dataset.wk;
+    const w = this.walk;
+    if (act === 'retry') return this.createWalk(w.path, w.lines, w.startAt);
+    if (!w?.blocks) return;
+    const i = w.current;
+    const b = w.blocks[i];
+    const card = this.walkBody.querySelector('.rebuild-card');
+    const go = async (k) => {
+      await this.saveWalk({ ...w, current: k });
+      await this.renderWalk();
+      this.walkBody.scrollTop = 0;
+      this.followWalk();
+    };
+    if (act === 'goto') return go(Number(el.dataset.i));
+    if (act === 'prev') return go(Math.max(0, i - 1));
+    if (act === 'next') return go(Math.min(w.blocks.length - 1, i + 1));
+    if (act === 'show') return this.followWalk();
+    if (act === 'continue') return this.createWalk(w.path, null, w.range.end + 1);
+    if (act === 'done') { this.walkPanel.classList.add('hidden'); return; }
+
+    const code = await this.walkBlockCode();
+    const repo = this.repoDisplayName();
+    const where = `lines ${b.start}-${b.end} of \`${w.path}\`${repo ? ` from ${repo}` : ''}`;
+    const block = fencedFile({ path: w.path, content: code, lines: b });
+    const mentor = this.walkBody.querySelector('.rebuild-mentor');
+
+    if (act === 'type') {
+      card.classList.add('is-typing');
+      card.querySelector('.walk-type').classList.remove('hidden');
+      card.querySelector('.walk-type textarea').focus();
+    } else if (act === 'peek') {
+      card.classList.remove('is-typing');
+      clearTimeout(this._walkPeek);
+      this._walkPeek = setTimeout(() => card.classList.add('is-typing'), 3000);
+    } else if (act === 'compare') {
+      const text = card.querySelector('.walk-type textarea').value;
+      if (!text.trim()) { this.showNotification('Type the lines first'); return; }
+      const { accuracy, ops } = compareTyped(code, text);
+      const bestSoFar = Math.max(accuracy, w.typed?.[i]?.best || 0);
+      await this.saveWalk({ ...w, typed: { ...(w.typed || {}), [i]: { best: bestSoFar, text } } });
+      const marks = { same: ' ', missing: '−', extra: '+' };
+      card.querySelector('.walk-result').innerHTML =
+        `<div class="walk-score">${accuracy}% match${accuracy >= 90 ? ' ✓' : ''}` +
+        `${accuracy < 100 ? ' <span>− in the original, missing from yours · + only in yours</span>' : ''}</div>` +
+        (accuracy < 100 ? `<pre class="walk-diff">${ops.map(o =>
+          `<span class="is-${o.type}">${marks[o.type]} ${this.escapeHtml(o.text)}</span>`).join('')}</pre>` : '');
+      // The outline's tick and the button's best score
+      const li = this.walkBody.querySelector(`.walk-outline li[data-i="${i}"]`);
+      if (bestSoFar >= 90 && li) { li.classList.add('done'); li.querySelector('.rebuild-step-dot').textContent = '✓'; }
+      el.closest('.rebuild-card').querySelector('[data-wk="type"]').textContent = `Type it · best ${bestSoFar}%`;
+    } else if (act === 'more' || act === 'quiz' || act === 'feedback') {
+      let prompt;
+      let title;
+      if (act === 'more') {
+        title = '📖 ' + b.title;
+        prompt = `I'm walking through ${where}, block by block. Explain this block in more depth, line by line: ` +
+          `what each line does and why, and anything that would surprise a beginner.` +
+          `${w.summary ? ` (The file as a whole: ${w.summary})` : ''}\n\n${LINE_NUMBER_NOTE}\n\n${block}\n\n${CITE_RULE}`;
+      } else if (act === 'quiz') {
+        title = '❓ Quiz';
+        prompt = `Quiz me on ${where}:\n\n${LINE_NUMBER_NOTE}\n\n${block}\n\n` +
+          `Ask 3 short questions, from what a line does to why it is written this way or what would break if it changed. ` +
+          `Then give the answers under a heading "Answers", so I can check myself.`;
+      } else {
+        const text = card.querySelector('.walk-type textarea').value;
+        if (!text.trim()) { this.showNotification('Type the lines first'); return; }
+        title = '🧑‍🏫 Feedback';
+        const lang = langFromPath(w.path);
+        prompt = `I retyped ${where} from memory to practise.\n\nThe original:\n\n\`\`\`${lang}\n${code.replace(/\n$/, '')}\n\`\`\`\n\n` +
+          `Mine:\n\n\`\`\`${lang}\n${text.replace(/\n$/, '')}\n\`\`\`\n\n` +
+          `Would mine behave the same? List the differences that change behaviour first, then the ones that are only style. ` +
+          `Keep it short and encouraging.`;
+      }
+      el.disabled = true;
+      await this.showAnswerIn(mentor, title, prompt, {});
+      el.disabled = false;
+    }
   }
 
   // Read the chat's latest answer and resolve with its text
@@ -2471,6 +2809,8 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
 
   async sendRepoFiles(paths, mode = 'explain', lines = null) {
     if (!this.repoTree || !paths.length) return;
+    // One file, line by line: the guided walkthrough
+    if (mode === 'lines' && paths.length === 1) return this.startWalk(paths[0], lines);
     if (this._sendingFiles) return;
     this._sendingFiles = true;
     const { repo } = this.repoTree;
@@ -2511,8 +2851,8 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
         this.threadInput?.focus();
       } else if (single && single.content.length <= 4000) {
         // Small single file: inline, so the code is visible in the chat
-        const block = `\`${single.path}\`${single.lines ? ` (lines ${single.lines.start}-${single.lines.end})` : ''} from ${repoName}:\n\n` +
-          fencedFile(single);
+        const block = `\`${single.path}\`${single.lines ? ` (lines ${single.lines.start}-${single.lines.end})` : ''} from ${repoName}. ` +
+          `${LINE_NUMBER_NOTE}\n\n${fencedFile(single)}`;
         this.askInThread({ title: modeLabel, sub: repoName, label, prompt: `${block}\n\n${question}` });
       } else {
         // Several (or big) files: ONE attachment with a repo map, then the question
@@ -3516,6 +3856,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
         (gh.kind === 'pull' || gh.kind === 'commit'
           ? row('explain_diff', icon('diff'), gh.kind === 'pull' ? `Explain pull request #${gh.number}` : 'Explain this commit', 'The goal, each file, and what could go wrong') : '') +
         (file ? row('add_file', icon('file'), `Explain ${file}`, 'The file open in your tab') : '') +
+        (file ? row('walk_file', icon('lines'), `Walk through ${file}`, 'Line by line, highlighted in your tab') : '') +
         row('explain_repo', icon('compass'), 'Tour this repository', 'What it does, how it is organised, where to start') +
         row('reader', icon('book'), 'Browse files', 'Read, explain or review any file') +
         row('changes', icon('commit'), 'Recent changes', 'What the latest commits are about') +
@@ -3819,7 +4160,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
         '2. How it is organised: the main folders and files and what each is responsible for.\n' +
         '3. How it works: follow one typical request or run from entry point to result, naming the files involved.\n' +
         '4. The tech stack and any patterns worth learning.\n' +
-        '5. Which 3 files I should read first, in order, and why.',
+        '5. Which 3 files I should read first, in order, and why.\n\n' + CITE_RULE,
       attachments: [{ filename: fname, content: this.packFor(files) }]
     });
   }
