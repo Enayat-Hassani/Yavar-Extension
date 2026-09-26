@@ -52,6 +52,19 @@ export function hintPrompt(plan, i) {
     `${s.study?.length ? s.study.join(', ') : 'the original code'} to look at. Keep it short.`;
 }
 
+// A question of the user's own about the current step. `earlier`: what the
+// mentor already said on it (earlierAnswers), so follow-ups make sense in
+// any chat.
+export function askPrompt(plan, i, code, question, earlier = '') {
+  const s = plan.steps[i];
+  return `I'm rebuilding ${plan.project}, step ${i + 1} of ${plan.steps.length}: "${s.title}".\n` +
+    `Task: ${s.task}\n` + (s.done_when ? `Done when: ${s.done_when}\n` : '') + `\n` +
+    (code.trim() ? `My code so far:\n\n\`\`\`${plan.language ? plan.language.toLowerCase() : ''}\n${code.replace(/\n$/, '')}\n\`\`\`\n\n` : '') +
+    (earlier ? `${earlier}\n\n` : '') +
+    `My question: ${question}\n\n` +
+    `Answer it like a mentor: help me understand, and don't write the step for me unless I ask for code.`;
+}
+
 export function checkPrompt(plan, i, code, attached) {
   const s = plan.steps[i];
   return `I'm rebuilding ${plan.project}, step ${i + 1} of ${plan.steps.length}: "${s.title}".\n` +
