@@ -2233,6 +2233,10 @@ button.lens-item:focus-visible {
 .wk-title { margin: 2px 0 6px; font-size: 16px; line-height: 1.3; text-wrap: balance; }
 .wk-explain { margin: 0; font-size: 13.5px; line-height: 1.6; color: var(--text-primary); text-wrap: pretty; }
 .wk-explain.is-empty { color: var(--text-secondary); }
+/* A change: the part's file in the meta line, and what was taken out */
+.wk-meta code { font-size: 11.5px; color: var(--text-primary); overflow-wrap: anywhere; }
+.wk-skipped { display: block; margin-top: 4px; font-size: 12px; }
+.raw-reply.wk-removed pre { white-space: pre; }   /* code keeps its lines; the pre scrolls sideways */
 
 /* What to do with this block or step: quiet text actions pinned to the
    bottom of the sheet. With little content they sit right under it; with a
