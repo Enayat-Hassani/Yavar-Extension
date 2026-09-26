@@ -96,9 +96,13 @@ function listItem(text) {
 
 const splitRow = (line) => line.trim().replace(/^\|/, '').replace(/\|$/, '').split(/(?<!\\)\|/).map(c => c.trim().replace(/\\\|/g, '|'));
 
+// ChatGPT's citation markers leak into copied text as
+// ":contentReference[oaicite:0]{index=0}"; they mean nothing outside its page.
+export const stripChatArtifacts = (text) => String(text || '').replace(/:?contentReference\[oaicite:\d+\]\{index=\d+\}/g, '');
+
 export function renderMarkdown(md) {
   const code = [];
-  const lines = esc(String(md || '').replace(/\r\n?/g, '\n')).split('\n');
+  const lines = esc(stripChatArtifacts(md).replace(/\r\n?/g, '\n')).split('\n');
   const out = [];
   let para = [];
   // Open lists, outermost first: { type, indent, items: [html] }

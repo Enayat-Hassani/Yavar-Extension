@@ -60,3 +60,27 @@ test('the model may only pick one of the candidates', () => {
   assert.deepEqual(parseNext('{"file": "`b.js`"}', candidates), { file: 'b.js', why: 'The core' });
   assert.equal(parseNext('{"file": "z.js", "why": "made up"}', candidates), null);
 });
+
+import { connectionTree } from '../src/utils/journey.js';
+
+test('connections start at the entry point and follow imports', () => {
+  const importsOf = new Map([
+    ['index.js', ['core.js']],
+    ['core.js', ['merge.js', 'errors.js']],
+    ['errors.js', ['core.js']]            // a cycle back to core
+  ]);
+  const tree = connectionTree(['index.js', 'core.js', 'errors.js'], importsOf);
+  assert.equal(tree.length, 1);
+  const [root] = tree;
+  assert.equal(root.file, 'index.js');
+  assert.deepEqual(root.children[0].children.map(c => c.file), ['merge.js', 'errors.js']);
+  const back = root.children[0].children[1].children[0];
+  assert.deepEqual(back, { file: 'core.js', repeat: true, children: [] });
+});
+
+test('files nothing imports each start their own branch; depth is capped', () => {
+  const importsOf = new Map([['a.js', ['b.js']], ['b.js', ['c.js']], ['c.js', ['d.js']], ['d.js', ['e.js']]]);
+  const tree = connectionTree(['a.js', 'x.js'], importsOf, { maxDepth: 2 });
+  assert.deepEqual(tree.map(t => t.file), ['a.js', 'x.js']);
+  assert.deepEqual(tree[0].children[0].children[0], { file: 'c.js', repeat: false, children: [] });
+});

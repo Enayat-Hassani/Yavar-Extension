@@ -77,3 +77,25 @@ export function parseNext(text, candidates) {
   }
   return null;
 }
+
+// How the files connect, as a tree for a narrow panel: each file's children
+// are the repo files it imports. Roots are files of the reading order that no
+// other file in it imports (the entry points), in reading order. A file shown
+// once is marked `repeat` where it appears again, so shared helpers don't
+// multiply. `importsOf`: Map(file -> [imported files]).
+// Returns [{ file, repeat, children }].
+export function connectionTree(order, importsOf, { maxDepth = 3, maxChildren = 8 } = {}) {
+  const imported = new Set(order.flatMap(f => importsOf.get(f) || []));
+  const roots = order.filter(f => !imported.has(f));
+  if (!roots.length && order.length) roots.push(order[0]);   // everything imports everything: start at the top
+  const seen = new Set();
+  const node = (file, depth) => {
+    if (seen.has(file)) return { file, repeat: true, children: [] };
+    seen.add(file);
+    const kids = depth < maxDepth ? (importsOf.get(file) || []).slice(0, maxChildren) : [];
+    return { file, repeat: false, children: kids.map(k => node(k, depth + 1)) };
+  };
+  const out = roots.map(r => node(r, 0));
+  order.filter(f => !seen.has(f)).forEach(f => out.push(node(f, 0)));   // only reachable through a cycle
+  return out;
+}
