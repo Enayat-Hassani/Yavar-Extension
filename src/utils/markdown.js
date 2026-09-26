@@ -37,16 +37,21 @@ const FAMILY = {
 };
 const kwCache = new Map();
 
+// A language's keyword family: its keywords and how a line comment starts.
+// Shared by highlight() and the code boxes' editor mode, so both colour the
+// same words.
+export function keywordInfo(lang) {
+  const fam = FAMILY[String(lang || '').toLowerCase()] || 'c';
+  if (!kwCache.has(fam)) kwCache.set(fam, new Set(KEYWORDS[fam].split(' ')));
+  return { fam, keywords: kwCache.get(fam), lineComment: fam === 'py' || fam === 'sh' ? '#' : fam === 'sql' ? '--' : '//' };
+}
+
 export function highlight(code, lang) {
   const l = String(lang || '').toLowerCase();
   if (/^(text|txt|plain|plaintext|output|markdown|md)?$/.test(l) && l !== '') return esc(code);
-  const fam = FAMILY[l] || 'c';
-  if (!kwCache.has(fam)) kwCache.set(fam, new Set(KEYWORDS[fam].split(' ')));
-  const kws = kwCache.get(fam);
-  const hashComments = fam === 'py' || fam === 'sh';
-  const sqlComments = fam === 'sql';
+  const { fam, keywords: kws, lineComment } = keywordInfo(l);
   const re = new RegExp([
-    hashComments ? '(#[^\\n]*)' : sqlComments ? '(--[^\\n]*)' : '(\\/\\/[^\\n]*|\\/\\*[\\s\\S]*?\\*\\/)',
+    lineComment === '#' ? '(#[^\\n]*)' : lineComment === '--' ? '(--[^\\n]*)' : '(\\/\\/[^\\n]*|\\/\\*[\\s\\S]*?\\*\\/)',
     '("(?:[^"\\\\\\n]|\\\\.)*"|\'(?:[^\'\\\\\\n]|\\\\.)*\'|`(?:[^`\\\\]|\\\\.)*`)',
     '(\\b\\d+(?:\\.\\d+)?\\b)',
     '([A-Za-z_$][\\w$]*)'
@@ -96,9 +101,13 @@ function listItem(text) {
 
 const splitRow = (line) => line.trim().replace(/^\|/, '').replace(/\|$/, '').split(/(?<!\\)\|/).map(c => c.trim().replace(/\\\|/g, '|'));
 
+// ChatGPT's citation markers leak into copied text as
+// ":contentReference[oaicite:0]{index=0}"; they mean nothing outside its page.
+export const stripChatArtifacts = (text) => String(text || '').replace(/:?contentReference\[oaicite:\d+\]\{index=\d+\}/g, '');
+
 export function renderMarkdown(md) {
   const code = [];
-  const lines = esc(String(md || '').replace(/\r\n?/g, '\n')).split('\n');
+  const lines = esc(stripChatArtifacts(md).replace(/\r\n?/g, '\n')).split('\n');
   const out = [];
   let para = [];
   // Open lists, outermost first: { type, indent, items: [html] }

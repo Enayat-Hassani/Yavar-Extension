@@ -95,16 +95,16 @@
       </div>
       <div id="run-editor" class="run-editor"></div>
       <div class="run-actions">
-        <button id="run-go" type="button" class="run-go" title="Run (Ctrl+Enter)">▶ Run</button>
-        <button id="run-stop" type="button" class="run-stop hidden">■ Stop</button>
+        <button id="run-go" type="button" class="run-go" title="Run (Ctrl+Enter)">Run</button>
+        <button id="run-stop" type="button" class="run-stop hidden">Stop</button>
         <span id="run-status" class="run-status" aria-live="polite"></span>
       </div>
       <div class="run-scroll">
         <pre id="run-output" class="run-output" aria-label="Output"></pre>
         <div id="run-followups" class="run-followups hidden">
-          <button type="button" class="files-chip-btn" data-ask="fix">Ask AI to fix it</button>
-          <button type="button" class="files-chip-btn" data-ask="explain">Explain the output</button>
-          <button type="button" class="files-chip-btn" data-ask="next">What should I try next?</button>
+          <button type="button" class="run-ask" data-ask="fix">Fix it</button>
+          <button type="button" class="run-ask" data-ask="explain">Explain the output</button>
+          <button type="button" class="run-ask" data-ask="next">What to try next</button>
         </div>
         <!-- Answers to the buttons above appear here, streamed from the chat -->
         <div id="run-answers" class="run-answers"></div>
@@ -119,11 +119,25 @@
           <span id="rebuild-sub" class="files-repo-chip"></span>
         </div>
         <div class="files-header-actions">
-          <button id="rebuild-reset" class="history-action-btn" title="Start over with a new plan">↺</button>
           <button id="rebuild-close" class="history-action-btn" title="Close (Esc)">✕</button>
         </div>
       </div>
       <div id="rebuild-body" class="rebuild-body"></div>
+    </div>
+
+    <!-- Reading: the repository's big picture and reading order (the map), and
+         walking through one file block by block, highlighted in the reader -->
+    <div id="walk-panel" class="run-panel rebuild-panel walk-panel sheet hidden" role="dialog" aria-label="Reading">
+      <div class="run-header">
+        <div class="files-heading">
+          <span id="walk-title" class="files-title">Walk through</span>
+          <span id="walk-sub" class="files-repo-chip"></span>
+        </div>
+        <div class="files-header-actions">
+          <button id="walk-close" class="history-action-btn" title="Close (Esc)">✕</button>
+        </div>
+      </div>
+      <div id="walk-body" class="rebuild-body walk-body"></div>
     </div>
 
 
@@ -162,6 +176,7 @@
             <div class="picker-heading">
               <span class="picker-title">Add files</span>
               <span id="picker-sub" class="picker-sub"></span>
+              <button id="picker-change" type="button" class="pk-link picker-change" data-pk-local="choose" hidden>Change folder</button>
             </div>
             <button id="picker-close" class="app-icon-btn" type="button" title="Close (Esc)" aria-label="Close">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg>

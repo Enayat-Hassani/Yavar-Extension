@@ -73,7 +73,7 @@ test('pack holds every file, marks them in the map, and survives inner fences', 
   assert.match(pack, /^# o\/r @ main: 2 files/);
   assert.match(pack, /a\.js {2}← included/);
   assert.match(pack, /## README\.md \(lines 1-3\)\n\n~~~~markdown/);
-  assert.match(pack, /```javascript\nlet a = 1;\n```/);
+  assert.match(pack, /```javascript\n1│ let a = 1;\n```/);
   assert.ok(!outlineTree(['test/t.js', 'src/a.js'], ['src/a.js']).includes('t.js'), 'unrelated dirs stay collapsed');
 });
 
@@ -119,4 +119,51 @@ test('local packs have no owner prefix; secrets are recognised', () => {
   assert.match(buildPack({ owner: '', repo: 'my-app', files: [{ path: 'a.py', content: 'x' }] }), /^# my-app: 1 file/);
   for (const p of ['.env', 'app/.env.local', 'certs/server.key', 'id_rsa', '.npmrc']) assert.ok(isSecretPath(p), p);
   for (const p of ['env.py', 'src/keys.ts', 'README.md', '.env.example.md']) assert.ok(!isSecretPath(p), p);
+});
+
+import { blobUrl, parseFileRef, fencedFile, CITE_RULE } from '../src/utils/github.js';
+
+test('numbers each line from where the slice starts', () => {
+  assert.equal(fencedFile({ path: 'a.py', content: 'x = 1\n\ny = 2\n' }), '```python\n1│ x = 1\n2│\n3│ y = 2\n```');
+  const out = fencedFile({ path: 'a.js', content: 'a\nb\nc', lines: { start: 98, end: 100 } });
+  assert.match(out, /^```javascript\n 98│ a\n 99│ b\n100│ c\n```$/);
+});
+
+test('blob URL highlights one line or a range', () => {
+  assert.equal(blobUrl('o', 'r', 'HEAD', 'src/a b.js'), 'https://github.com/o/r/blob/HEAD/src/a%20b.js');
+  assert.equal(blobUrl('o', 'r', 'feat/x', 'a.js', { start: 7, end: 7 }), 'https://github.com/o/r/blob/feat/x/a.js#L7');
+  assert.equal(blobUrl('o', 'r', 'main', 'a.js', { start: 12, end: 30 }), 'https://github.com/o/r/blob/main/a.js#L12-L30');
+  assert.equal(blobUrl('o', 'r', 'main', 'README.md', { start: 3, end: 5 }), 'https://github.com/o/r/blob/main/README.md?plain=1#L3-L5');
+  assert.equal(blobUrl('o', 'r', 'main', 'README.md'), 'https://github.com/o/r/blob/main/README.md');
+});
+
+test('reads file references in the forms answers use', () => {
+  const files = new Set(['src/app.js', 'src/utils/net.js', 'lib/net.js', 'README.md', 'Makefile']);
+  assert.deepEqual(parseFileRef('src/app.js', files), { path: 'src/app.js', lines: null });
+  assert.deepEqual(parseFileRef('src/app.js:12-30', files), { path: 'src/app.js', lines: { start: 12, end: 30 } });
+  assert.deepEqual(parseFileRef('./src/app.js:40', files), { path: 'src/app.js', lines: { start: 40, end: 40 } });
+  assert.deepEqual(parseFileRef('src/app.js#L30-L12', files), { path: 'src/app.js', lines: { start: 12, end: 30 } });
+  assert.deepEqual(parseFileRef('src/app.js (lines 5–9)', files), { path: 'src/app.js', lines: { start: 5, end: 9 } });
+  assert.deepEqual(parseFileRef('app.js:3', files), { path: 'src/app.js', lines: { start: 3, end: 3 } });
+  assert.deepEqual(parseFileRef('utils/net.js', files), { path: 'src/utils/net.js', lines: null });
+  assert.deepEqual(parseFileRef('Makefile', files), { path: 'Makefile', lines: null });
+});
+
+test('ignores code that is not a file of the repo, and ambiguous names', () => {
+  const files = new Set(['src/utils/net.js', 'lib/net.js', 'src/app.js']);
+  assert.equal(parseFileRef('net.js', files), null, 'two files are called net.js');
+  assert.equal(parseFileRef('app', files), null);
+  assert.equal(parseFileRef('const x = 1', files), null);
+  assert.equal(parseFileRef('other/app.js', files), null);
+  assert.equal(parseFileRef('', files), null);
+});
+
+test('reading prompts ask for citations the panel can link', () => {
+  assert.ok(readingPrompt('explain', { what: '`x.js`', repo: 'o/r' }).endsWith(CITE_RULE));
+});
+
+test('TypeScript imports written as .js find their .ts files', () => {
+  const files = new Set(['source/index.ts', 'source/core/Ky.ts', 'source/utils/merge.ts', 'lib/plain.js']);
+  assert.deepEqual(resolveImports(["./core/Ky.js", "./utils/merge.js", "../lib/plain.js"], 'source/index.ts', files).sort(),
+    ['lib/plain.js', 'source/core/Ky.ts', 'source/utils/merge.ts']);
 });
