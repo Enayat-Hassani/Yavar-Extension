@@ -1,6 +1,6 @@
 # Yavar - Your AI Sidekick
 
-A Chrome extension that embeds ChatGPT, Claude, and Gemini in a sidebar — so you can select anything on any page and route it to the AI, capture screenshots, learn GitHub repositories, run a web research agent, and keep your AI answers in a searchable history.
+A Chrome extension that embeds ChatGPT, Claude, and Gemini in a sidebar — so you can select anything on any page and route it to the AI, capture screenshots, read a GitHub repository, a commit or a local project block by block beside the code, run a web research agent, and keep your AI answers in a searchable history.
 
 ## What it does
 
@@ -9,7 +9,7 @@ A Chrome extension that embeds ChatGPT, Claude, and Gemini in a sidebar — so y
 **The Yavar view**: Yavar opens as a full-page app. The chat (ChatGPT, Claude or Gemini) keeps running behind it; the chat button in the header shows it, and **‹ Yavar** brings you back.
 
 - **Header:** the model pill switches models; the new model picks up the conversation (API models get the earlier turns as their own, a chat site gets them as an attached `conversation-so-far.md`, newest turns first if it's long), and *Ask* on an API answer passes them on too, the pencil starts a new conversation, and **⋯** holds saved answers, notes, web and video research, the code playground, *Continue in a fresh chat* and settings.
-- **Start page:** actions for the tab you're on. On GitHub: *Tour this repository*, *Browse files*, *Recent changes*, *Build it yourself*, and *Explain* for an open pull request or file. On other pages: *Summarize*, *Ask about it*, *Fact-check it*.
+- **Start page:** actions for the tab you're on. On GitHub: *Read <file>* on a file page, *Read this commit* or *Read pull request #N* on those pages, *Read this repository*, *Build it yourself* and *Recent changes*. On other pages: *Summarize*, *Ask about it*, *Fact-check it*. With no page open: *Read a project folder*.
 - **Composer:** type to the model, or press **+** to add the file open in your tab, **files from the repository** or **a folder**, **this page** (on YouTube, the video's transcript), or a **screenshot**: click an element on the page, or drag an area (↑ widens a click to the element around it, ✓ or Enter takes it). Along with the picture, Yavar sends what's in it as Markdown: text, a table as a table, links, image descriptions, the heading above it, and the HTML of a control or form. Each attachment chip shows its size in tokens, and the message box offers one-tap actions that fit what's attached: a table gets *Explain / Key takeaways / As CSV*, code *Explain / Find bugs / Line by line*, an error *Why this error? / How do I fix it?*, a paragraph *Summarize / Explain simply / Words to learn*. **Use a prompt** wraps what you typed in one of your templates. With files attached, one tap asks for *Explain*, *Line by line*, *How it fits*, *Review* or *Quiz me*.
 - **Selections, pages and screenshots from outside the panel** (the floating menu, the right-click menu, the shortcuts) arrive in the composer. A floating-menu prompt is sent at once if *Settings → Send floating-menu prompts right away* is on; otherwise it waits in the message box.
 - **Answers** stream in and render tables, checklists, nested lists and coloured code (long blocks fold). Under each: Copy, Ask again, Save, and *Open in chat*, or with **API** chosen, *Ask ChatGPT/Claude/Gemini* to put the same question to the free chat. API answers suggest three follow-up questions. Hover your question to edit and resend it. ■ stops waiting.
@@ -24,26 +24,23 @@ A Chrome extension that embeds ChatGPT, Claude, and Gemini in a sidebar — so y
 
 Add, edit, or remove your own templates in Settings using `{{selection}}`, `{{page}}`, `{{clipboard}}`, `{{url}}`, `{{title}}`, and `{{repo}}` placeholders. Pin the ones you use most to the menu; the rest (e.g. **Improve writing**, **Translate**) sit behind its **⋯** button.
 
-**Tour this repository** (also `Cmd/Ctrl+Shift+L`): one click packs the README and the repo's core files into one message and asks for a guided tour (purpose, layout, how a request flows through, the stack, and which 3 files to read first). It replaced the old deep-dive agent, which took many turns to do the same.
-
 **Web research agent** — research any topic: the agent performs **SEARCH + READ** across the web and writes an answer with sources. Each search and read is logged in the conversation as it happens, and ■ stops it. Turn on **Deep research** in Settings for deeper coverage.
 
 **Fact-check it** (the start page on any web page) seeds the web research agent with the page, then lets it branch out via SEARCH/READ. **Video research** (in **⋯**) searches YouTube for a topic (e.g. *"top things to try in Chiang Mai"*), pulls the top videos' transcripts, and hands them to the AI to synthesize against your Notes. Requires a running **ytx** server; see [Video search: setting up ytx](#video-search-setting-up-ytx).
 
-**Reading code** — learn from other people's code without an API key or burning your chat quota. **+ → Files from this repository** (or *Browse files* on the start page) opens a file picker:
+**Reading code** — read a repository the way you would with a mentor beside you, without an API key. The chat site does the explaining, so reading costs no paid calls.
 
-- **Pick several files, send one message.** They go to the chat as **one Markdown pack** with a map of the repo showing where each file sits.
-- **+ Imports** also selects the repo files the selected ones import (JS/TS, Python, C/C++, Rust, CSS).
-- **Suggested** lists the file open in your tab, then a reading order: README, the manifest, then entry points.
-- **Line ranges:** select lines on GitHub (`#L10-L25`) and *Explain* on the start page sends just those lines.
-- **Read marks (✓)** and a token estimate, so you know when a pack is too big for a free plan.
-- **Works on any branch or tag**, including names with slashes.
-- **Recent changes** (start page): the latest commits on the branch. Click one to have the AI explain its diff, or ask *What's been happening?* for a themed summary.
-- **Barely touches the GitHub API:** file contents come from `raw.githubusercontent.com`, and the tree is one cached API call per repo, so the 60 requests/hour anonymous limit stops being a problem. A token in Settings lifts it further and opens private repos.
+- **The reader.** Files open in a Yavar reader tab with the lines under discussion highlighted. It shows GitHub files and files from a local folder alike. File references in answers (`src/app.js:12-30`) are links that open there.
+- **Read <file>.** The AI splits the file into blocks of related lines. You step through them in the panel while the reader highlights each block. Every block has *Explain more*, *Quiz me*, *Practise typing* (retype the lines from memory; Yavar compares them with the original and marks what differs) and a chat button for your own question. Questions carry the block's numbered lines and the last two answers on it, so they make sense in any chat. Progress is kept per file.
+- **Read this repository** (also `Cmd/Ctrl+Shift+L`). The AI reads the README and core files and returns the big picture: what the project does, its main parts, and a reading order that starts at the entry point. Each file is then walked block by block. When you finish one, *Up next* suggests the next from the reading order and the file's imports; with a free API model set up, it picks between the candidates. *How the files connect* shows the import tree.
+- **Read this commit / pull request** (and each row of *Recent changes*). The change is split into parts, one per changed spot in a file. The AI gives the goal of the change, the order to read the parts, and what each part changed and why. The reader shows the file as it is after the change with the new lines highlighted; what was removed is in a fold under the explanation. *Write it yourself* is the typing practice over the new lines. Lockfiles, generated and vendored code and binary files are left out and named; a change with more than 40 parts has its busiest files' parts joined.
+- **Local folders.** *Read a project folder* (start page, or **+ → Files from a folder**) lists the folders you have opened before, or asks for a new one. Everything above works on it: the reader, walkthroughs, the reading map. `node_modules`, `.git`, build output and secret files (`.env`, keys) are never listed, and nothing leaves your machine except the files you send.
+- **Pick several files, send one message.** **+ → Files from this repository** opens a picker. The files go to the chat as **one Markdown pack** with a map of the repo, and one tap asks for *Explain*, *Line by line*, *How it fits*, *Review* or *Quiz me*. **+ Imports** adds the repo files the selected ones import (JS/TS, Python, C/C++, Rust, CSS). Read marks (✓) and a token estimate show what you have read and when a pack is too big for a free plan.
+- **Works on any branch or tag**, including names with slashes. File contents come from `raw.githubusercontent.com`, and the tree is one cached API call per repo, so the 60 requests/hour anonymous limit is rarely reached. A token in Settings lifts it further and opens private repos.
 
-**Local folders** — **+ → Files from a folder** uses the same picker on a project folder on your computer: packs, reading modes, imports, read marks. `node_modules`, `.git`, build output and secret files (`.env`, keys) are never listed, and nothing leaves your machine except the files you choose to send. Reopening remembers the last folder.
+When a walkthrough, reading map or plan comes back in a form Yavar can't read, it asks again before showing an error: the same chat once more, then another chat site (Gemini first), then the free API models, never the paid one. If the chat page shows its own error (for example Gemini's *Something went wrong (1060)*), Yavar moves on at once and the final error quotes it. Your chosen chat is loaded back afterwards.
 
-**Rebuild it yourself** — the best way to understand a codebase is to build a small version of it. From the start page on GitHub (or for the folder you last opened), one click sends the project's core files and the AI writes a plan of 5-10 small steps. For each step: the files to study (one click to read them), your task, how you know it works, a box for your code, **💡 Hint** (not the solution), **Check my code** (compared against the original files), and **▶ Try it**, which runs your code right in the step card. Hints and reviews stream into the step as they're written, with Copy, Run and *Use in editor* on each code block, so you never have to leave the step. Progress and mentor notes are saved per project.
+**Build it yourself** — the best way to understand a codebase is to build a small version of it. From the start page on GitHub (or for the folder you last opened), one click sends the project's core files and the AI writes a plan of 5-10 small steps. For each step: the files to study (one click opens them in the reader and explains them), your task, how you know it works, a code editor for your version, **Hint** (not the solution), **Review my code** (compared against the original files), **Run it**, and a chat button for your own question about the step. Answers appear inside the step, with Copy, Run and *Use in editor* on each code block. Progress and mentor notes are saved per project.
 
 **Answers inside Yavar**: every answer, including research reports, streams into the conversation as the AI writes it. Code blocks get Copy and ▶ Run, each answer has Copy, Ask again and Save, and the composer asks follow-ups in the same chat. *Open in chat* shows the real chat whenever you want it (API answers have no chat page, so they offer *Ask* the chat site instead).
 
@@ -53,9 +50,7 @@ Add, edit, or remove your own templates in Settings using `{{selection}}`, `{{pa
 
 **Sheets**: the runner, Build it yourself, notes and saved answers each fill the panel. ✕ or Esc goes back to the Yavar view.
 
-**Run code** — every Python or JavaScript block in an answer gets a **▶ Run** button. It runs locally in a sandbox (Python via bundled [Pyodide](https://pyodide.org), standard library only), shows the output, and offers *Ask AI to fix it*, *Explain the output* and *What should I try next?*. The answers appear under your code, not in the chat. *Code playground* in **⋯** opens the same runner.
-
-**Explain PR / commit** — on a pull request or commit page, one click attaches the diff and asks the AI to explain the goal, each file's change, what to learn from it, and what's risky.
+**Run code** — every Python or JavaScript block in an answer gets a **▶ Run** button. It runs locally in a sandbox (Python via bundled [Pyodide](https://pyodide.org), standard library only), shows the output, and offers *Fix it*, *Explain the output* and *What to try next*. The answers appear under your code, not in the chat. *Code playground* in **⋯** opens the same runner.
 
 **History & saved answers** — capture the AI's last answer and keep it in a searchable saved-answers panel. Answers saved while reading a repo are tagged with it (click the tag to see everything about that repo). The **+** in the panel's header saves the chat's latest answer. Expand, copy, send to Notes, or **export everything as Markdown**.
 
@@ -73,7 +68,7 @@ Chrome commands (rebind at `chrome://extensions/shortcuts`):
 |----------------------|--------|
 | `Cmd+Shift+Y` / `Alt+Shift+Y` | Open Yavar |
 | `Cmd+Shift+I` / `Alt+Shift+S` | Pick an element or area of the page (attached to your message) |
-| `Cmd+Shift+L` / `Ctrl+Shift+L` | Tour the GitHub repository in your tab |
+| `Cmd+Shift+L` / `Ctrl+Shift+L` | Read the GitHub repository in your tab |
 | `Cmd+Shift+O` / `Alt+Shift+N` | Open or close Notes |
 
 These are the defaults for a new install. Chrome keeps the bindings of an existing install; change them at `chrome://extensions/shortcuts`.
@@ -117,10 +112,19 @@ Yavar-Extension/
 │   ├── content.js        # Content script: floating menu + text selection
 │   ├── background.js     # Service worker (lifecycle, screenshot, routing)
 │   ├── sidepanel.js      # Sidebar UI: the Yavar view, agents, file picker,
-│   │                     #   history, notes, runner, rebuild
+│   │                     #   walkthroughs, history, notes, runner, rebuild
+│   ├── reader.js         # The reader tab: a file with its lines highlighted
 │   ├── ai-bridge.js      # Auto-submit / auto-paste / answer capture on AI platforms
 │   ├── options.js        # Settings page (models, prompts, token, shortcuts)
 │   └── utils/
+│       ├── github.js     # URLs, file packs, line citations, imports
+│       ├── walkthrough.js # A file split into blocks; typing comparison; quizzes
+│       ├── journey.js    # The reading map and what to read next
+│       ├── changes.js    # A commit or PR diff split into parts
+│       ├── rebuild.js    # Build it yourself: plans, hints, reviews
+│       ├── llm.js        # Model APIs: local gateway, OpenRouter, the monthly budget
+│       ├── markdown.js   # Rendering answers
+│       ├── codeEditor.js # CodeMirror modes for the code boxes
 │       ├── commands.js   # Keyboard shortcut handlers
 │       ├── template-core.js # Prompt templates: defaults + {{variable}} expansion
 │       │                    #   (classic script, shared by content script and pages)
@@ -130,12 +134,13 @@ Yavar-Extension/
 │       ├── models.js     # Built-in chat models, shared by the panel and Settings
 │       └── contextMenu.js
 ├── lib/
-│   ├── codemirror/       # CodeMirror (notes panel)
+│   ├── codemirror/       # CodeMirror (notes, runner, code boxes)
 │   └── pyodide/          # Python runtime for the code runner
 ├── styles/
 ├── tests/                # node:test unit tests
 ├── scripts/              # ytx setup + check.mjs (static checks)
 ├── sidepanel.html
+├── reader.html
 ├── options.html
 └── manifest.json
 ```
