@@ -11,7 +11,7 @@ import { DEFAULT_MODELS, loadModels as loadStoredModels } from './utils/models.j
 import { captureLabel, captureMarkdown, hasCaptureText } from './utils/capture.js';
 import { suggestActions } from './utils/actions.js';
 import { icon } from './utils/icons.js';
-import { transcriptMarkdown, turnsToMessages, HANDOFF_NOTE } from './utils/conversation.js';
+import { transcriptMarkdown, turnsToMessages, HANDOFF_NOTE, earlierAnswers } from './utils/conversation.js';
 import { loadApiConfig, buildRoute, askRoute, askWithBudget } from './utils/llm.js';
 import { pickCoreFiles, planPrompt, hintPrompt, askPrompt, checkPrompt, parseRebuildPlan } from './utils/rebuild.js';
 import {
@@ -2284,7 +2284,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       if (!q) return;
       const title = q.length > 80 ? q.slice(0, 79) + '…' : q;
       el.disabled = true;
-      await this.showAnswerIn(this.rebuildBody.querySelector('.rebuild-mentor'), title, askPrompt(st.plan, i, code, q), {
+      await this.showAnswerIn(this.rebuildBody.querySelector('.rebuild-mentor'), title, askPrompt(st.plan, i, code, q, earlierAnswers(st.mentor?.[i])), {
         via: 'chat', inline: true,
         onUseCode: (c) => this.setStepCode(c),
         onDone: (text) => this.addMentorNote(i, title, text)
@@ -2709,8 +2709,10 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       const q = this.takeQuestion(this.walkBody);
       if (!q) return;
       label = q.length > 80 ? q.slice(0, 79) + '…' : q;
+      const earlier = earlierAnswers(w.notes?.[i]);
       prompt = `I'm walking through ${where}, block by block. My question about this block: ${q}` +
-        `${w.summary ? `\n\n(The file as a whole: ${w.summary})` : ''}\n\n${LINE_NUMBER_NOTE}\n\n${block}\n\n${CITE_RULE}`;
+        `${w.summary ? `\n\n(The file as a whole: ${w.summary})` : ''}\n\n${LINE_NUMBER_NOTE}\n\n${block}` +
+        `${earlier ? `\n\n${earlier}` : ''}\n\n${CITE_RULE}`;
     } else if (act === 'quiz') {
       label = 'Quiz';
       prompt = quizPrompt(where, `${LINE_NUMBER_NOTE}\n\n${block}`);
