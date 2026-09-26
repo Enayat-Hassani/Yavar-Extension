@@ -84,3 +84,11 @@ test('files nothing imports each start their own branch; depth is capped', () =>
   assert.deepEqual(tree.map(t => t.file), ['a.js', 'x.js']);
   assert.deepEqual(tree[0].children[0].children[0], { file: 'c.js', repeat: false, children: [] });
 });
+
+test('paths led by the folder name, or under other keys, still count', () => {
+  const files = new Set(['backend/app.py', 'backend/models.py', 'README.md']);
+  const reply = '{"summary": "A backend.", "reading_order": [{"path": "wfm-ops-agent/backend/app.py", "reason": "Entry"}, {"file": "./backend/models.py"}]}';
+  const j = parseJourney(reply, files, 'wfm-ops-agent');
+  assert.deepEqual(j.path, [{ file: 'backend/app.py', why: 'Entry' }, { file: 'backend/models.py', why: '' }]);
+  assert.equal(parseJourney(reply, files), null, 'without the folder name the first path is unknown');
+});

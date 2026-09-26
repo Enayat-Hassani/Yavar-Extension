@@ -2284,7 +2284,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
           : '<span class="rebuild-live-hint">Reading the code…</span>';
       };
       const reply = await this.askInPanel(planPrompt(this.repoDisplayName()), { attachments, onProgress, via: 'chat' });
-      await this.adoptPlan(reply);
+      await this.adoptPlan((await this.parseChatReply(reply, parseRebuildPlan)).text);
     } catch (e) {
       this.showNotification('⚠️ ' + e.message + '. When the plan is in the chat, use "Load it".');
     } finally {
@@ -2431,6 +2431,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     }
     const MAX_LINES = 400;
     this._walkPending = true;
+    this._walkRaw = '';
     this.walk = { path, pending: true };
     this.renderWalk();
     try {
@@ -2458,8 +2459,11 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       const reply = await this.askInPanel(prompt, {
         attachments: inline ? [] : [{ filename: fname, content: this.packFor([file]) }], onProgress, via: 'chat'
       });
-      const parsed = parseWalkthrough(reply, range);
-      if (!parsed) throw new Error("couldn't find the blocks in the AI's reply");
+      const { value: parsed, text } = await this.parseChatReply(reply, (t) => parseWalkthrough(t, range));
+      if (!parsed) {
+        this._walkRaw = text;
+        throw new Error("couldn't find the blocks in the AI's reply");
+      }
       await this.saveWalk({ path, range, total, summary: parsed.summary, blocks: parsed.blocks, current: 0, typed: {}, created: Date.now() });
       await this.markRead([path]);
       this._readingContext = { label: repo, ts: Date.now() };
@@ -2508,7 +2512,8 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     if (!w?.blocks) {
       this.walkBody.innerHTML = (toMap ? `<div class="wk-bar">${toMap}</div>` : '') + (w?.error
         ? `<div class="rebuild-intro"><p>⚠️ Could not make the walkthrough: ${esc(w.error)}.</p>` +
-          `<button type="button" class="files-send" data-wk="retry">Try again</button></div>`
+          `<button type="button" class="files-send jr-primary" data-wk="retry">Ask again</button></div>` +
+          this.replyDisclosure(this._walkRaw)
         : `<div class="rebuild-wait"><span class="files-spinner"></span>The AI is splitting ${esc(w?.path?.split('/').pop())} into blocks…<div class="rebuild-live"></div></div>`);
       return;
     }
@@ -2815,6 +2820,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
 
   showJourneyMap() {
     this.walkView = 'map';
+    this._journeyError = null;
     document.getElementById('walk-title').textContent = 'Reading';
     document.getElementById('walk-sub').textContent = this.repoDisplayName();
     this.renderJourney();
@@ -2838,6 +2844,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     document.getElementById('walk-sub').textContent = this.repoDisplayName();
     this._journeyPending = true;
     this._journeyError = null;
+    this._journeyRaw = '';
     this.renderJourney();
     const done = this.journey?.done || [];
     try {
@@ -2858,8 +2865,11 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       const reply = await this.askInPanel(journeyPrompt(this.repoDisplayName(), fname), {
         attachments: [{ filename: fname, content: this.packFor(files) }], onProgress, via: 'chat'
       });
-      const parsed = parseJourney(reply, this.repoTree.fileSet);
-      if (!parsed) throw new Error("couldn't find a reading order in the AI's reply");
+      const { value: parsed, text } = await this.parseChatReply(reply, (t) => parseJourney(t, this.repoTree.fileSet, this.repoTree.repo));
+      if (!parsed) {
+        this._journeyRaw = text;
+        throw new Error("couldn't find a reading order of files from this project in the AI's reply");
+      }
       await this.saveJourney({ ...parsed, done, created: Date.now() });
       this._readingContext = { label: this.repoDisplayName(), ts: Date.now() };
     } catch (e) {
@@ -2877,11 +2887,15 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     const j = this.journey;
     const local = this.repoTree?.source === 'local';
     const other = local ? `<button type="button" class="files-link-btn jr-link" data-wk="folders">Read another folder</button>` : '';
-    if (this._journeyPending || !j) {
+    // A failed new overview says so, even when an older map exists
+    if (this._journeyPending || this._journeyError || !j) {
       this.walkBody.innerHTML = this._journeyPending
         ? `<div class="rebuild-wait"><span class="files-spinner"></span>Reading the README and core files for the big picture…<div class="rebuild-live"></div></div>`
         : `<div class="rebuild-intro"><p>⚠️ Could not get an overview${this._journeyError ? `: ${esc(this._journeyError)}` : ''}.</p>` +
-          `<button type="button" class="files-send" data-wk="journey-create">Try again</button></div>` + other;
+          `<div class="jr-actions rb-start">` +
+            (j ? `<button type="button" class="files-link-btn jr-link" data-wk="map">Back to the current map</button>` : '<span></span>') +
+            `<button type="button" class="files-send jr-primary" data-wk="journey-create">Ask again</button></div></div>` +
+          this.replyDisclosure(this._journeyRaw) + other;
       return;
     }
     const done = new Set(j.done || []);
@@ -2982,6 +2996,28 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     } catch (e) {
       console.warn('[Yavar] No next-file pick:', e.message);   // the reading order stands
     }
+  }
+
+  // A reply the chat site just gave, parsed with `parse`. If it doesn't
+  // parse, the chat's answer is read once more: the answer watch can settle
+  // before a long code block has finished rendering. Returns { value, text },
+  // value null when neither reading parses (text is kept for showing).
+  async parseChatReply(reply, parse) {
+    const first = parse(reply);
+    if (first) return { value: first, text: reply };
+    await new Promise(r => setTimeout(r, 1500));
+    let again = '';
+    try { again = await this.captureLastAnswerText(); } catch (e) { /* the first reading stands */ }
+    const second = again ? parse(again) : null;
+    // Show whichever reading holds more of the answer
+    const text = (second || again.length > String(reply || '').length) ? again : reply;
+    return { value: second, text };
+  }
+
+  // The AI's reply behind a "couldn't read it" error, folded, so you can see why
+  replyDisclosure(text) {
+    if (!String(text || '').trim()) return '';
+    return `<details class="raw-reply"><summary>Show the AI's reply</summary><pre>${this.escapeHtml(String(text).slice(0, 20000))}</pre></details>`;
   }
 
   // Read the chat's latest answer and resolve with its text
