@@ -41,7 +41,7 @@
   --brand-chatgpt: #10a37f;
   --brand-claude: #d97757;
   --brand-gemini: linear-gradient(135deg, #4285f4, #9b72cb);
-  --brand-api: linear-gradient(135deg, #5e5ce6, #bf5af2);
+  --brand-api: #1d1d1f;          /* the logo's tile: models Yavar calls itself */
   /* Shape: four radii and a pill */
   --r-xs: 4px;
   --r-sm: 6px;
@@ -1922,7 +1922,7 @@ button.lens-item:focus-visible {
 
 /* A research mode set on the message box */
 .composer-tool { color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface)); border-color: color-mix(in srgb, var(--accent) 30%, var(--border)); }
-.model-mark[data-model="api"] { background: var(--brand-api); }
+.model-mark[data-model="api"] { background: var(--brand-api); box-shadow: inset 0 0 0 1px var(--border); }
 .composer-item-size { flex-shrink: 0; font-size: 10.5px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
 
 /* ========== Answers: rendering, actions, motion ========== */

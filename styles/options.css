@@ -271,7 +271,7 @@ body {
 }
 
 .btn-danger:hover {
-  background: #dc2626;
+  background: color-mix(in srgb, var(--danger) 85%, #000);
   box-shadow: 0 2px 8px rgba(255, 59, 48, 0.2);
 }
 

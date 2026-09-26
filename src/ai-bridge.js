@@ -598,7 +598,7 @@
 
   const UI_CSS = `
     :host { all: initial; --fg:#1d1d1f; --muted:#6e6e73; --line:rgba(0,0,0,.12); --hover:rgba(0,113,227,.09); --accent:#0071e3; }
-    :host([dark]) { --fg:#f5f5f7; --muted:#a1a1a6; --line:rgba(255,255,255,.14); --hover:rgba(10,132,255,.18); --accent:#4aa3ff; }
+    :host([dark]) { --fg:#f5f5f7; --muted:#a1a1a6; --line:rgba(255,255,255,.14); --hover:rgba(10,132,255,.18); --accent:#409cff; }
     * { box-sizing: border-box; font: 500 12px/1.2 system-ui, -apple-system, 'Segoe UI', sans-serif; }
     .row { display:flex; flex-wrap:wrap; align-items:center; gap:4px; margin:8px 0 2px; opacity:.72; transition:opacity .15s; }
     .row:hover, .row:focus-within { opacity:1; }
