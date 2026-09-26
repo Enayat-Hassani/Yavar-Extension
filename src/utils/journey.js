@@ -21,16 +21,23 @@ export function journeyPrompt(name, fname) {
 }
 
 // Keep only files that exist (a partial path is matched when it's unique),
-// drop repeats. Returns { summary, parts, path } or null when the reading
-// order has fewer than two files.
-export function parseJourney(text, fileSet) {
+// drop repeats. `root` is the repo or folder name, which the AI sometimes
+// puts in front of paths ("my-app/src/x.py"). Returns { summary, parts,
+// path } or null when the reading order has fewer than two files.
+export function parseJourney(text, fileSet, root = '') {
   const str = v => (v == null ? '' : String(v)).trim();
-  const known = f => parseFileRef(str(f).replace(/^`|`$/g, ''), fileSet)?.path || null;
+  const known = (f) => {
+    const p = str(f).replace(/^`|`$/g, '').replace(/^\.?\//, '');
+    const hit = parseFileRef(p, fileSet)?.path;
+    if (hit || !root || !p.startsWith(root + '/')) return hit || null;
+    return parseFileRef(p.slice(root.length + 1), fileSet)?.path || null;
+  };
   for (const obj of jsonCandidates(text)) {
-    if (!Array.isArray(obj?.path)) continue;
+    const order = obj?.path || obj?.reading_order || obj?.files;
+    if (!Array.isArray(order)) continue;
     const seen = new Set();
-    const path = obj.path
-      .map(p => ({ file: known(typeof p === 'string' ? p : p?.file), why: str(p?.why) }))
+    const path = order
+      .map(p => ({ file: known(typeof p === 'string' ? p : p?.file || p?.path), why: str(p?.why || p?.reason) }))
       .filter(p => p.file && !seen.has(p.file) && seen.add(p.file));
     if (path.length < 2) continue;
     const parts = (Array.isArray(obj.parts) ? obj.parts : [])
