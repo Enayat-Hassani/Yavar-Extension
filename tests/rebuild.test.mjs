@@ -50,4 +50,6 @@ test('a question of your own carries the step, your code and the question', () =
   assert.match(p, /```python\ndef parse\(line\):\n    return line\.split\(\)\n```/);
   assert.match(p, /My question: Why not use a regex\?/);
   assert.doesNotMatch(askPrompt(plan, 0, '  \n', 'What is a request line?'), /My code so far/);
+  assert.match(askPrompt(plan, 0, '', 'And then?', 'What you told me about this earlier:\n\n### Hint\n\nSplit on spaces.'),
+    /### Hint\n\nSplit on spaces\.\n\nMy question: And then\?/);
 });

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { transcriptMarkdown, turnsToMessages } from '../src/utils/conversation.js';
+import { transcriptMarkdown, turnsToMessages, earlierAnswers } from '../src/utils/conversation.js';
 
 const turns = [
   { q: 'What is a closure?', a: 'A function that keeps its scope.', by: 'ChatGPT' },
@@ -27,4 +27,18 @@ test('a long conversation keeps its newest turns and says what it left out', () 
   assert.equal(turnsToMessages(many, 350).length, 6);
   // The newest turn is kept even when it alone is over the limit
   assert.equal(turnsToMessages([{ q: 'big', a: 'y'.repeat(1000) }], 10).length, 2);
+});
+
+test('earlier answers on a block: the latest two, long ones cut, quizzes as questions', () => {
+  const notes = [
+    { label: 'Explain more', text: 'oldest' },
+    { label: 'Quiz', quiz: [{ q: 'What is MIN_ROWS?', a: 'A floor on rows.' }] },
+    { title: 'Hint', text: 'x'.repeat(2000) }
+  ];
+  const s = earlierAnswers(notes);
+  assert.doesNotMatch(s, /oldest/);
+  assert.match(s, /### Quiz\n\n1\. What is MIN_ROWS\?\n   Answer: A floor on rows\./);
+  assert.match(s, /### Hint\n\nx{1500} …$/);
+  assert.equal(earlierAnswers([]), '');
+  assert.equal(earlierAnswers(undefined), '');
 });
