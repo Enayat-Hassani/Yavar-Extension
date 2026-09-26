@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { pickCoreFiles, parseRebuildPlan, planPrompt, hintPrompt, checkPrompt } from '../src/utils/rebuild.js';
+import { pickCoreFiles, parseRebuildPlan, planPrompt, hintPrompt, askPrompt, checkPrompt } from '../src/utils/rebuild.js';
 
 test('picks docs and shallow source within budget, skipping tests and big files', () => {
   const items = [
@@ -41,4 +41,15 @@ test('prompts mention the project, step and code', () => {
   assert.match(planPrompt('acme/demo'), /acme\/demo[\s\S]*```json/);
   assert.match(hintPrompt(plan, 0), /step 1 of 1: "A"[\s\S]*a\.py/);
   assert.match(checkPrompt(plan, 0, 'print(1)\n', true), /```python\nprint\(1\)\n```[\s\S]*attached pack/);
+});
+
+test('a question of your own carries the step, your code and the question', () => {
+  const plan = { project: 'tiny-http', language: 'Python', steps: [{ title: 'Parse the request line', task: 'Split method, path and version' }] };
+  const p = askPrompt(plan, 0, 'def parse(line):\n    return line.split()\n', 'Why not use a regex?');
+  assert.match(p, /step 1 of 1: "Parse the request line"/);
+  assert.match(p, /```python\ndef parse\(line\):\n    return line\.split\(\)\n```/);
+  assert.match(p, /My question: Why not use a regex\?/);
+  assert.doesNotMatch(askPrompt(plan, 0, '  \n', 'What is a request line?'), /My code so far/);
+  assert.match(askPrompt(plan, 0, '', 'And then?', 'What you told me about this earlier:\n\n### Hint\n\nSplit on spaces.'),
+    /### Hint\n\nSplit on spaces\.\n\nMy question: And then\?/);
 });

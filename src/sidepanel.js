@@ -11,9 +11,9 @@ import { DEFAULT_MODELS, loadModels as loadStoredModels } from './utils/models.j
 import { captureLabel, captureMarkdown, hasCaptureText } from './utils/capture.js';
 import { suggestActions } from './utils/actions.js';
 import { icon } from './utils/icons.js';
-import { transcriptMarkdown, turnsToMessages, HANDOFF_NOTE } from './utils/conversation.js';
+import { transcriptMarkdown, turnsToMessages, HANDOFF_NOTE, earlierAnswers } from './utils/conversation.js';
 import { loadApiConfig, buildRoute, askRoute, askWithBudget } from './utils/llm.js';
-import { pickCoreFiles, planPrompt, hintPrompt, checkPrompt, parseRebuildPlan } from './utils/rebuild.js';
+import { pickCoreFiles, planPrompt, hintPrompt, askPrompt, checkPrompt, parseRebuildPlan } from './utils/rebuild.js';
 import {
   parseGitHubUrl, refCandidates, rawFileUrl, encodePath, isReadablePath, estimateTokens, formatCount,
   sliceLines, extractImports, resolveImports, suggestStartFiles, buildPack, readingPrompt, READ_MODES,
@@ -197,6 +197,32 @@ class YavarSidePanel {
       if (!this.closeStepList(this.walkBody, true)) this.walkPanel.classList.add('hidden');
     });
     this.walkBody?.addEventListener('click', (e) => this.onWalkClick(e));
+    for (const body of [this.rebuildBody, this.walkBody]) {
+      body?.addEventListener('click', (e) => {
+        if (e.target.closest('.wk-ask-open')) this.toggleAsk(body, true);
+      });
+      body?.addEventListener('keydown', (e) => {
+        if (!e.target.matches('.wk-ask-input') || e.isComposing) return;
+        if (e.key === 'Escape') {
+          e.stopPropagation();   // closes the field, not the sheet
+          this.toggleAsk(body, false, { refocus: true });
+        } else if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          e.target.nextElementSibling.click();
+        }
+      });
+      // Left empty: back to the actions. A question being written stays.
+      body?.addEventListener('focusout', (e) => {
+        const ask = e.target.closest?.('.wk-ask');
+        if (!ask || ask.contains(e.relatedTarget) || ask.querySelector('.wk-ask-input').value.trim()) return;
+        this.toggleAsk(body, false);
+      });
+      body?.addEventListener('input', (e) => {
+        if (!e.target.matches('.wk-ask-input')) return;
+        e.target.style.height = 'auto';
+        e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+      });
+    }
     document.getElementById('run-close')?.addEventListener('click', () => this.closeRunPanel());
     this.runGo?.addEventListener('click', () => this.runCode());
     this.runStop?.addEventListener('click', () => this.stopCode());
@@ -481,7 +507,8 @@ class YavarSidePanel {
       ANSWER_WATCH_FAILED: 'answer reading is not supported on this model',
       ANSWER_WATCH_NOT_SENT: "the chat didn't send the message (open the chat with 💬 and press send there)",
       ANSWER_WATCH_STALLED: 'no reply from the AI',
-      ANSWER_WATCH_TIMEOUT: 'no reply from the AI'
+      ANSWER_WATCH_TIMEOUT: 'no reply from the AI',
+      ANSWER_WATCH_ERROR: `the chat showed "${String(data.message || 'an error').slice(0, 100)}"`
     }[data.action];
     const plain = data.action === 'CHAT_STATE' || data.action === 'TEMP_CHAT_STARTED';
     if (data.action !== 'ANSWER_SETTLED' && data.action !== 'ANSWER_CAPTURED' && !fail && !plain) return false;
@@ -2126,11 +2153,11 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
         ? `<span class="rb-done-note">✓ Step done</span><button type="button" class="files-link-btn jr-link" data-rb="undone">Undo</button>`
         : `<button type="button" class="files-send jr-primary" data-rb="done">${i === n - 1 ? 'Mark the last step done' : 'Mark done and continue →'}</button>`) +
       `</div>` +
-      `<div class="wk-dock">` +
+      `<div class="wk-dock">` + this.askBox('data-rb', 'Ask about this step…',
         `<button type="button" class="run-ask" data-rb="hint">Hint</button>` +
         `<button type="button" class="run-ask" data-rb="check">Review my code</button>` +
         (lang ? `<button type="button" class="run-ask" data-rb="try" title="Ctrl+Enter">Run it</button>` : '') +
-        `<span class="rebuild-run-status"></span>` +
+        `<span class="rebuild-run-status"></span>`) +
       `</div>`;
 
     this._rbCode = this.makeCodeBox(this.rebuildBody.querySelector('.code-box'), {
@@ -2164,6 +2191,40 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     const mentor = { ...(st.mentor || {}) };
     mentor[i] = [...(mentor[i] || []), { title, text, ts: Date.now() }].slice(-6);
     await this.saveRebuild({ ...st, mentor });
+  }
+
+  // A dock's content: the quick actions, ending in a chat button that swaps
+  // them for a question field in the same row (so the dock doesn't grow).
+  // The field grows as you type; Enter asks, Shift+Enter starts a new line,
+  // and Escape, or leaving it empty, brings the actions back (toggleAsk).
+  askBox(attr, placeholder, actions) {
+    return `<div class="wk-acts">${actions}` +
+      `<button type="button" class="wk-ask-open" title="${placeholder.replace(/…$/, '')}" aria-label="${placeholder.replace(/…$/, '')}" aria-expanded="false">${icon('chat', 18)}</button></div>` +
+      `<div class="wk-ask" hidden><textarea class="wk-ask-input" rows="1" placeholder="${placeholder}" aria-label="${placeholder}"></textarea>` +
+      `<button type="button" class="wk-ask-send" ${attr}="ask" title="Ask (Enter)" aria-label="Ask">` +
+      `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"></path></svg></button></div>`;
+  }
+
+  toggleAsk(body, open, { refocus = false } = {}) {
+    const dock = body.querySelector('.wk-dock');
+    const ask = dock?.querySelector('.wk-ask');
+    if (!ask || ask.hidden === !open) return;
+    const btn = dock.querySelector('.wk-ask-open');
+    dock.classList.toggle('is-asking', open);
+    ask.hidden = !open;
+    btn.setAttribute('aria-expanded', String(open));
+    if (open) ask.querySelector('.wk-ask-input').focus();
+    else if (refocus) btn.focus();
+  }
+
+  // The question typed in a dock's ask field, cleared once taken; '' when empty
+  takeQuestion(body) {
+    const input = body.querySelector('.wk-ask-input');
+    const q = input?.value.trim() || '';
+    if (!q) { input?.focus(); return ''; }
+    input.value = '';
+    input.style.height = '';
+    return q;
   }
 
   async onRebuildClick(e) {
@@ -2243,6 +2304,17 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       el.disabled = true;
       await this.showAnswerIn(mentor, title, prompt, {
         attachments, via: 'chat', inline: true,
+        onUseCode: (c) => this.setStepCode(c),
+        onDone: (text) => this.addMentorNote(i, title, text)
+      });
+      el.disabled = false;
+    } else if (act === 'ask') {
+      const q = this.takeQuestion(this.rebuildBody);
+      if (!q) return;
+      const title = q.length > 80 ? q.slice(0, 79) + '…' : q;
+      el.disabled = true;
+      await this.showAnswerIn(this.rebuildBody.querySelector('.rebuild-mentor'), title, askPrompt(st.plan, i, code, q, earlierAnswers(st.mentor?.[i])), {
+        via: 'chat', inline: true,
         onUseCode: (c) => this.setStepCode(c),
         onDone: (text) => this.addMentorNote(i, title, text)
       });
@@ -2558,10 +2630,10 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       `<div class="walk-notes"></div>` +
       `<div class="walk-next" aria-live="polite"></div>` +
       // Pinned to the bottom of the sheet, so answers never push them away
-      `<div class="wk-dock">` +
+      `<div class="wk-dock">` + this.askBox('data-wk', 'Ask about these lines…',
         `<button type="button" class="run-ask" data-wk="more">Explain more</button>` +
         `<button type="button" class="run-ask" data-wk="quiz">Quiz me</button>` +
-        `<button type="button" class="run-ask" data-wk="type" aria-expanded="false">Practise typing${best != null ? ` · best ${best}%` : ''}</button>` +
+        `<button type="button" class="run-ask" data-wk="type" aria-expanded="false">Practise typing${best != null ? ` · best ${best}%` : ''}</button>`) +
       `</div>`;
 
     // Earlier answers for this block, folded except the latest
@@ -2651,7 +2723,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       }
       return;
     }
-    if (act !== 'more' && act !== 'quiz' && act !== 'feedback') return;
+    if (act !== 'more' && act !== 'quiz' && act !== 'feedback' && act !== 'ask') return;
 
     const notesEl = this.walkBody.querySelector('.walk-notes');
     let prompt;
@@ -2661,6 +2733,14 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       prompt = `I'm walking through ${where}, block by block. Explain this block in more depth, line by line: ` +
         `what each line does and why, and anything that would surprise a beginner.` +
         `${w.summary ? ` (The file as a whole: ${w.summary})` : ''}\n\n${LINE_NUMBER_NOTE}\n\n${block}\n\n${CITE_RULE}`;
+    } else if (act === 'ask') {
+      const q = this.takeQuestion(this.walkBody);
+      if (!q) return;
+      label = q.length > 80 ? q.slice(0, 79) + '…' : q;
+      const earlier = earlierAnswers(w.notes?.[i]);
+      prompt = `I'm walking through ${where}, block by block. My question about this block: ${q}` +
+        `${w.summary ? `\n\n(The file as a whole: ${w.summary})` : ''}\n\n${LINE_NUMBER_NOTE}\n\n${block}` +
+        `${earlier ? `\n\n${earlier}` : ''}\n\n${CITE_RULE}`;
     } else if (act === 'quiz') {
       label = 'Quiz';
       prompt = quizPrompt(where, `${LINE_NUMBER_NOTE}\n\n${block}`);
@@ -3666,6 +3746,10 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
 
       if (data.action === 'ANSWER_WATCH_FAILED') {
         if (this.agent?.active) this.finishAgent('Answer-reading is not supported on this model.');
+      }
+
+      if (data.action === 'ANSWER_WATCH_ERROR') {
+        if (this.agent?.active) this.finishAgent(`The chat showed an error: "${data.message || 'Something went wrong'}".`);
       }
     });
   }
