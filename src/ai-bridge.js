@@ -176,6 +176,19 @@
     const STALL_MS = 22000;      // no generation + no new answer → the submit likely failed
     const IDLE_TIMEOUT_MS = 90000; // give up only after this long with no activity
 
+    // The site's own failure message ("Something went wrong (1060)"), new
+    // since the watch started. The phrase inside the user's own messages
+    // (code being explained, say) doesn't count. Read sparingly: innerText
+    // lays out the page.
+    const ERROR_RE = /something went wrong[^\n]{0,80}/gi;
+    const siteErrors = () => {
+      const found = (document.body?.innerText || '').match(ERROR_RE) || [];
+      const userSel = USER_SELECTORS[platform];
+      const own = userSel ? [...document.querySelectorAll(userSel)].flatMap(el => (el.innerText || '').match(ERROR_RE) || []) : [];
+      return found.slice(own.length);   // the site's messages come after the question they answer
+    };
+    const errorsBefore = siteErrors().length;
+
     let sawGenerating = false;
     let lastText = '';
     let lastProgress = '';
@@ -236,6 +249,11 @@
           lastText = cur.text;
           stableTicks = 0;
         }
+      } else if (!generating && elapsed % 3000 < TICK && siteErrors().length > errorsBefore) {
+        const rid = requestId;
+        const message = siteErrors().pop().trim();
+        stopAnswerWatch();
+        try { postToYavar({ action: 'ANSWER_WATCH_ERROR', message, requestId: rid }); } catch (e) {}
       } else if (!sawGenerating && elapsed >= STALL_MS) {
         // Never saw generation and no new answer appeared — the message probably
         // never sent. Tell the agent so it can retry rather than hang.

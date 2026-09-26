@@ -481,7 +481,8 @@ class YavarSidePanel {
       ANSWER_WATCH_FAILED: 'answer reading is not supported on this model',
       ANSWER_WATCH_NOT_SENT: "the chat didn't send the message (open the chat with 💬 and press send there)",
       ANSWER_WATCH_STALLED: 'no reply from the AI',
-      ANSWER_WATCH_TIMEOUT: 'no reply from the AI'
+      ANSWER_WATCH_TIMEOUT: 'no reply from the AI',
+      ANSWER_WATCH_ERROR: `the chat showed "${String(data.message || 'an error').slice(0, 100)}"`
     }[data.action];
     const plain = data.action === 'CHAT_STATE' || data.action === 'TEMP_CHAT_STARTED';
     if (data.action !== 'ANSWER_SETTLED' && data.action !== 'ANSWER_CAPTURED' && !fail && !plain) return false;
@@ -3666,6 +3667,10 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
 
       if (data.action === 'ANSWER_WATCH_FAILED') {
         if (this.agent?.active) this.finishAgent('Answer-reading is not supported on this model.');
+      }
+
+      if (data.action === 'ANSWER_WATCH_ERROR') {
+        if (this.agent?.active) this.finishAgent(`The chat showed an error: "${data.message || 'Something went wrong'}".`);
       }
     });
   }
