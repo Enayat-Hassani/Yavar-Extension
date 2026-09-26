@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { walkPrompt, parseWalkthrough, compareTyped } from '../src/utils/walkthrough.js';
+import { walkPrompt, parseWalkthrough, compareTyped, stripComments } from '../src/utils/walkthrough.js';
 
 const reply = (blocks, summary = 'Parses things.') => '```json\n' + JSON.stringify({ summary, blocks }) + '\n```';
 
@@ -57,6 +57,28 @@ test('typing compare catches a changed line and a missing one', () => {
 
 test('typing nothing scores zero', () => {
   assert.equal(compareTyped('x = 1', '').accuracy, 0);
+});
+
+test('typing compare leaves comments and docstrings out', () => {
+  const original = 'def f(x):\n    """Add one."""\n    # the next number\n    return x + 1  # simple\n';
+  const r = compareTyped(original, 'def f(x):\n    return x + 1', 'python');
+  assert.equal(r.accuracy, 100);
+  assert.ok(r.ops.every(o => o.type === 'same'));
+  // Comments you add yourself don't count against you either
+  assert.equal(compareTyped('const a = 1;\n/* two\n   lines */\nlet b = 2; // b', '// mine\nconst a = 1;\nlet b = 2;', 'javascript').accuracy, 100);
+});
+
+test('comment markers inside strings are code', () => {
+  assert.equal(stripComments('url = "http://x.org" // site', 'javascript'), 'url = "http://x.org" ');
+  assert.equal(stripComments("tag = '#main'  # id", 'python'), "tag = '#main'  ");
+  // A triple-quoted string that is a value, not a docstring, stays
+  assert.equal(stripComments('q = """\nselect 1 # not a comment\n"""', 'python'), 'q = """\nselect 1 # not a comment\n"""');
+  assert.equal(stripComments('select 1 -- one', 'sql'), 'select 1 ');
+});
+
+test('comments are compared when the language is unknown', () => {
+  assert.equal(compareTyped('x = 1\n# note', 'x = 1').accuracy, 50);
+  assert.equal(stripComments('<a href="//x">//</a>', 'html'), '<a href="//x">//</a>');
 });
 
 import { quizPrompt, parseQuiz } from '../src/utils/walkthrough.js';
