@@ -2283,8 +2283,11 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
           ? `<ol>${titles.map(t => `<li>${this.escapeHtml(t)}</li>`).join('')}</ol>`
           : '<span class="rebuild-live-hint">Reading the code…</span>';
       };
-      const reply = await this.askInPanel(planPrompt(this.repoDisplayName()), { attachments, onProgress, via: 'chat' });
-      await this.adoptPlan((await this.parseChatReply(reply, parseRebuildPlan)).text);
+      const { value, text, tried } = await this.askForJson(planPrompt(this.repoDisplayName()), {
+        attachments, onProgress, live: this.rebuildBody, parse: parseRebuildPlan
+      });
+      if (!value) throw new Error(`couldn't find a plan in the replies (asked ${tried})`);
+      await this.adoptPlan(text);
     } catch (e) {
       this.showNotification('⚠️ ' + e.message + '. When the plan is in the chat, use "Load it".');
     } finally {
@@ -2456,13 +2459,13 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
           ? `<ol>${titles.map(t => `<li>${this.escapeHtml(t)}</li>`).join('')}</ol>`
           : '<span class="rebuild-live-hint">Reading the code…</span>';
       };
-      const reply = await this.askInPanel(prompt, {
-        attachments: inline ? [] : [{ filename: fname, content: this.packFor([file]) }], onProgress, via: 'chat'
+      const { value: parsed, text, tried } = await this.askForJson(prompt, {
+        attachments: inline ? [] : [{ filename: fname, content: this.packFor([file]) }], onProgress, live: this.walkBody,
+        parse: (t) => parseWalkthrough(t, range)
       });
-      const { value: parsed, text } = await this.parseChatReply(reply, (t) => parseWalkthrough(t, range));
       if (!parsed) {
         this._walkRaw = text;
-        throw new Error("couldn't find the blocks in the AI's reply");
+        throw new Error(`couldn't find the blocks in the replies (asked ${tried})`);
       }
       await this.saveWalk({ path, range, total, summary: parsed.summary, blocks: parsed.blocks, current: 0, typed: {}, created: Date.now() });
       await this.markRead([path]);
@@ -2862,13 +2865,13 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
           ? `<ol>${found.map(f => `<li>${this.escapeHtml(f)}</li>`).join('')}</ol>`
           : '<span class="rebuild-live-hint">Reading the code…</span>';
       };
-      const reply = await this.askInPanel(journeyPrompt(this.repoDisplayName(), fname), {
-        attachments: [{ filename: fname, content: this.packFor(files) }], onProgress, via: 'chat'
+      const { value: parsed, text, tried } = await this.askForJson(journeyPrompt(this.repoDisplayName(), fname), {
+        attachments: [{ filename: fname, content: this.packFor(files) }], onProgress, live: this.walkBody,
+        parse: (t) => parseJourney(t, this.repoTree.fileSet, this.repoTree.repo)
       });
-      const { value: parsed, text } = await this.parseChatReply(reply, (t) => parseJourney(t, this.repoTree.fileSet, this.repoTree.repo));
       if (!parsed) {
         this._journeyRaw = text;
-        throw new Error("couldn't find a reading order of files from this project in the AI's reply");
+        throw new Error(`couldn't find a reading order of files from this project in the replies (asked ${tried})`);
       }
       await this.saveJourney({ ...parsed, done, created: Date.now() });
       this._readingContext = { label: this.repoDisplayName(), ts: Date.now() };
@@ -3012,6 +3015,71 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     // Show whichever reading holds more of the answer
     const text = (second || again.length > String(reply || '').length) ? again : reply;
     return { value: second, text };
+  }
+
+  // Teaching asks for a reply Yavar reads as JSON (a walkthrough, a reading
+  // map, a plan). One that fails is usually fine the second time, so before
+  // giving up, ask the same chat again, then another chat site, then the
+  // free API models (never the paid one). The chosen chat comes back after.
+  // `live`: the sheet whose .rebuild-live box shows what's happening.
+  // Returns { value, text, tried }: value null when replies came but none
+  // could be read (text: the fullest one, to show; tried: who was asked,
+  // "ChatGPT twice, Gemini"). Throws when no attempt got an answer at all.
+  async askForJson(prompt, { attachments = [], onProgress = null, parse, live = null }) {
+    const say = (msg) => {
+      const box = live?.querySelector('.rebuild-live');
+      if (box) box.innerHTML = `<span class="rebuild-live-hint">${this.escapeHtml(msg)}</span>`;
+    };
+    const home = this.getCurrentModel();
+    const other = ['gemini', 'chatgpt', 'claude']
+      .map(id => this.models.find(m => m.id === id && m.enabled)).find(m => m && m.id !== home?.id);
+    const free = buildRoute(await loadApiConfig()).filter(s => !s.paid);
+    const chatName = home?.name || 'the chat';
+    const attempts = [
+      { name: chatName },
+      { name: chatName, note: `That reply couldn't be read. Asking ${chatName} again…` },
+      other && { name: other.name, model: other.id, note: `Asking ${other.name} instead…` },
+      free.length && { name: 'a free API model', api: true, note: 'Asking a free API model…' }
+    ].filter(Boolean);
+    const asked = [];
+    let shown = '';
+    let answered = false;
+    try {
+      for (const a of attempts) {
+        if (a.note) say(a.note);
+        if (a.model) {
+          this.currentModelId = a.model;
+          this.loadCurrentAI();
+          this.updateModelPill();
+        }
+        asked.push(a.name);
+        let result;
+        try {
+          if (a.api) {
+            const files = attachments.map(f => `<file name="${f.filename}">\n${f.content}\n</file>`);
+            const { text } = await askRoute(free, [{ role: 'user', content: [...files, prompt].join('\n\n') }], { onDelta: onProgress });
+            result = { value: parse(text), text };
+          } else {
+            result = await this.parseChatReply(await this.askInPanel(prompt, { attachments, onProgress, via: 'chat' }), parse);
+          }
+        } catch (e) {
+          console.warn(`[Yavar] ${a.name} gave no answer:`, e.message);
+          continue;
+        }
+        if (result.value) return { ...result, tried: '' };
+        answered = true;
+        if (result.text.length > shown.length) shown = result.text;
+      }
+    } finally {
+      if (home && this.currentModelId !== home.id) {
+        this.currentModelId = home.id;
+        this.loadCurrentAI();
+        this.updateModelPill();
+      }
+    }
+    const tried = [...new Set(asked)].map(n => n + (asked.filter(x => x === n).length > 1 ? ' twice' : '')).join(', ');
+    if (!answered) throw new Error(`no answer came back (asked ${tried})`);
+    return { value: null, text: shown, tried };
   }
 
   // The AI's reply behind a "couldn't read it" error, folded, so you can see why
