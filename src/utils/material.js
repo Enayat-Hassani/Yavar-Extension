@@ -1,6 +1,7 @@
-// "Save for Morfia": the article in the tab as a material file (format
-// "morfia-material", version 1), which Morfia's Add article page opens.
-// The selected passage goes as `start_quote`, where Morfia's reader opens.
+// "Add to Morfia": the article in the tab, sent to Morfia's bridge as
+// "morfia-material" version 1. Morfia fetches and cleans the article from
+// its link and falls back to this text. The selected passage goes as
+// `start_quote`, where Morfia's reader opens.
 
 const MAX_TITLE = 300;
 const MAX_QUOTE = 1000;
@@ -23,6 +24,30 @@ export function materialFile({ title = '', url = '', text = '', quote = '', prod
   };
 }
 
-export function materialFilename(title) {
-  return (title.replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'article') + '.morfia.json';
+// POST to a running Morfia with its connection code. Resolves to Morfia's
+// answer ({ id, title, already, from }); rejects with a message to show.
+export async function addToMorfia(file, { base, token }) {
+  let res;
+  try {
+    res = await fetch(base.replace(/\/+$/, '') + '/bridge/v1/article', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(file)
+    });
+  } catch (e) {
+    throw new Error(`Morfia isn't running at ${base}`);
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Morfia answered ${res.status}`);
+  return data;
+}
+
+export async function pingMorfia({ base, token }) {
+  let res;
+  try {
+    res = await fetch(base.replace(/\/+$/, '') + '/bridge/v1/ping', { headers: { Authorization: `Bearer ${token}` } });
+  } catch (e) {
+    throw new Error(`Morfia isn't running at ${base}`);
+  }
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `Morfia answered ${res.status}`);
 }

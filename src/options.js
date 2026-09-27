@@ -3,6 +3,7 @@
 import { loadTemplates, saveTemplates, DEFAULT_TEMPLATES } from './utils/templates.js';
 import { loadModels } from './utils/models.js';
 import { COACH_KEY, coachSteps, lacksAttempt, loadCoach } from './utils/coach.js';
+import { pingMorfia } from './utils/material.js';
 import { OPENROUTER_BASE, DEFAULT_MONTHLY_CAP, isFreeModel, loadApiConfig, buildRoute, askWithBudget, loadSpend, spentThisMonth } from './utils/llm.js';
 
 const DEFAULT_SETTINGS = {
@@ -22,7 +23,8 @@ const DEFAULT_SETTINGS = {
   apiGatewayBase: '',
   apiGatewayModel: '',
   ieltsCoach: false,
-  morfia: false
+  morfia: false,
+  morfiaBase: 'http://localhost:8000'
 };
 
 // Toggles that map one checkbox to one boolean setting
@@ -133,6 +135,8 @@ class OptionsPage {
     document.getElementById('gateway-base')?.addEventListener('change', (e) => this.saveSetting({ apiGatewayBase: e.target.value.trim().replace(/\/+$/, '') }));
     document.getElementById('gateway-model')?.addEventListener('change', (e) => this.saveSetting({ apiGatewayModel: e.target.value.trim() }));
     document.getElementById('test-api')?.addEventListener('click', () => this.testApi());
+    document.getElementById('save-morfia-token')?.addEventListener('click', () => this.connectMorfia());
+    document.getElementById('morfia-base')?.addEventListener('change', (e) => this.saveSetting({ morfiaBase: e.target.value.trim() || DEFAULT_SETTINGS.morfiaBase }));
 
     this.addSiteBtn.addEventListener('click', () => this.addDisabledSite());
     // Delegated: inline onclick handlers are blocked by the extension CSP
@@ -214,6 +218,7 @@ class OptionsPage {
     this.showSpend();
     document.getElementById('gateway-base').value = this.settings.apiGatewayBase || '';
     document.getElementById('gateway-model').value = this.settings.apiGatewayModel || '';
+    document.getElementById('morfia-base').value = this.settings.morfiaBase;
     this.renderFreeModels();
     this.renderDisabledSites();
   }
@@ -333,9 +338,10 @@ class OptionsPage {
   // ===== Model APIs (keys local only) =====
   async loadApiKeys() {
     try {
-      const keys = await chrome.storage.local.get(['openrouterKey', 'gatewayKey']);
+      const keys = await chrome.storage.local.get(['openrouterKey', 'gatewayKey', 'morfiaToken']);
       document.getElementById('openrouter-key').value = keys.openrouterKey || '';
       document.getElementById('gateway-key').value = keys.gatewayKey || '';
+      document.getElementById('morfia-token').value = keys.morfiaToken || '';
     } catch (e) { /* leave empty */ }
   }
 
@@ -405,6 +411,21 @@ class OptionsPage {
       });
       out.textContent = `✓ ${step.label}${step.paid ? ` (paid, $${cost.toFixed(5)})` : ''} answered: ${text.trim().slice(0, 80)}`;
       if (step.paid) this.showSpend();
+    } catch (e) {
+      out.textContent = '✕ ' + e.message;
+    }
+  }
+
+  // The code is kept on this device only, like the API keys
+  async connectMorfia() {
+    const out = document.getElementById('morfia-status');
+    const token = document.getElementById('morfia-token').value.trim();
+    await chrome.storage.local.set({ morfiaToken: token });
+    if (!token) { out.textContent = 'Code removed.'; return; }
+    out.textContent = 'Checking…';
+    try {
+      await pingMorfia({ base: this.settings.morfiaBase, token });
+      out.textContent = '✓ Connected to Morfia.';
     } catch (e) {
       out.textContent = '✕ ' + e.message;
     }
@@ -509,6 +530,7 @@ class OptionsPage {
         if (typeof imported.enableFloatingMenu === 'boolean') clean.enableFloatingMenu = imported.enableFloatingMenu;
         if (Array.isArray(imported.disabledSites)) clean.disabledSites = imported.disabledSites.filter(x => typeof x === 'string');
         if (typeof imported.ytxBaseUrl === 'string') clean.ytxBaseUrl = imported.ytxBaseUrl;
+        if (typeof imported.morfiaBase === 'string') clean.morfiaBase = imported.morfiaBase;
         if (Number.isFinite(imported.ytxVideoCount)) clean.ytxVideoCount = imported.ytxVideoCount;
         if (Number.isFinite(imported.apiMonthlyCap) && imported.apiMonthlyCap >= 0) clean.apiMonthlyCap = imported.apiMonthlyCap;
         for (const k of ['apiPaidModel', 'apiGatewayBase', 'apiGatewayModel']) {

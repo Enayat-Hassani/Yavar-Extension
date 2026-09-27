@@ -12,7 +12,7 @@ import { DEFAULT_MODELS, loadModels as loadStoredModels } from './utils/models.j
 import { captureLabel, captureMarkdown, hasCaptureText } from './utils/capture.js';
 import { suggestActions } from './utils/actions.js';
 import { coachSteps, loadCoach, coachPrompt } from './utils/coach.js';
-import { materialFile, materialFilename } from './utils/material.js';
+import { materialFile, addToMorfia } from './utils/material.js';
 import { icon } from './utils/icons.js';
 import { idbGet, idbSet } from './utils/idb.js';
 import { transcriptMarkdown, turnsToMessages, HANDOFF_NOTE, earlierAnswers } from './utils/conversation.js';
@@ -1288,7 +1288,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       { id: 'history', icon: icon('bookmark'), name: 'Saved answers', desc: 'Everything you saved, searchable', divider: true },
       { id: 'notes', icon: icon('note'), name: 'Notes', desc: 'Your scratchpad' },
       ...(this._morfiaOn && this._tabCtx?.usable && !this._tabCtx.video
-        ? [{ id: 'save_morfia', icon: icon('forward'), name: 'Save for Morfia', desc: 'Download this article to practise in Morfia' }] : []),
+        ? [{ id: 'save_morfia', icon: icon('forward'), name: 'Add to Morfia', desc: 'Add this article to your Morfia library' }] : []),
       { id: 'research_web', icon: icon('globe'), name: 'Web research', desc: 'Searches, reads sources, cites them', divider: true },
       { id: 'videos', icon: icon('video'), name: 'Video research', desc: 'What the top YouTube videos say' },
       { id: 'run', icon: icon('code'), name: 'Code playground', desc: 'Run Python or JavaScript' },
@@ -4624,7 +4624,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
         row('attach_page', icon('chat'), 'Ask about it', 'Attach the page, then ask your question') +
         row('research_page', icon('search'), 'Fact-check it', 'Compare its claims with other sources') +
         (this._coachOn && !this._tabCtx.video ? row('ielts', icon('pen'), 'IELTS practice', 'Five steps, your attempt first') : '') +
-        (this._morfiaOn && !this._tabCtx.video ? row('save_morfia', icon('forward'), 'Save for Morfia', 'Download it to practise in Morfia') : '') +
+        (this._morfiaOn && !this._tabCtx.video ? row('save_morfia', icon('forward'), 'Add to Morfia', 'Add this article to your Morfia library') : '') +
         `</div>`;
     } else {
       hero = { kicker: 'Yavar', title: 'Ask anything' };
@@ -4932,10 +4932,15 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     this.renderComposer();
   }
 
-  // The article in the tab as a material file for Morfia, with the selected
+  // The article in the tab, added to Morfia's library, with the selected
   // passage as the place its reader opens
   async saveForMorfia() {
     try {
+      const [{ settings }, { morfiaToken }] = await Promise.all([
+        chrome.storage.sync.get('settings'), chrome.storage.local.get('morfiaToken')]);
+      if (!morfiaToken) throw new Error("Add Morfia's connection code in Settings → Morfia");
+      const base = settings?.morfiaBase || 'http://localhost:8000';
+      this.showNotification('Adding to Morfia…');
       const [tab] = await this.getActiveTabs();
       const [{ text, title, url }, quote] = await Promise.all([
         this.getActivePageText(110000),
@@ -4948,13 +4953,8 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
         producer: 'Yavar ' + chrome.runtime.getManifest().version, capturedAt: new Date().toISOString()
       });
       if (!file.text) throw new Error('This page has no readable text');
-      const href = URL.createObjectURL(new Blob([JSON.stringify(file, null, 2)], { type: 'application/json' }));
-      const a = document.createElement('a');
-      a.href = href;
-      a.download = materialFilename(title);
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(href), 1000);
-      this.showNotification(`Saved ${a.download}. In Morfia: Add article → Open a material file`);
+      const added = await addToMorfia(file, { base, token: morfiaToken });
+      this.showNotification(`${added.already ? 'Already in Morfia' : 'Added to Morfia'}: ${added.title}`);
     } catch (e) {
       this.showNotification('⚠️ ' + e.message);
     }

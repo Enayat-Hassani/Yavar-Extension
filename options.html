@@ -151,11 +151,25 @@
         <h2>Morfia</h2>
         <div class="setting-item">
           <label class="toggle-label">
-            <span>Save for Morfia</span>
+            <span>Add to Morfia</span>
             <input type="checkbox" id="setting-morfia">
             <span class="toggle"></span>
           </label>
-          <p class="help-text">Downloads the article in your tab as a file that Morfia opens under <strong>Add article → Open a material file</strong>. Select a passage first and Morfia opens there.</p>
+          <p class="help-text">Adds the article in your tab to Morfia's library in one click. Select a passage first and Morfia opens there.</p>
+        </div>
+
+        <div class="setting-item">
+          <label for="morfia-token">Connection code</label>
+          <div class="input-row">
+            <input type="password" id="morfia-token" placeholder="From Morfia's Settings → Yavar" autocomplete="off">
+            <button id="save-morfia-token" class="btn-secondary">Connect</button>
+          </div>
+          <p id="morfia-status" class="help-text" aria-live="polite">Stored on this device only, never synced or exported.</p>
+        </div>
+
+        <div class="setting-item">
+          <label for="morfia-base">Morfia address</label>
+          <input type="text" id="morfia-base" placeholder="http://localhost:8000">
         </div>
       </section>
 

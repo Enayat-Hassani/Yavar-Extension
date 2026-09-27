@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { materialFile, materialFilename } from '../src/utils/material.js';
+import { materialFile, addToMorfia, pingMorfia } from '../src/utils/material.js';
 
 // The same file Morfia's tests read (tests/fixtures/material/article-v1.json there)
 const fixture = JSON.parse(readFileSync(new URL('./fixtures/material-v1.json', import.meta.url)));
@@ -28,7 +28,30 @@ test('sends no url that is not http or https', () => {
   assert.equal(materialFile({ url: 'file:///Users/me/a.html', text: 'x' }).url, '');
 });
 
-test('names the file after the title', () => {
-  assert.equal(materialFilename('The Patience of Bees!'), 'The-Patience-of-Bees.morfia.json');
-  assert.equal(materialFilename('***'), 'article.morfia.json');
+function serve(fn) {
+  const calls = [];
+  globalThis.fetch = async (url, init = {}) => { calls.push({ url, init }); return fn(url, init); };
+  return calls;
+}
+const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+
+test('posts the article to the bridge with the connection code', async () => {
+  const calls = serve(() => json(201, { id: 7, title: 'Bees', already: false }));
+  const added = await addToMorfia(fixture, { base: 'http://localhost:8000/', token: 'abc' });
+  assert.equal(added.id, 7);
+  assert.equal(calls[0].url, 'http://localhost:8000/bridge/v1/article');
+  assert.equal(calls[0].init.headers.Authorization, 'Bearer abc');
+  assert.deepEqual(JSON.parse(calls[0].init.body), fixture);
+});
+
+test("says Morfia isn't running when nothing answers", async () => {
+  serve(() => { throw new TypeError('Failed to fetch'); });
+  await assert.rejects(addToMorfia(fixture, { base: 'http://localhost:8000', token: 'abc' }),
+    /Morfia isn't running at http:\/\/localhost:8000/);
+});
+
+test("passes on Morfia's own reason for a refusal", async () => {
+  serve(() => json(401, { error: 'Not connected.' }));
+  await assert.rejects(addToMorfia(fixture, { base: 'http://x', token: 'bad' }), /Not connected\./);
+  await assert.rejects(pingMorfia({ base: 'http://x', token: 'bad' }), /Not connected\./);
 });

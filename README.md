@@ -44,7 +44,7 @@ When a walkthrough, reading map or plan comes back in a form Yavar can't read, i
 
 **IELTS practice** (off by default) — five steps on the article in your tab, from its thesis to a Task 2 paragraph. You write each step first; the chat gives feedback after. Turn it on and edit its prompts under *Settings → Prompts*.
 
-**Save for Morfia** (off by default: *Settings → Morfia*) — downloads the article in your tab as a file for Morfia, a separate practice app, which opens it under *Add article → Open a material file*. Select a passage first and Morfia opens there.
+**Add to Morfia** (off by default: *Settings → Morfia*) — adds the article in your tab to Morfia, a separate practice app running on your computer, in one click. Connect once with the code from Morfia's Settings. Morfia fetches and cleans the article itself, so select a passage first only if you want Morfia to open there.
 
 **Answers inside Yavar**: every answer, including research reports, streams into the conversation as the AI writes it. Code blocks get Copy and ▶ Run, each answer has Copy, Ask again and Save, and the composer asks follow-ups in the same chat. *Open in chat* shows the real chat whenever you want it (API answers have no chat page, so they offer *Ask* the chat site instead).
 
@@ -128,7 +128,7 @@ Yavar-Extension/
 │       ├── changes.js    # A commit or PR diff split into parts
 │       ├── rebuild.js    # Build it yourself: plans, hints, reviews
 │       ├── coach.js      # IELTS practice: the five steps and their prompts
-│       ├── material.js   # Save for Morfia: the article as a material file
+│       ├── material.js   # Add to Morfia: the article, sent to Morfia's bridge
 │       ├── llm.js        # Model APIs: local gateway, OpenRouter, the monthly budget
 │       ├── markdown.js   # Rendering answers
 │       ├── codeEditor.js # CodeMirror modes for the code boxes and the reader
