@@ -12,6 +12,7 @@ import { DEFAULT_MODELS, loadModels as loadStoredModels } from './utils/models.j
 import { captureLabel, captureMarkdown, hasCaptureText } from './utils/capture.js';
 import { suggestActions } from './utils/actions.js';
 import { coachSteps, loadCoach, coachPrompt } from './utils/coach.js';
+import { materialFile, materialFilename } from './utils/material.js';
 import { icon } from './utils/icons.js';
 import { idbGet, idbSet } from './utils/idb.js';
 import { transcriptMarkdown, turnsToMessages, HANDOFF_NOTE, earlierAnswers } from './utils/conversation.js';
@@ -128,6 +129,7 @@ class YavarSidePanel {
       const wanted = currentModelId || settings?.defaultAI;
       this.answerWith = settings?.answerWith === 'api' ? 'api' : 'chat';
       this._coachOn = !!settings?.ieltsCoach;
+      this._morfiaOn = !!settings?.morfia;
       if (wanted && this.models.some(m => m.id === wanted)) {
         this.currentModelId = wanted;
       }
@@ -1285,6 +1287,8 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       { id: 'read_folder', icon: icon('folder'), name: 'Read a project folder', desc: 'A project on this computer', divider: repoItems.length > 0 },
       { id: 'history', icon: icon('bookmark'), name: 'Saved answers', desc: 'Everything you saved, searchable', divider: true },
       { id: 'notes', icon: icon('note'), name: 'Notes', desc: 'Your scratchpad' },
+      ...(this._morfiaOn && this._tabCtx?.usable && !this._tabCtx.video
+        ? [{ id: 'save_morfia', icon: icon('forward'), name: 'Save for Morfia', desc: 'Download this article to practise in Morfia' }] : []),
       { id: 'research_web', icon: icon('globe'), name: 'Web research', desc: 'Searches, reads sources, cites them', divider: true },
       { id: 'videos', icon: icon('video'), name: 'Video research', desc: 'What the top YouTube videos say' },
       { id: 'run', icon: icon('code'), name: 'Code playground', desc: 'Run Python or JavaScript' },
@@ -1498,7 +1502,8 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       local: () => this.openPicker('local'),
       run: () => this.openRunPanel(),
       carry_over: () => this.carryOverToNewChat(),
-      ielts: () => this.startCoach()
+      ielts: () => this.startCoach(),
+      save_morfia: () => this.saveForMorfia()
     };
     tools[id]?.();
   }
@@ -4619,6 +4624,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
         row('attach_page', icon('chat'), 'Ask about it', 'Attach the page, then ask your question') +
         row('research_page', icon('search'), 'Fact-check it', 'Compare its claims with other sources') +
         (this._coachOn && !this._tabCtx.video ? row('ielts', icon('pen'), 'IELTS practice', 'Five steps, your attempt first') : '') +
+        (this._morfiaOn && !this._tabCtx.video ? row('save_morfia', icon('forward'), 'Save for Morfia', 'Download it to practise in Morfia') : '') +
         `</div>`;
     } else {
       hero = { kicker: 'Yavar', title: 'Ask anything' };
@@ -4926,6 +4932,34 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     this.renderComposer();
   }
 
+  // The article in the tab as a material file for Morfia, with the selected
+  // passage as the place its reader opens
+  async saveForMorfia() {
+    try {
+      const [tab] = await this.getActiveTabs();
+      const [{ text, title, url }, quote] = await Promise.all([
+        this.getActivePageText(110000),
+        // The selection is optional: without it Morfia opens at the top
+        chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => String(getSelection() || '') })
+          .then(([r]) => r?.result || '').catch(() => '')
+      ]);
+      const file = materialFile({
+        title, url, text, quote,
+        producer: 'Yavar ' + chrome.runtime.getManifest().version, capturedAt: new Date().toISOString()
+      });
+      if (!file.text) throw new Error('This page has no readable text');
+      const href = URL.createObjectURL(new Blob([JSON.stringify(file, null, 2)], { type: 'application/json' }));
+      const a = document.createElement('a');
+      a.href = href;
+      a.download = materialFilename(title);
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(href), 1000);
+      this.showNotification(`Saved ${a.download}. In Morfia: Add article → Open a material file`);
+    } catch (e) {
+      this.showNotification('⚠️ ' + e.message);
+    }
+  }
+
   // ----- File picker (add repo / folder files to the message) -----
 
   setupPicker() {
@@ -5193,8 +5227,12 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       if (areaName === 'sync' && changes.settings) {
         this.answerWith = changes.settings.newValue?.answerWith === 'api' ? 'api' : 'chat';
         this.updateModelPill();
-        const coachOn = !!changes.settings.newValue?.ieltsCoach;
-        if (coachOn !== this._coachOn) { this._coachOn = coachOn; this.renderHome(); }
+        const { ieltsCoach, morfia } = changes.settings.newValue || {};
+        if (!!ieltsCoach !== this._coachOn || !!morfia !== this._morfiaOn) {
+          this._coachOn = !!ieltsCoach;
+          this._morfiaOn = !!morfia;
+          this.renderHome();
+        }
       }
       if (areaName === 'local' && changes.yavarHistory && this._history) {
         this._history = changes.yavarHistory.newValue || [];

@@ -21,7 +21,8 @@ const DEFAULT_SETTINGS = {
   apiMonthlyCap: DEFAULT_MONTHLY_CAP,
   apiGatewayBase: '',
   apiGatewayModel: '',
-  ieltsCoach: false
+  ieltsCoach: false,
+  morfia: false
 };
 
 // Toggles that map one checkbox to one boolean setting
@@ -31,7 +32,8 @@ const TOGGLES = {
   'setting-temp-chats': 'tempChats',
   'setting-deep-research': 'deepResearch',
   'setting-inchat': 'inChatButtons',
-  'setting-ielts-coach': 'ieltsCoach'
+  'setting-ielts-coach': 'ieltsCoach',
+  'setting-morfia': 'morfia'
 };
 
 class OptionsPage {
@@ -514,7 +516,7 @@ class OptionsPage {
         }
         if (Array.isArray(imported.apiFreeModels)) clean.apiFreeModels = imported.apiFreeModels.filter(x => typeof x === 'string');
         if (imported.answerWith === 'chat' || imported.answerWith === 'api') clean.answerWith = imported.answerWith;
-        for (const k of ['autoSubmit', 'tempChats', 'deepResearch', 'inChatButtons', 'ieltsCoach']) {
+        for (const k of ['autoSubmit', 'tempChats', 'deepResearch', 'inChatButtons', 'ieltsCoach', 'morfia']) {
           if (typeof imported[k] === 'boolean') clean[k] = imported[k];
         }
         await this.saveSetting(clean);
