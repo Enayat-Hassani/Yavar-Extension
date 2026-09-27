@@ -11,9 +11,13 @@
   <div class="container">
     <header class="header">
       <h1>Yavar Settings</h1>
+      <nav class="page-nav" aria-label="Settings pages">
+        <a href="#general" data-page="general">General</a>
+        <a href="#prompts" data-page="prompts">Prompts</a>
+      </nav>
     </header>
 
-    <main class="settings-container">
+    <main class="settings-container" id="page-general">
       <!-- Models -->
       <section class="settings-section" id="models">
         <h2>Models</h2>
@@ -143,22 +147,15 @@
         </div>
       </section>
 
-      <!-- Prompt Templates -->
       <section class="settings-section">
-        <h2>Prompt templates</h2>
-        <p class="help-text">
-          Used by the floating menu and by <strong>+ → Use a prompt</strong> in Yavar.
-          Placeholders are filled in when a prompt runs:
-          <code>{{selection}}</code>, <code>{{page}}</code>, <code>{{clipboard}}</code>,
-          <code>{{url}}</code>, <code>{{title}}</code>, <code>{{repo}}</code>.
-          <strong>In menu</strong> pins a template to the floating menu; the rest sit behind its <strong>⋯</strong>.
-        </p>
-
-        <div id="templates-list" class="templates-list"></div>
-
-        <div class="templates-actions">
-          <button id="add-template-btn" class="btn-primary">Add template</button>
-          <button id="reset-templates-btn" class="btn-secondary">Reset to defaults</button>
+        <h2>Morfia</h2>
+        <div class="setting-item">
+          <label class="toggle-label">
+            <span>Save for Morfia</span>
+            <input type="checkbox" id="setting-morfia">
+            <span class="toggle"></span>
+          </label>
+          <p class="help-text">Downloads the article in your tab as a file that Morfia opens under <strong>Add article → Open a material file</strong>. Select a passage first and Morfia opens there.</p>
         </div>
       </section>
 
@@ -210,6 +207,46 @@
           <button id="import-settings-btn" class="btn-secondary">Import settings</button>
           <button id="reset-settings-btn" class="btn-danger">Reset settings</button>
         </div>
+      </section>
+    </main>
+
+    <main class="settings-container" id="page-prompts" hidden>
+      <!-- Prompt Templates -->
+      <section class="settings-section">
+        <h2>Prompt templates</h2>
+        <p class="help-text">
+          Used by the floating menu and by <strong>+ → Use a prompt</strong> in Yavar.
+          Placeholders are filled in when a prompt runs:
+          <code>{{selection}}</code>, <code>{{page}}</code>, <code>{{clipboard}}</code>,
+          <code>{{url}}</code>, <code>{{title}}</code>, <code>{{repo}}</code>.
+          <strong>In menu</strong> pins a template to the floating menu; the rest sit behind its <strong>⋯</strong>.
+        </p>
+
+        <div id="templates-list" class="templates-list"></div>
+
+        <div class="templates-actions">
+          <button id="add-template-btn" class="btn-primary">Add template</button>
+          <button id="reset-templates-btn" class="btn-secondary">Reset to defaults</button>
+        </div>
+      </section>
+
+      <section class="settings-section" id="coach">
+        <h2>IELTS coach</h2>
+        <div class="setting-item">
+          <label class="toggle-label">
+            <span>IELTS practice on the start page</span>
+            <input type="checkbox" id="setting-ielts-coach">
+            <span class="toggle"></span>
+          </label>
+          <p class="help-text">Five steps on the article in your tab, one reply at a time: you send your attempt, the chat gives feedback. The article goes to the chat as a file.</p>
+        </div>
+        <div class="setting-item">
+          <label for="coach-about">About you</label>
+          <textarea id="coach-about" class="template-body-input" rows="1" placeholder="Optional, e.g. target band 8, first language Dari, working on cohesion"></textarea>
+          <p class="help-text">Sent with the first step.</p>
+        </div>
+        <p class="help-text"><code>{{selection}}</code> is what you type for that step, and every step needs it. <code>{{title}}</code> and <code>{{url}}</code> are the article's.</p>
+        <div id="coach-steps" class="templates-list"></div>
       </section>
     </main>
 

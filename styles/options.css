@@ -102,6 +102,29 @@ body {
   gap: 20px;
 }
 
+.settings-container[hidden] { display: none; }
+
+/* General / Prompts */
+.page-nav {
+  display: flex;
+  gap: 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.page-nav a {
+  padding: 8px 0;
+  margin-bottom: -1px;
+  border-bottom: 2px solid transparent;
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: color var(--dur-quick) var(--ease-std);
+}
+
+.page-nav a:hover { color: var(--text-primary); }
+.page-nav a[aria-current="page"] { color: var(--text-primary); border-bottom-color: var(--accent); }
+
 .settings-section {
   background: var(--bg-secondary);
   border: 1px solid var(--border);
@@ -448,6 +471,12 @@ kbd {
   resize: vertical;
   box-sizing: border-box;
 }
+
+/* IELTS coach steps */
+.coach-step-name { flex: 1; font-size: 14px; font-weight: 600; }
+.btn-small { padding: 4px 10px; font-size: 12px; }
+.coach-step-error { margin-top: 6px; font-size: 12px; color: var(--danger); }
+#coach-about { font-family: inherit; font-size: 14px; resize: none; }
 
 .template-icon-input:focus,
 .template-name-input:focus,

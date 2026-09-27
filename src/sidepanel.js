@@ -11,6 +11,8 @@ import { parseDiff, changeBlocks, changePack, changeWalkPrompt, parseChangeWalk,
 import { DEFAULT_MODELS, loadModels as loadStoredModels } from './utils/models.js';
 import { captureLabel, captureMarkdown, hasCaptureText } from './utils/capture.js';
 import { suggestActions } from './utils/actions.js';
+import { coachSteps, loadCoach, coachPrompt } from './utils/coach.js';
+import { materialFile, materialFilename } from './utils/material.js';
 import { icon } from './utils/icons.js';
 import { idbGet, idbSet } from './utils/idb.js';
 import { transcriptMarkdown, turnsToMessages, HANDOFF_NOTE, earlierAnswers } from './utils/conversation.js';
@@ -126,6 +128,8 @@ class YavarSidePanel {
       const { currentModelId, settings } = await chrome.storage.sync.get(['currentModelId', 'settings']);
       const wanted = currentModelId || settings?.defaultAI;
       this.answerWith = settings?.answerWith === 'api' ? 'api' : 'chat';
+      this._coachOn = !!settings?.ieltsCoach;
+      this._morfiaOn = !!settings?.morfia;
       if (wanted && this.models.some(m => m.id === wanted)) {
         this.currentModelId = wanted;
       }
@@ -1283,6 +1287,8 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       { id: 'read_folder', icon: icon('folder'), name: 'Read a project folder', desc: 'A project on this computer', divider: repoItems.length > 0 },
       { id: 'history', icon: icon('bookmark'), name: 'Saved answers', desc: 'Everything you saved, searchable', divider: true },
       { id: 'notes', icon: icon('note'), name: 'Notes', desc: 'Your scratchpad' },
+      ...(this._morfiaOn && this._tabCtx?.usable && !this._tabCtx.video
+        ? [{ id: 'save_morfia', icon: icon('forward'), name: 'Save for Morfia', desc: 'Download this article to practise in Morfia' }] : []),
       { id: 'research_web', icon: icon('globe'), name: 'Web research', desc: 'Searches, reads sources, cites them', divider: true },
       { id: 'videos', icon: icon('video'), name: 'Video research', desc: 'What the top YouTube videos say' },
       { id: 'run', icon: icon('code'), name: 'Code playground', desc: 'Run Python or JavaScript' },
@@ -1495,7 +1501,9 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       videos: () => this.useComposerTool('videos'),
       local: () => this.openPicker('local'),
       run: () => this.openRunPanel(),
-      carry_over: () => this.carryOverToNewChat()
+      carry_over: () => this.carryOverToNewChat(),
+      ielts: () => this.startCoach(),
+      save_morfia: () => this.saveForMorfia()
     };
     tools[id]?.();
   }
@@ -4514,7 +4522,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     });
     this.threadInput?.addEventListener('keydown', (e) => {
       if (!e.isComposing && this.commandMenuKey(e)) return;
-      if (this.composerTool && (e.key === 'Escape' || (e.key === 'Backspace' && !this.threadInput.value))) {
+      if (this.composerTool && this.composerTool !== 'coach' && (e.key === 'Escape' || (e.key === 'Backspace' && !this.threadInput.value))) {
         e.preventDefault();
         this.clearComposerTool();
         return;
@@ -4615,6 +4623,8 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
         row('summarize_page', icon('lines'), 'Summarize', 'The main point and key details') +
         row('attach_page', icon('chat'), 'Ask about it', 'Attach the page, then ask your question') +
         row('research_page', icon('search'), 'Fact-check it', 'Compare its claims with other sources') +
+        (this._coachOn && !this._tabCtx.video ? row('ielts', icon('pen'), 'IELTS practice', 'Five steps, your attempt first') : '') +
+        (this._morfiaOn && !this._tabCtx.video ? row('save_morfia', icon('forward'), 'Save for Morfia', 'Download it to practise in Morfia') : '') +
         `</div>`;
     } else {
       hero = { kicker: 'Yavar', title: 'Ask anything' };
@@ -4640,6 +4650,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     this.threadBody.innerHTML = '';
     this.composerItems = [];
     this.composerTool = null;
+    this._coach = null;
     this.renderComposer();
     this._freshChatNext = true;
     this._apiHistory = [];
@@ -4745,7 +4756,10 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
   // makes it the box's mode (a chip you can remove), and sending runs it.
   // With a question already typed, it runs right away.
   composerTools() {
+    const c = this._coach;
+    const step = c?.steps[c.i];
     return {
+      ...(step ? { coach: { icon: icon('pen', 13), name: `IELTS ${c.i + 1}/${c.steps.length} · ${step.name}`, placeholder: step.ask, run: (t) => this.coachSend(t) } } : {}),
       research_web: { icon: icon('globe', 13), name: 'Web research', placeholder: 'What should it research?', run: (t) => this.startResearchAgent(t) },
       videos: { icon: icon('video', 13), name: 'Video research', placeholder: 'A topic to research on YouTube', run: (t) => this.researchVideosOnTopic(t) },
       research_page: { icon: icon('search', 13), name: 'Fact-check this page', placeholder: 'Ask about the page, or press Enter to check all of it', allowEmpty: true, run: (t) => this.researchThisPage(t) }
@@ -4768,6 +4782,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
 
   clearComposerTool() {
     if (!this.composerTool) return;
+    if (this.composerTool === 'coach') this._coach = null;
     this.composerTool = null;
     this.renderComposer();
   }
@@ -4877,6 +4892,69 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
           'Summarize it: the main point in 2-3 sentences, then the key points as short bullets, then anything worth questioning.',
         attachments: [{ filename: fname, content: text, mime: 'text/plain' }]
       });
+    } catch (e) {
+      this.showNotification('⚠️ ' + e.message);
+    }
+  }
+
+  // IELTS coach: the article goes with the first step as a file; each send
+  // wraps what you typed in the current step's prompt, then moves on
+  async startCoach() {
+    try {
+      const [{ text, title, url }, { about, prompts }] = await Promise.all([this.getActivePageText(60000), loadCoach()]);
+      this._coach = { i: 0, steps: coachSteps(prompts), about, title, url, page: text };
+      this.composerTool = 'coach';
+      this.renderComposer();
+      this.setView('app');
+      this.threadInput.focus();
+    } catch (e) {
+      this.showNotification('⚠️ ' + e.message);
+    }
+  }
+
+  async coachSend(text) {
+    const c = this._coach;
+    if (!c) return;
+    this.composerTool = 'coach';
+    this.renderComposer();
+    const first = c.i === 0;
+    const filename = (c.title.replace(/[^\w.-]+/g, '-').slice(0, 40) || 'article') + '.txt';
+    const answer = await this.askInThread({
+      title: c.title.slice(0, 60), label: text,
+      prompt: await coachPrompt(c.steps[c.i], text, c),
+      items: first ? [{ label: c.title.slice(0, 40) || 'This page' }] : [],
+      attachments: first ? [{ filename, content: c.page, mime: 'text/plain' }] : []
+    });
+    if (this._coach !== c) return;   // ended or restarted while waiting
+    // A failed answer keeps the step, so the attempt can be sent again
+    if (answer != null) c.i++;
+    if (c.i >= c.steps.length) { this._coach = null; this.composerTool = null; }
+    this.renderComposer();
+  }
+
+  // The article in the tab as a material file for Morfia, with the selected
+  // passage as the place its reader opens
+  async saveForMorfia() {
+    try {
+      const [tab] = await this.getActiveTabs();
+      const [{ text, title, url }, quote] = await Promise.all([
+        this.getActivePageText(110000),
+        // The selection is optional: without it Morfia opens at the top
+        chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => String(getSelection() || '') })
+          .then(([r]) => r?.result || '').catch(() => '')
+      ]);
+      const file = materialFile({
+        title, url, text, quote,
+        producer: 'Yavar ' + chrome.runtime.getManifest().version, capturedAt: new Date().toISOString()
+      });
+      if (!file.text) throw new Error('This page has no readable text');
+      const href = URL.createObjectURL(new Blob([JSON.stringify(file, null, 2)], { type: 'application/json' }));
+      const a = document.createElement('a');
+      a.href = href;
+      a.download = materialFilename(title);
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(href), 1000);
+      this.showNotification(`Saved ${a.download}. In Morfia: Add article → Open a material file`);
     } catch (e) {
       this.showNotification('⚠️ ' + e.message);
     }
@@ -5149,6 +5227,12 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       if (areaName === 'sync' && changes.settings) {
         this.answerWith = changes.settings.newValue?.answerWith === 'api' ? 'api' : 'chat';
         this.updateModelPill();
+        const { ieltsCoach, morfia } = changes.settings.newValue || {};
+        if (!!ieltsCoach !== this._coachOn || !!morfia !== this._morfiaOn) {
+          this._coachOn = !!ieltsCoach;
+          this._morfiaOn = !!morfia;
+          this.renderHome();
+        }
       }
       if (areaName === 'local' && changes.yavarHistory && this._history) {
         this._history = changes.yavarHistory.newValue || [];

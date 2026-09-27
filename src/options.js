@@ -2,6 +2,7 @@
 
 import { loadTemplates, saveTemplates, DEFAULT_TEMPLATES } from './utils/templates.js';
 import { loadModels } from './utils/models.js';
+import { COACH_KEY, coachSteps, lacksAttempt, loadCoach } from './utils/coach.js';
 import { OPENROUTER_BASE, DEFAULT_MONTHLY_CAP, isFreeModel, loadApiConfig, buildRoute, askWithBudget, loadSpend, spentThisMonth } from './utils/llm.js';
 
 const DEFAULT_SETTINGS = {
@@ -19,7 +20,9 @@ const DEFAULT_SETTINGS = {
   apiPaidModel: '',
   apiMonthlyCap: DEFAULT_MONTHLY_CAP,
   apiGatewayBase: '',
-  apiGatewayModel: ''
+  apiGatewayModel: '',
+  ieltsCoach: false,
+  morfia: false
 };
 
 // Toggles that map one checkbox to one boolean setting
@@ -28,7 +31,9 @@ const TOGGLES = {
   'setting-auto-submit': 'autoSubmit',
   'setting-temp-chats': 'tempChats',
   'setting-deep-research': 'deepResearch',
-  'setting-inchat': 'inChatButtons'
+  'setting-inchat': 'inChatButtons',
+  'setting-ielts-coach': 'ieltsCoach',
+  'setting-morfia': 'morfia'
 };
 
 class OptionsPage {
@@ -51,6 +56,12 @@ class OptionsPage {
     if (version) version.textContent = 'v' + chrome.runtime.getManifest().version;
     this.templates = await loadTemplates();
     this.renderTemplates();
+    this.coach = await loadCoach();
+    this.renderCoach();
+    this.showPage();
+    window.addEventListener('hashchange', () => this.showPage());
+    // Wrapping changes with the width: fit the open page's prompts again
+    window.addEventListener('resize', fitVisible);
     // The panel's model menu changes the current model: keep the select in step
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area === 'sync' && (changes.aiModels || changes.currentModelId)) this.loadModelsList();
@@ -145,6 +156,18 @@ class OptionsPage {
     this.addTemplateBtn?.addEventListener('click', () => this.addTemplate());
     this.resetTemplatesBtn?.addEventListener('click', () => this.resetTemplates());
     this.templatesList?.addEventListener('input', (e) => this.handleTemplateEdit(e));
+    this.coachList = document.getElementById('coach-steps');
+    this.coachAbout = document.getElementById('coach-about');
+    this.coachList?.addEventListener('input', (e) => this.handleCoachEdit(e));
+    this.coachList?.addEventListener('click', (e) => {
+      const id = e.target.closest('[data-reset-step]')?.dataset.resetStep;
+      if (id) this.resetCoachStep(id);
+    });
+    this.coachAbout?.addEventListener('input', () => {
+      this.coach.about = this.coachAbout.value;
+      fitHeight(this.coachAbout);
+      this.persistCoach();
+    });
     this.templatesList?.addEventListener('change', (e) => this.handleTemplateEdit(e));
     // Don't lose a debounced template edit when the tab closes
     window.addEventListener('pagehide', () => {
@@ -456,6 +479,7 @@ class OptionsPage {
       yavarExport: 1,
       settings: this.settings,
       promptTemplates: this.templates,
+      coach: this.coach,
       aiModels: Array.isArray(aiModels) ? aiModels : undefined
     };
     const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
@@ -492,7 +516,7 @@ class OptionsPage {
         }
         if (Array.isArray(imported.apiFreeModels)) clean.apiFreeModels = imported.apiFreeModels.filter(x => typeof x === 'string');
         if (imported.answerWith === 'chat' || imported.answerWith === 'api') clean.answerWith = imported.answerWith;
-        for (const k of ['autoSubmit', 'tempChats', 'deepResearch', 'inChatButtons']) {
+        for (const k of ['autoSubmit', 'tempChats', 'deepResearch', 'inChatButtons', 'ieltsCoach', 'morfia']) {
           if (typeof imported[k] === 'boolean') clean[k] = imported[k];
         }
         await this.saveSetting(clean);
@@ -511,6 +535,17 @@ class OptionsPage {
           }));
         await saveTemplates(this.templates);
         this.renderTemplates();
+      }
+
+      if (parsed.yavarExport && parsed.coach && typeof parsed.coach === 'object') {
+        const prompts = {};
+        for (const s of coachSteps()) {
+          const body = parsed.coach.prompts?.[s.id];
+          if (typeof body === 'string' && body.trim() && !lacksAttempt(body)) prompts[s.id] = body;
+        }
+        this.coach = { about: typeof parsed.coach.about === 'string' ? parsed.coach.about : '', prompts };
+        await this.persistCoach();
+        this.renderCoach();
       }
 
       if (parsed.yavarExport && Array.isArray(parsed.aiModels)) {
@@ -637,12 +672,90 @@ class OptionsPage {
     }
   }
 
+  // ===== Pages =====
+  showPage() {
+    const page = location.hash === '#prompts' ? 'prompts' : 'general';
+    for (const p of ['general', 'prompts']) document.getElementById('page-' + p).hidden = p !== page;
+    document.querySelectorAll('.page-nav a').forEach(a => {
+      if (a.dataset.page === page) a.setAttribute('aria-current', 'page');
+      else a.removeAttribute('aria-current');
+    });
+    // Textareas measured while hidden have no height
+    fitVisible();
+  }
+
+  // ===== IELTS coach =====
+  // Only edited steps are stored, so an improved default still reaches the rest
+  renderCoach() {
+    if (!this.coachList) return;
+    this.coachAbout.value = this.coach.about;
+    this.coachList.innerHTML = coachSteps(this.coach.prompts).map((s, i) => `
+      <div class="template-card">
+        <div class="template-row">
+          <span class="coach-step-name">${i + 1}. ${this.escapeHtml(s.name)}</span>
+          <button type="button" class="btn-secondary btn-small" data-reset-step="${s.id}" ${s.edited ? '' : 'hidden'}>Reset</button>
+        </div>
+        <textarea class="template-body-input" data-step="${s.id}" rows="1" aria-label="Prompt for step ${i + 1}, ${this.escapeHtml(s.name)}">${this.escapeHtml(s.body)}</textarea>
+        <p class="coach-step-error" role="alert" hidden>Keep {{selection}}: it carries what you type for this step.</p>
+      </div>`).join('');
+    this.coachList.querySelectorAll('textarea').forEach(fitHeight);
+  }
+
+  handleCoachEdit(e) {
+    const el = e.target.closest('[data-step]');
+    if (!el) return;
+    fitHeight(el);
+    const card = el.closest('.template-card');
+    const invalid = lacksAttempt(el.value);
+    card.querySelector('.coach-step-error').hidden = !invalid;
+    if (invalid) return;
+    const id = el.dataset.step;
+    const def = coachSteps().find(s => s.id === id).body;
+    if (el.value.trim() && el.value !== def) this.coach.prompts[id] = el.value;
+    else delete this.coach.prompts[id];
+    card.querySelector('[data-reset-step]').hidden = !this.coach.prompts[id];
+    this.persistCoach();
+  }
+
+  resetCoachStep(id) {
+    delete this.coach.prompts[id];
+    this.persistCoach();
+    this.renderCoach();
+  }
+
+  // Debounced: storage.sync allows about 120 writes a minute
+  persistCoach() {
+    clearTimeout(this._coachTimer);
+    return new Promise((resolve) => {
+      this._coachTimer = setTimeout(async () => {
+        try {
+          await chrome.storage.sync.set({ [COACH_KEY]: this.coach });
+        } catch (error) {
+          console.error('[Yavar] Failed to save the coach prompts:', error);
+          this.showToast(/quota/i.test(error.message) ? 'Coach prompts too large to sync - shorten one' : 'Could not save the coach prompts', true);
+        }
+        resolve();
+      }, 400);
+    });
+  }
+
   escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text == null ? '' : String(text);
     // innerHTML escapes &, <, > but not quotes — escape them too for attribute safety
     return div.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
+}
+
+// Grow a textarea to its content
+function fitHeight(el) {
+  el.style.overflowY = 'hidden';   // sub-pixel line heights leave a stray 2px scroll
+  el.style.height = 'auto';
+  el.style.height = el.scrollHeight + el.offsetHeight - el.clientHeight + 'px';   // plus the border
+}
+
+function fitVisible() {
+  document.querySelectorAll('.settings-container:not([hidden]) textarea').forEach(fitHeight);
 }
 
 // Initialize options page
