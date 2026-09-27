@@ -2,6 +2,11 @@
   "name": "yavar-extension",
   "private": true,
   "description": "Dev tooling for the Yavar Chrome extension (the extension itself needs no build).",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Enayat-Hassani/Yavar-Extension.git"
+  },
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "test": "node --test",

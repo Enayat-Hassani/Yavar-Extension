@@ -9,9 +9,6 @@ desktop.ini
 *.swp
 *.swo
 *~
-.project
-.classpath
-.settings/
 
 # Logs
 *.log
@@ -31,7 +28,6 @@ coverage/
 
 # Dependency directories
 node_modules/
-jspm_packages/
 vendor/
 
 # ytx transcript server (cloned by scripts/setup-ytx.sh into server/ytx)
