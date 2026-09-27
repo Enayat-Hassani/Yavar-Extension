@@ -22,7 +22,7 @@ A Chrome extension that embeds ChatGPT, Claude, and Gemini in a sidebar — so y
 - **Explain** — send it wrapped in a "Guided Learning" prompt.
 - **Summarize** — send it wrapped in a concise-summary prompt.
 
-Add, edit, or remove your own templates in Settings using `{{selection}}`, `{{page}}`, `{{clipboard}}`, `{{url}}`, `{{title}}`, and `{{repo}}` placeholders. Pin the ones you use most to the menu; the rest (e.g. **Improve writing**, **Translate**) sit behind its **⋯** button.
+Add, edit, or remove your own templates under *Settings → Prompts* using `{{selection}}`, `{{page}}`, `{{clipboard}}`, `{{url}}`, `{{title}}`, and `{{repo}}` placeholders. Pin the ones you use most to the menu; the rest (e.g. **Improve writing**, **Translate**) sit behind its **⋯** button.
 
 **Web research agent** — research any topic: the agent performs **SEARCH + READ** across the web and writes an answer with sources. Each search and read is logged in the conversation as it happens, and ■ stops it. Turn on **Deep research** in Settings for deeper coverage.
 
@@ -41,6 +41,8 @@ Add, edit, or remove your own templates in Settings using `{{selection}}`, `{{pa
 When a walkthrough, reading map or plan comes back in a form Yavar can't read, it asks again before showing an error: the same chat once more, then another chat site (Gemini first), then the free API models, never the paid one. If the chat page shows its own error (for example Gemini's *Something went wrong (1060)*), Yavar moves on at once and the final error quotes it. Your chosen chat is loaded back afterwards.
 
 **Build it yourself** — the best way to understand a codebase is to build a small version of it. From the start page on GitHub (or for the folder you last opened), one click sends the project's core files and the AI writes a plan of 5-10 small steps. For each step: the files to study (one click opens them in the reader and explains them), your task, how you know it works, a code editor for your version, **Hint** (not the solution), **Review my code** (compared against the original files), **Run it**, and a chat button for your own question about the step. Answers appear inside the step, with Copy, Run and *Use in editor* on each code block. Progress and mentor notes are saved per project.
+
+**IELTS practice** (off by default) — five steps on the article in your tab, from its thesis to a Task 2 paragraph. You write each step first; the chat gives feedback after. Turn it on and edit its prompts under *Settings → Prompts*.
 
 **Answers inside Yavar**: every answer, including research reports, streams into the conversation as the AI writes it. Code blocks get Copy and ▶ Run, each answer has Copy, Ask again and Save, and the composer asks follow-ups in the same chat. *Open in chat* shows the real chat whenever you want it (API answers have no chat page, so they offer *Ask* the chat site instead).
 
@@ -123,6 +125,7 @@ Yavar-Extension/
 │       ├── journey.js    # The reading map and what to read next
 │       ├── changes.js    # A commit or PR diff split into parts
 │       ├── rebuild.js    # Build it yourself: plans, hints, reviews
+│       ├── coach.js      # IELTS practice: the five steps and their prompts
 │       ├── llm.js        # Model APIs: local gateway, OpenRouter, the monthly budget
 │       ├── markdown.js   # Rendering answers
 │       ├── codeEditor.js # CodeMirror modes for the code boxes and the reader
@@ -158,7 +161,7 @@ Yavar asks for broad permissions to do its job. Here's what they are and why:
 
 ## Configuration
 
-Settings live on the options page (`options.html`, or **⋯ → Settings** in Yavar). Shortcuts are changed at `chrome://extensions/shortcuts`.
+Settings live on the options page (`options.html`, or **⋯ → Settings** in Yavar); prompt templates and the IELTS coach are on its **Prompts** tab. Shortcuts are changed at `chrome://extensions/shortcuts`.
 
 ## Video search: setting up ytx
 
