@@ -295,9 +295,10 @@ export function readingPrompt(mode, { what, repo }, edits = {}) {
 
 // Compact tree outline for the pack header: every directory that contains a
 // selected file is expanded one level; everything else is summarised.
-export function outlineTree(paths, selected, maxLines = 120) {
+// `expandAll` opens every directory (the project's file list for a question).
+export function outlineTree(paths, selected, maxLines = 120, expandAll = false) {
   const keepDirs = new Set(['']);
-  for (const s of selected) {
+  for (const s of expandAll ? paths : selected) {
     const parts = s.split('/');
     for (let i = 1; i < parts.length; i++) keepDirs.add(parts.slice(0, i).join('/'));
   }
@@ -338,6 +339,27 @@ export function fencedFile({ path, content, lines }) {
   const width = String(first + rows.length - 1).length;
   const body = rows.map((l, i) => `${String(first + i).padStart(width)}│${l ? ' ' + l : ''}`).join('\n');
   return `${fence}${langFromPath(path)}\n${body}\n${fence}`;
+}
+
+// ---- Files the AI asks for ----
+// A question on a project's code carries its file list and this rule; an
+// answer that ends with NEED lines gets those files sent back, once.
+
+export const NEED_RULE = 'If seeing another file of this project would change your answer (where a function comes from, ' +
+  'what calls this code), end your reply with one line per file, `NEED: path/to/file`, using paths from the project files ' +
+  'listed (at most 3). I will send them and you can give the full answer. Leave the lines out if you have what you need.';
+
+// The files an answer asks for with NEED lines, as real paths of the
+// project (a partial path counts when only one file ends with it). Files
+// that may hold secrets and unreadable ones are never sent.
+export function neededFiles(text, fileSet, max = 3) {
+  const out = [];
+  for (const m of String(text || '').matchAll(/^\W*NEED:\s*`?([^`\s]+)`?/gim)) {
+    const path = parseFileRef(m[1], fileSet)?.path;
+    if (path && !out.includes(path) && !isSecretPath(path) && isReadablePath(path)) out.push(path);
+    if (out.length >= max) break;
+  }
+  return out;
 }
 
 export const LINE_NUMBER_NOTE = 'Each line of code starts with its line number and "│"; the numbers are not part of the code.';

@@ -167,3 +167,17 @@ test('TypeScript imports written as .js find their .ts files', () => {
   assert.deepEqual(resolveImports(["./core/Ky.js", "./utils/merge.js", "../lib/plain.js"], 'source/index.ts', files).sort(),
     ['lib/plain.js', 'source/core/Ky.ts', 'source/utils/merge.ts']);
 });
+
+test('the files an answer asks for are real, readable and not secret', async () => {
+  const { neededFiles, outlineTree } = await import('../src/utils/github.js');
+  const files = new Set(['src/cart.js', 'src/tax.js', 'lib/tax.js', '.env', 'logo.png', 'README.md']);
+  const answer = 'The total looks right.\n\nNEED: src/tax.js\n- NEED: `README.md`\nNEED: tax.js\nNEED: .env\nNEED: logo.png\nNEED: nope.js\nNEED: src/tax.js';
+  assert.deepEqual(neededFiles(answer, files), ['src/tax.js', 'README.md']);   // tax.js alone is two files; .env and the image never go
+  assert.deepEqual(neededFiles('No NEED here.', files), []);
+  assert.deepEqual(neededFiles('NEED: src/cart.js\nNEED: src/tax.js\nNEED: README.md', files, 2), ['src/cart.js', 'src/tax.js']);
+  // The file list opens every folder when asked
+  const all = outlineTree(['src/a.js', 'src/deep/b.js', 'lib/c.js'], ['src/a.js'], 50, true);
+  assert.match(all, /deep\/\n\s+b\.js/);
+  assert.match(all, /lib\/\n\s+c\.js/);
+  assert.doesNotMatch(outlineTree(['src/a.js', 'lib/c.js'], ['src/a.js'], 50), /c\.js/);
+});

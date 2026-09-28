@@ -23,7 +23,7 @@ import {
   parseGitHubUrl, refCandidates, rawFileUrl, encodePath, isReadablePath, estimateTokens, formatCount,
   sliceLines, extractImports, resolveImports, suggestStartFiles, buildPack, readingPrompt, READ_MODES,
   fencedFile, parseCommitsAtom, commitsFromApi, timeAgo, LOCAL_SKIP_DIRS, isSecretPath,
-  parseFileRef, CITE_RULE, LINE_NUMBER_NOTE, langFromPath
+  parseFileRef, CITE_RULE, LINE_NUMBER_NOTE, langFromPath, outlineTree, NEED_RULE, neededFiles
 } from './utils/github.js';
 
 // Session-storage keys other parts of the extension use to hand work to the panel
@@ -2033,6 +2033,9 @@ class YavarSidePanel {
       this.followWalk();
       return;
     }
+    // Opened on the repository's own page: its file tree lets the AI ask for files
+    const tab = this._tabCtx?.gh;
+    if (!change.local && tab && tab.owner === owner && tab.repo === repo) await this.ensureRepoTree().catch(() => {});
     await this.createChangeWalk(change);
   }
 
@@ -2341,7 +2344,9 @@ class YavarSidePanel {
       : `lines ${b.start}-${b.end} of \`${w.path}\`${repo ? ` from ${repo}` : ''}`;
     const block = c ? partContext(b) : `${LINE_NUMBER_NOTE}\n\n${fencedFile({ path: w.path, content: code, lines: b })}`;
     const project = this.walkProject();
-    const brief = project ? await this.projectBriefFor(project) : '';
+    const listed = this._filesListedFor === w.key;
+    const files = project ? this.projectFiles(project, [b.path || w.path], { list: !listed }) : '';
+    const brief = [project ? await this.projectBriefFor(project) : '', files].filter(Boolean).join('\n\n');
     const whole = [w.summary ? `(The ${c ? 'change' : 'file'} as a whole: ${w.summary})` : '', brief].filter(Boolean).join('\n\n');
     // Cited lines open the loaded tree's version, which a change's lines don't match
     const cite = c ? '' : `\n\n${CITE_RULE}`;
@@ -2430,11 +2435,15 @@ class YavarSidePanel {
         this.renderWalkNote(notesEl, note, false);
         await this.addWalkNote(w.key || w.path, i, note);
       } else if (lineNums) {
-        const text = await this.showAnswerIn(notesEl, label, prompt, { via: 'chat', inline: true, attachments });
+        if (files && !listed) this._filesListedFor = w.key;
+        let text = await this.showAnswerIn(notesEl, label, prompt, { via: 'chat', inline: true, attachments });
+        text = await this.answerWithFiles(notesEl, label, text, project);
         this.markLineRefs(notesEl);
         if (text) await this.saveLines(w.key, lineNums, label, text);
       } else {
-        const text = await this.showAnswerIn(notesEl, label, prompt, { via: 'chat', inline: true });
+        if (files && !listed) this._filesListedFor = w.key;
+        let text = await this.showAnswerIn(notesEl, label, prompt, { via: 'chat', inline: true });
+        text = await this.answerWithFiles(notesEl, label, text, project);
         this.markLineRefs(notesEl);
         if (text) await this.addWalkNote(w.key || w.path, i, { label, text });
       }
@@ -2612,6 +2621,39 @@ class YavarSidePanel {
       } catch (e) { /* no README: no brief */ }
     }
     return (this._briefs[id] = projectBrief(journey, readme));
+  }
+
+  // The loaded file tree when it is this project's, else null
+  treeFor({ owner = '', repo } = {}) {
+    const t = this.repoTree;
+    return t && t.repo === repo && (t.owner || '') === (owner || '') ? t : null;
+  }
+
+  // The project's file list and the NEED rule, so the AI can ask for the
+  // files it needs (answerWithFiles sends them). The list goes once per walk;
+  // later questions carry the rule alone. '' without the project's tree.
+  projectFiles(project, focus = [], { list = true } = {}) {
+    const t = project && this.treeFor(project);
+    if (!t) return '';
+    const paths = [...t.fileSet].filter(isReadablePath);
+    return (list ? `The project's files:\n\`\`\`\n${outlineTree(paths, focus, 150, true)}\n\`\`\`\n\n` : '') + NEED_RULE;
+  }
+
+  // An answer that ends with NEED lines gets those files, once, in the same
+  // chat, and gives its full answer; that answer is the one kept
+  async answerWithFiles(container, label, text, project) {
+    const t = text && project && this.treeFor(project);
+    const paths = t ? neededFiles(text, t.fileSet) : [];
+    if (!paths.length) return text;
+    const files = (await this.fetchRepoFilesMany(paths)).filter(f => !f.error);
+    if (!files.length) return text;
+    const one = files.length === 1 && files[0].path.split('/').pop();
+    const fname = one ? (one.endsWith('.md') ? one : `${one}.md`) : 'requested-files.md';
+    const more = await this.showAnswerIn(container, `${label} · with ${files.map(f => f.path.split('/').pop()).join(', ')}`,
+      `Here ${files.length === 1 ? 'is the file' : 'are the files'} you asked for, attached as "${fname}". ` +
+      `Now give your full answer to my last question, in the same shape as before, without asking for more files.`,
+      { via: 'chat', inline: true, attachments: [{ filename: fname, content: this.packFor(files) }] });
+    return more || text;
   }
 
   // The project the open walk or tree is in, for projectBriefFor
@@ -3391,8 +3433,10 @@ class YavarSidePanel {
         : `these ${files.length} files`;
       let question = readingPrompt(mode, { what, repo: repoName }, this._promptEdits);
       const t = this.repoTree;
-      const brief = question && t ? await this.projectBriefFor({ owner: t.owner, repo: t.repo, local: t.source === 'local' }) : '';
+      const packProject = t && { owner: t.owner, repo: t.repo, local: t.source === 'local' };
+      const brief = question && t ? await this.projectBriefFor(packProject) : '';
       if (brief) question = `${brief}\n\n${question}`;
+      if (question) question += `\n\n${NEED_RULE}`;
       const totalChars = files.reduce((n, f) => n + f.content.length, 0);
 
       const modeLabel = READ_MODES.find(m => m.id === mode)?.label || 'Explain';
@@ -3414,7 +3458,7 @@ class YavarSidePanel {
         // Small single file: inline, so the code is visible in the chat
         const block = `\`${single.path}\`${single.lines ? ` (lines ${single.lines.start}-${single.lines.end})` : ''} from ${repoName}. ` +
           `${LINE_NUMBER_NOTE}\n\n${fencedFile(single)}`;
-        this.askInThread({ title: modeLabel, sub: repoName, label, prompt: `${block}\n\n${question}` });
+        this.askInThread({ title: modeLabel, sub: repoName, label, prompt: `${block}\n\n${question}`, project: packProject });
       } else {
         // Several (or big) files: ONE attachment with a repo map, then the question
         const fname = single
@@ -3423,7 +3467,7 @@ class YavarSidePanel {
         question = `The attached "${fname}" contains ${single ? what : `${files.length} files from ${repoName}`}` +
           `${single ? '' : ` (${files.map(f => f.path).join(', ')})`}, starting with a map of the repository.\n\n${question}`;
         this.askInThread({ title: modeLabel, sub: repoName, label, prompt: question,
-          attachments: [{ filename: fname, content: this.packFor(files) }] });
+          attachments: [{ filename: fname, content: this.packFor(files) }], project: packProject });
       }
 
       await this.markRead(files.map(f => f.path));
@@ -4318,16 +4362,17 @@ class YavarSidePanel {
   }
 
   // Ask the chat and stream the answer into the Yavar view
-  async askInThread({ title, sub = '', label, prompt, attachments = [], items = [] }) {
+  async askInThread({ title, sub = '', label, prompt, attachments = [], items = [], project = null }) {
     if (!this.appView) return null;
     if (this.threadBusy()) { this.showNotification('Wait for the current answer, or press ■ to stop it'); return null; }
     this.openThread({ title, sub });
     this.addThreadQuestion(label, items);
     this.setBusy(true);
     try {
-      return await this.showAnswerIn(this.threadBody, this.answerWith === 'api' ? 'API' : this.getCurrentModel()?.name || 'Answer', prompt, {
-        attachments, collapsible: false, saveAs: { prompt: label }
-      });
+      const name = this.answerWith === 'api' ? 'API' : this.getCurrentModel()?.name || 'Answer';
+      const text = await this.showAnswerIn(this.threadBody, name, prompt, { attachments, collapsible: false, saveAs: { prompt: label } });
+      // A file pack's answer may ask for more of the project's files
+      return project ? await this.answerWithFiles(this.threadBody, name, text, project) : text;
     } finally {
       this.setBusy(false);
       document.getElementById('thread-private')?.classList.toggle('hidden', !this._chatIsTemp || this.answerWith === 'api');
