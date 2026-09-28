@@ -2111,6 +2111,7 @@ class YavarSidePanel {
       return;
     }
     const { blocks, current: i, typed = {}, range, total, change } = w;
+    if (change && w.summaryOpen) return this.renderReviewSummary();
     const b = blocks[i];
     const n = blocks.length;
     const last = i === n - 1;
@@ -2134,7 +2135,8 @@ class YavarSidePanel {
         first: i === 0, pct: Math.round(((i + 1) / n) * 100),
         next: !last ? `<button type="button" class="wk-step" data-wk="next" aria-label="Next">›</button>`
           : more ? `<button type="button" class="wk-step wk-step-text" data-wk="continue">Next lines ›</button>`
-            : change ? '' : `<button type="button" class="wk-step wk-step-text" data-wk="finish">Finish file</button>`,
+            : change ? `<button type="button" class="wk-step wk-step-text" data-wk="summary">Summary ›</button>`
+              : `<button type="button" class="wk-step wk-step-text" data-wk="finish">Finish file</button>`,
         items: blocks.map((x, k) => ({ i: k, current: k === i, mark: practised(k) ? '✓' : k + 1, title: esc(x.title),
           meta: change ? esc(x.path.split('/').pop()) : `${x.start}-${x.end}` })),
         extra: change
@@ -2222,14 +2224,21 @@ class YavarSidePanel {
     const i = w.current;
     const b = w.blocks[i];
     const go = async (k) => {
-      await this.saveWalk({ ...w, current: k });
+      await this.saveWalk({ ...w, current: k, summaryOpen: false });
       await this.renderWalk();
       this.walkBody.scrollTop = 0;
       this.followWalk();
     };
     if (act === 'list') return this.toggleStepList(this.walkBody, el);
     if (act === 'goto') return go(Number(el.dataset.i));
-    if (act === 'prev') return go(Math.max(0, i - 1));
+    if (act === 'prev') return go(w.summaryOpen ? i : Math.max(0, i - 1));
+    if (act === 'summary') {
+      await this.saveWalk({ ...w, summaryOpen: true });
+      await this.renderWalk();
+      this.walkBody.scrollTop = 0;
+      return;
+    }
+    if (act === 'wrapup') return this.writeReviewSummary(el);
     if (act === 'next') return go(Math.min(w.blocks.length - 1, i + 1));
     if (act === 'show') return this.followWalk();
     if (act === 'redo') return this.resetWalk();
@@ -2369,6 +2378,72 @@ class YavarSidePanel {
       el.disabled = false;
       // Moved on while this was answered: the part now open gets its turn
       if (c && this.walk?.key === w.key && this.walk.current !== i) this.autoLines();
+    }
+  }
+
+  // ----- The end of a change walk -----
+  // What Find bugs turned up, part by part, and one summary: what the change
+  // does, its risks, a checklist, and the words to go with it (a commit
+  // message, a pull request description, or a review comment).
+  renderReviewSummary() {
+    const w = this.walk;
+    const c = w.change;
+    const n = w.blocks.length;
+    const esc = (t) => this.escapeHtml(t || '');
+    const found = w.blocks.map((b, k) => ({ b, k, notes: (w.notes?.[k] || []).filter(x => x.label === 'Find bugs') })).filter(x => x.notes.length);
+    const unchecked = n - w.blocks.filter((_, k) => (w.notes?.[k] || []).some(x => x.label === 'Find bugs')).length;
+    this.walkBody.innerHTML =
+      this.stepBar({
+        act: 'wk', context: c.label, where: 'Summary', first: false, pct: 100, next: '',
+        items: w.blocks.map((x, k) => ({ i: k, current: false, mark: k + 1, title: esc(x.title), meta: esc(x.path.split('/').pop()) }))
+      }) +
+      `<h3 class="wk-title">Review summary</h3>` +
+      (w.summary ? `<p class="wk-summary">${esc(w.summary)}</p>` : '') +
+      `<div class="rebuild-label">Found with Find bugs</div>` +
+      (found.length
+        ? `<ul class="wk-found">${found.map(({ b, k }) =>
+            `<li><button type="button" class="files-link-btn" data-wk="goto" data-i="${k}">Part ${k + 1} · ${esc(b.title)}</button></li>`).join('')}</ul>`
+        : '') +
+      `<p class="wk-explain is-empty">${found.length ? '' : 'No part has been checked with Find bugs yet. '}` +
+        `${unchecked ? `${unchecked} of ${n} part${n === 1 ? '' : 's'} not checked; the summary still reviews the whole diff.` : 'Every part was checked.'}</p>` +
+      `<div class="walk-notes"></div>` +
+      `<div class="wk-dock"><div class="wk-acts"><button type="button" class="run-ask" data-wk="wrapup">${w.review ? 'Write it again' : 'Write the summary'}</button></div></div>`;
+    const notesEl = this.walkBody.querySelector('.walk-notes');
+    if (w.review) this.renderWalkNote(notesEl, { label: 'Review summary', text: w.review }, false);
+    else if (!this._panelAsk) this.walkBody.querySelector('[data-wk="wrapup"]').click();
+  }
+
+  async writeReviewSummary(el) {
+    const w = this.walk;
+    const c = w.change;
+    const repo = c.owner ? `${c.owner}/${c.repo}` : c.repo;
+    const found = w.blocks.flatMap((b, k) => (w.notes?.[k] || []).filter(x => x.label === 'Find bugs')
+      .map(x => `### Part ${k + 1} · ${b.title}\n${x.text.slice(0, 1500)}`));
+    const [before, words] = c.local
+      ? c.base === 'uncommitted'
+        ? ['commit', 'Commit message: In a code block, a title line under 60 characters saying what the change does, in the imperative, then a blank line and a short body on what changed and why']
+        : ['push', 'Pull request description: In a code block, a title, then what changed, why, and how it was tested']
+      : ['merge', 'Review comment: A short, kind review you could post, saying what is good and what to change'];
+    const prompt = `The attached "${w.fname || 'changes.md'}" is the whole diff of ${w.what || c.label.toLowerCase()} in ${repo}${c.title ? ` ("${c.title}")` : ''}, ` +
+      `which I have read part by part. Write the review summary, under these headings:\n\n` +
+      `## What it does\nTwo or three sentences.\n\n` +
+      `## Risks\nWhat could break and where, naming the parts.\n\n` +
+      `## Before you ${before}\nA checklist ("- [ ] ...") of what to fix or check, most important first. Leave it out if there is nothing.\n\n` +
+      `## ${words.split(':')[0]}\n${words.split(': ')[1]}.` +
+      (found.length ? `\n\nWhile reading, Find bugs reported the problems below. Keep the ones that still hold after seeing the whole diff:\n\n${found.join('\n\n')}` : '');
+    const notesEl = this.walkBody.querySelector('.walk-notes');
+    notesEl.replaceChildren();
+    el.disabled = true;
+    try {
+      const text = await this.showAnswerIn(notesEl, 'Review summary', prompt, {
+        via: 'chat', inline: true, attachments: [{ filename: w.fname || 'changes.md', content: changePack(w.blocks, w.what || c.label) }]
+      });
+      if (text && this.walk?.key === w.key) {
+        await this.saveWalk({ ...this.walk, review: text });
+        el.textContent = 'Write it again';
+      }
+    } finally {
+      el.disabled = false;
     }
   }
 
