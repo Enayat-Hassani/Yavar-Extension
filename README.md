@@ -111,8 +111,10 @@ Yavar-Extension/
 ├── src/
 │   ├── content.js        # Content script: floating menu + text selection
 │   ├── background.js     # Service worker (lifecycle, screenshot, routing)
-│   ├── sidepanel.js      # Sidebar UI: the Yavar view, file picker,
-│   │                     #   walkthroughs, history, notes, rebuild
+│   ├── sidepanel.js      # The sidebar: setup, start page, thread, menus
+│   ├── panel/            # Its features, one module each: chat, answers, repo,
+│   │                     #   context, walk, journey, review, rebuild, composer,
+│   │                     #   tab, capture, history, notes, labs, sheets
 │   ├── reader.js         # The reader tab: a file with its lines highlighted, editable when local
 │   ├── ai-bridge.js      # Auto-submit / auto-paste / answer capture on AI platforms
 │   ├── options.js        # Settings page (models, prompts, token, shortcuts)
