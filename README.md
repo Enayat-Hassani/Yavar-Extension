@@ -8,7 +8,7 @@ A Chrome extension that embeds ChatGPT, Claude, and Gemini in a sidebar — so y
 
 **The Yavar view**: Yavar opens as a full-page app. The chat (ChatGPT, Claude or Gemini) keeps running behind it; the chat button in the header shows it, and **‹ Yavar** brings you back.
 
-- **Header:** the model pill switches models; the new model picks up the conversation (API models get the earlier turns as their own, a chat site gets them as an attached `conversation-so-far.md`, newest turns first if it's long), and *Ask* on an API answer passes them on too, the pencil starts a new conversation, and **⋯** holds saved answers, notes, web and video research, the code playground, *Continue in a fresh chat* and settings.
+- **Header:** the model pill switches models; the new model picks up the conversation (API models get the earlier turns as their own, a chat site gets them as an attached `conversation-so-far.md`, newest turns first if it's long), and *Ask* on an API answer passes them on too, the pencil starts a new conversation, and **⋯** holds saved answers, notes, web research, *Continue in a fresh chat* and settings.
 - **Start page:** actions for the tab you're on. On GitHub: *Read <file>* on a file page, *Read this commit* or *Read pull request #N* on those pages, *Read this repository*, *Build it yourself* and *Recent changes*. On other pages: *Summarize*, *Ask about it*, *Fact-check it*. With no page open: *Read a project folder*.
 - **Composer:** type to the model, or press **+** to add the file open in your tab, **files from the repository** or **a folder**, **this page** (on YouTube, the video's transcript), or a **screenshot**: click an element on the page, or drag an area (↑ widens a click to the element around it, ✓ or Enter takes it). Along with the picture, Yavar sends what's in it as Markdown: text, a table as a table, links, image descriptions, the heading above it, and the HTML of a control or form. Each attachment chip shows its size in tokens, and the message box offers one-tap actions that fit what's attached: a table gets *Explain / Key takeaways / As CSV*, code *Explain / Find bugs / Line by line*, an error *Why this error? / How do I fix it?*, a paragraph *Summarize / Explain simply / Words to learn*. **Use a prompt** wraps what you typed in one of your templates. With files attached, one tap asks for *Explain*, *Line by line*, *How it fits*, *Review* or *Quiz me*.
 - **Selections, pages and screenshots from outside the panel** (the floating menu, the right-click menu, the shortcuts) arrive in the composer. A floating-menu prompt is sent at once if *Settings → Send floating-menu prompts right away* is on; otherwise it waits in the message box.
@@ -26,7 +26,7 @@ Add, edit, or remove your own templates under *Settings → Prompts* using `{{se
 
 **Web research agent** — research any topic: the agent performs **SEARCH + READ** across the web and writes an answer with sources. Each search and read is logged in the conversation as it happens, and ■ stops it. Turn on **Deep research** in Settings for deeper coverage.
 
-**Fact-check it** (the start page on any web page) seeds the web research agent with the page, then lets it branch out via SEARCH/READ. **Video research** (in **⋯**) searches YouTube for a topic (e.g. *"top things to try in Chiang Mai"*), pulls the top videos' transcripts, and hands them to the AI to synthesize against your Notes. Requires a running **ytx** server; see [Video search: setting up ytx](#video-search-setting-up-ytx).
+**Fact-check it** (the start page on any web page) seeds the web research agent with the page, then lets it branch out via SEARCH/READ.
 
 **Reading code** — read a repository the way you would with a mentor beside you, without an API key. The chat site does the explaining, so reading costs no paid calls.
 
@@ -143,7 +143,7 @@ Yavar-Extension/
 │   └── codemirror/       # CodeMirror (notes, code boxes, reader)
 ├── styles/
 ├── tests/                # node:test unit tests
-├── scripts/              # ytx setup + check.mjs (static checks)
+├── scripts/              # check.mjs (static checks)
 ├── sidepanel.html
 ├── reader.html
 ├── options.html
@@ -162,67 +162,6 @@ Yavar asks for broad permissions to do its job. Here's what they are and why:
 ## Configuration
 
 Settings live on the options page (`options.html`, or **⋯ → Settings** in Yavar); prompt templates and the IELTS coach are on its **Prompts** tab. Shortcuts are changed at `chrome://extensions/shortcuts`.
-
-## Video search: setting up ytx
-
-**Video research** gets its transcripts from
-**[ytx](https://github.com/Enayat-Hassani/youtube-transcript-extractor)**, a
-small local server. (A browser extension can't fetch many transcripts reliably
-on its own — YouTube throttles it — so ytx does the heavy lifting: multi-backend
-fetching with caching.) Attaching one video's transcript (**+ → This video's
-transcript** on a YouTube page) uses ytx when it's running and the page's
-captions otherwise. Everything else works without it.
-
-ytx needs [**uv**](https://docs.astral.sh/uv/) (a Python tool). Install that
-first, then set ytx up.
-
-**macOS / Linux** — from the extension folder:
-
-```bash
-./scripts/setup-ytx.sh
-```
-
-**Windows** (PowerShell):
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\setup-ytx.ps1
-```
-
-That clones ytx into `server/ytx` and installs its dependencies. Then run it
-(leave it open in a terminal):
-
-```bash
-cd server/ytx && uv run uvicorn ytx_api.main:app --host 127.0.0.1 --port 8722
-```
-
-Check it's up (should print `{"status":"ok",…}`):
-
-```bash
-curl -s http://127.0.0.1:8722/health
-```
-
-The extension talks to `http://localhost:8722` by default — change the URL or
-video count in **Settings** if you like.
-
-### Keep it always-on (optional)
-
-So you don't have to start it by hand each time:
-
-- **macOS** — installs a LaunchAgent that runs ytx at login and restarts it if it
-  stops:
-
-  ```bash
-  ./scripts/install-autostart-macos.sh
-  ```
-
-  Uninstall: `launchctl unload -w ~/Library/LaunchAgents/com.yavar.ytx.plist && rm ~/Library/LaunchAgents/com.yavar.ytx.plist`
-
-- **Windows** — create a Task Scheduler task that runs the `uvicorn …` command
-  above *At log on*.
-- **Linux** — a `systemd --user` service running the same command.
-
-It's a light process (~55 MB idle, ~0% CPU when unused). Port `8722` is used
-instead of the common `8000` to avoid clashing with other local servers.
 
 ## Development
 

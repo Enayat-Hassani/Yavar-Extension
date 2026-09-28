@@ -30,8 +30,6 @@ coverage/
 node_modules/
 vendor/
 
-# ytx transcript server (cloned by scripts/setup-ytx.sh into server/ytx)
-server/
 
 # Build outputs
 dist/

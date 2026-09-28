@@ -14,8 +14,6 @@ const DEFAULT_SETTINGS = {
   tempChats: true,
   deepResearch: false,
   inChatButtons: true,
-  ytxBaseUrl: 'http://localhost:8722',
-  ytxVideoCount: 12,
   answerWith: 'chat',
   apiFreeModels: [],
   apiPaidModel: '',
@@ -75,8 +73,6 @@ class OptionsPage {
     this.modelsList = document.getElementById('models-list');
     this.addModelForm = document.getElementById('add-model-form');
 
-    this.ytxBaseUrlInput = document.getElementById('ytx-base-url');
-    this.ytxVideoCountInput = document.getElementById('ytx-video-count');
 
     this.disabledSiteInput = document.getElementById('disabled-site');
     this.addSiteBtn = document.getElementById('add-site-btn');
@@ -113,13 +109,6 @@ class OptionsPage {
       document.getElementById(elId)?.addEventListener('change', (e) => this.saveSetting({ [key]: e.target.checked }));
     }
 
-    this.ytxBaseUrlInput?.addEventListener('change', () => this.saveSetting({
-      ytxBaseUrl: this.ytxBaseUrlInput.value.trim().replace(/\/+$/, '') || DEFAULT_SETTINGS.ytxBaseUrl
-    }));
-    this.ytxVideoCountInput?.addEventListener('change', () => {
-      const count = parseInt(this.ytxVideoCountInput.value, 10);
-      this.saveSetting({ ytxVideoCount: Number.isFinite(count) ? Math.min(50, Math.max(1, count)) : 12 });
-    });
 
     document.getElementById('save-github-token')?.addEventListener('click', () => this.saveGithubToken());
 
@@ -211,8 +200,6 @@ class OptionsPage {
       const el = document.getElementById(elId);
       if (el) el.checked = !!this.settings[key];
     }
-    if (this.ytxBaseUrlInput) this.ytxBaseUrlInput.value = this.settings.ytxBaseUrl;
-    if (this.ytxVideoCountInput) this.ytxVideoCountInput.value = this.settings.ytxVideoCount;
     document.getElementById('paid-model').value = this.settings.apiPaidModel || '';
     document.getElementById('monthly-cap').value = this.settings.apiMonthlyCap;
     this.showSpend();
@@ -529,9 +516,7 @@ class OptionsPage {
         if (typeof imported.defaultAI === 'string') clean.defaultAI = imported.defaultAI;
         if (typeof imported.enableFloatingMenu === 'boolean') clean.enableFloatingMenu = imported.enableFloatingMenu;
         if (Array.isArray(imported.disabledSites)) clean.disabledSites = imported.disabledSites.filter(x => typeof x === 'string');
-        if (typeof imported.ytxBaseUrl === 'string') clean.ytxBaseUrl = imported.ytxBaseUrl;
         if (typeof imported.morfiaBase === 'string') clean.morfiaBase = imported.morfiaBase;
-        if (Number.isFinite(imported.ytxVideoCount)) clean.ytxVideoCount = imported.ytxVideoCount;
         if (Number.isFinite(imported.apiMonthlyCap) && imported.apiMonthlyCap >= 0) clean.apiMonthlyCap = imported.apiMonthlyCap;
         for (const k of ['apiPaidModel', 'apiGatewayBase', 'apiGatewayModel']) {
           if (typeof imported[k] === 'string') clean[k] = imported[k];

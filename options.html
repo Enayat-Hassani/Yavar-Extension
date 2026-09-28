@@ -186,26 +186,6 @@
         </div>
       </section>
 
-      <!-- Video Research (ytx) -->
-      <section class="settings-section">
-        <h2>Video research</h2>
-        <p class="help-text">
-          Video research pulls transcripts of the top YouTube results from your local
-          <strong>ytx</strong> server. Start it with <code>uv run uvicorn ytx_api.main:app --port 8722</code>
-          (or set it to start at login; see the README).
-        </p>
-
-        <div class="setting-item">
-          <label for="ytx-base-url">ytx server URL</label>
-          <input type="text" id="ytx-base-url" placeholder="http://localhost:8722">
-        </div>
-
-        <div class="setting-item">
-          <label for="ytx-video-count">Videos per topic</label>
-          <input type="number" id="ytx-video-count" min="1" max="50" step="1" placeholder="12">
-        </div>
-      </section>
-
       <!-- Keyboard Shortcuts -->
       <section class="settings-section">
         <h2>Keyboard shortcuts</h2>
