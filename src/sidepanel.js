@@ -12,6 +12,7 @@ import { captureLabel, captureMarkdown, hasCaptureText } from './utils/capture.j
 import { suggestActions } from './utils/actions.js';
 import { coachSteps, loadCoach, coachPrompt } from './utils/coach.js';
 import { materialFile, addToMorfia } from './utils/material.js';
+import { gitRepo, workingDiff, ignoreRules, blobSha } from './utils/git.js';
 import { icon } from './utils/icons.js';
 import { idbGet, idbSet } from './utils/idb.js';
 import { transcriptMarkdown, turnsToMessages, HANDOFF_NOTE, earlierAnswers } from './utils/conversation.js';
@@ -923,6 +924,7 @@ class YavarSidePanel {
     return [
       ...repoItems,
       { id: 'read_folder', icon: icon('folder'), name: 'Read a project folder', desc: 'A project on this computer', divider: repoItems.length > 0 },
+      { id: 'review_changes', icon: icon('diff'), name: 'Review my changes', desc: 'Before you commit or push' },
       { id: 'history', icon: icon('bookmark'), name: 'Saved answers', desc: 'Everything you saved, searchable', divider: true },
       { id: 'notes', icon: icon('note'), name: 'Notes', desc: 'Your scratchpad' },
       ...(this._morfiaOn && this._tabCtx?.usable && !this._tabCtx.video
@@ -1120,6 +1122,7 @@ class YavarSidePanel {
       walk_diff: () => this.walkActiveDiff(),
       explain_repo: () => this.openJourney(),
       read_folder: () => this.openJourney({ folder: true }),
+      review_changes: () => this.startReview(),
       history: () => this.toggleHistory(),
       notes: () => this.toggleNotes(),
       settings: () => chrome.runtime.openOptionsPage(),
@@ -2002,7 +2005,9 @@ class YavarSidePanel {
 
   async walkChange(gh) {
     const { owner, repo, kind, sha, number, title = '' } = gh;
-    const change = { owner, repo, kind, sha, number, title,
+    // A local change (reviewLocal) arrives whole: its label, and a key made
+    // from its diff, so the same changes reopen their walk
+    const change = gh.local ? gh : { owner, repo, kind, sha, number, title,
       label: kind === 'pull' ? `Pull request #${number}` : `Commit ${sha.slice(0, 7)}`,
       ref: kind === 'pull' ? `refs/pull/${number}/head` : sha,
       key: `walk:${owner}/${repo}:@${kind === 'pull' ? `pr-${number}` : sha}` };
@@ -2010,7 +2015,7 @@ class YavarSidePanel {
     try { saved = (await chrome.storage.local.get(change.key))[change.key]; } catch (e) { /* none */ }
     this.walkView = 'file';
     document.getElementById('walk-title').textContent = 'Read the change';
-    document.getElementById('walk-sub').textContent = change.label + (title ? ` · ${title}` : '');
+    document.getElementById('walk-sub').textContent = change.label + (change.title ? ` · ${change.title}` : '');
     this.walkPanel.classList.remove('hidden');
     if (saved?.blocks?.length) {
       this.walk = saved;
@@ -2029,12 +2034,12 @@ class YavarSidePanel {
     this.walk = { key, change, pending: true };
     this.renderWalk();
     try {
-      const files = parseDiff(await this.fetchDiff({ owner, repo, kind, sha, number }));
+      const files = parseDiff(change.local ? await this.localDiff(change) : await this.fetchDiff({ owner, repo, kind, sha, number }));
       const { blocks, skipped } = changeBlocks(files);
       if (!blocks.length) throw new Error(files.length ? 'only lockfiles, generated or binary files changed' : 'the diff is empty');
-      const what = kind === 'pull' ? `pull request #${number}` : `commit ${sha.slice(0, 7)}`;
-      const fname = `${repo}-${kind === 'pull' ? `pr-${number}` : sha.slice(0, 7)}-changes.md`.replace(/[^\w.-]+/g, '-');
-      const { value: parsed, text, tried } = await this.askForJson(changeWalkPrompt({ what, repo: `${owner}/${repo}`, title, fname, skipped }), {
+      const what = change.local ? change.what : kind === 'pull' ? `pull request #${number}` : `commit ${sha.slice(0, 7)}`;
+      const fname = `${repo}-${change.local ? change.base : kind === 'pull' ? `pr-${number}` : sha.slice(0, 7)}-changes.md`.replace(/[^\w.-]+/g, '-');
+      const { value: parsed, text, tried } = await this.askForJson(changeWalkPrompt({ what, repo: owner ? `${owner}/${repo}` : repo, title, fname, skipped }), {
         attachments: [{ filename: fname, content: changePack(blocks, what) }], live: this.walkBody, list: 'title',
         hint: `Reading ${blocks.length} part${blocks.length === 1 ? '' : 's'} of the change…`,
         parse: (t) => parseChangeWalk(t, blocks)
@@ -2044,7 +2049,7 @@ class YavarSidePanel {
         throw new Error(`couldn't find the parts in the replies (asked ${tried})`);
       }
       await this.saveWalk({ key, change, summary: parsed.summary, blocks: parsed.blocks, skipped, current: 0, typed: {}, created: Date.now() });
-      this._readingContext = { label: `${owner}/${repo}`, ts: Date.now() };
+      this._readingContext = { label: owner ? `${owner}/${repo}` : repo, ts: Date.now() };
       this.followWalk();
     } catch (e) {
       this.walk = { key, change, error: e.message };
@@ -2071,8 +2076,8 @@ class YavarSidePanel {
     if (w.change) {
       // The file as it is after the change, with the part's diff drawn in it
       // (a walk saved before parts kept their lines just highlights them)
-      const { owner, repo, ref } = w.change;
-      if (b.start) this.openRepoFile({ source: 'github', owner, repo, ref, path: b.path, lines: { start: b.start, end: b.end },
+      const { owner, repo, ref, local } = w.change;
+      if (b.start) this.openRepoFile({ source: local ? 'local' : 'github', owner, repo, ref, path: b.path, lines: { start: b.start, end: b.end },
         label: `Part ${w.current + 1} of ${w.blocks.length} · ${b.title}`, diff: b.add ? { add: b.add, del: b.del } : null });
       return;
     }
@@ -2088,6 +2093,7 @@ class YavarSidePanel {
     const b = w.blocks[w.current];
     if (!w.change) return sliceLines(await this.readRepoFile(w.path), b.start, b.end);
     if (!b.start) return b.removedText;
+    if (w.change.local) return sliceLines(await this.readRepoFile(b.path), b.start, b.end);
     const { owner, repo, ref } = w.change;
     return sliceLines(await this.fetchFileAt(owner, repo, ref, b.path), b.start, b.end);
   }
@@ -2137,7 +2143,7 @@ class YavarSidePanel {
         items: blocks.map((x, k) => ({ i: k, current: k === i, mark: practised(k) ? '✓' : k + 1, title: esc(x.title),
           meta: change ? esc(x.path.split('/').pop()) : `${x.start}-${x.end}` })),
         extra: change
-          ? `<button type="button" class="files-link-btn wk-redo" data-wk="explain-change">Explain the whole change in the chat</button>` +
+          ? (change.local ? '' : `<button type="button" class="files-link-btn wk-redo" data-wk="explain-change">Explain the whole change in the chat</button>`) +
             `<button type="button" class="files-link-btn wk-redo" data-wk="redo">Ask for a new walkthrough of this change</button>`
           : `<button type="button" class="files-link-btn wk-redo" data-wk="redo">Ask for a new walkthrough of this file</button>`
       }) +
@@ -2168,6 +2174,7 @@ class YavarSidePanel {
         (change ? `<button type="button" class="run-ask" data-wk="lines">Line by line</button>` : '') +
         `<button type="button" class="run-ask" data-wk="more">Explain more</button>` +
         (change ? `<button type="button" class="run-ask" data-wk="bugs">Find bugs</button>` +
+          `<button type="button" class="run-ask" data-wk="better">Better ways</button>` +
           `<button type="button" class="run-ask" data-wk="tests">How to test it</button>` : '') +
         `<button type="button" class="run-ask" data-wk="quiz">Quiz me</button>` +
         (!change || b.added ? `<button type="button" class="run-ask" data-wk="type" aria-expanded="false">${change ? 'Write it yourself' : 'Practise typing'}${best != null ? ` · best ${best}%` : ''}</button>` : '')) +
@@ -2200,6 +2207,8 @@ class YavarSidePanel {
     if (act === 'close') return this.walkPanel.classList.add('hidden');
     // Choosing a folder, the reading map, and moving between files
     if (act === 'folder') return this.openFolderJourney(el.dataset.i);
+    if (act === 'review') return this.reviewLocal(el.dataset.base);
+    if (act === 'review-back') return this.showReviewChoice();
     if (act === 'folder-new') return this.openFolderJourney(null);
     if (act === 'folders') return this.showFolderChoice();
     if (act === 'map') return this.showJourneyMap();
@@ -2251,7 +2260,7 @@ class YavarSidePanel {
 
     const code = await this.walkBlockCode();
     const c = w.change;
-    const repo = c ? `${c.owner}/${c.repo}` : this.repoDisplayName();
+    const repo = c ? (c.owner ? `${c.owner}/${c.repo}` : c.repo) : this.repoDisplayName();
     // What the question is about: a file's numbered lines, or a change's part and its diff
     const where = c ? `part ${i + 1} of ${w.blocks.length} of ${c.label.toLowerCase()} in ${repo}${c.title ? ` ("${c.title}")` : ''}`
       : `lines ${b.start}-${b.end} of \`${w.path}\`${repo ? ` from ${repo}` : ''}`;
@@ -2278,7 +2287,7 @@ class YavarSidePanel {
       }
       return;
     }
-    if (!['more', 'lines', 'bugs', 'tests', 'quiz', 'feedback', 'ask'].includes(act)) return;
+    if (!['more', 'lines', 'bugs', 'better', 'tests', 'quiz', 'feedback', 'ask'].includes(act)) return;
 
     const notesEl = this.walkBody.querySelector('.walk-notes');
     let prompt;
@@ -2296,6 +2305,11 @@ class YavarSidePanel {
         `For each problem give the line number, what goes wrong, a concrete case that shows it, and a fix. ` +
         `If a problem depends on code not shown here, say what to check. If there is nothing real, say so plainly ` +
         `and name what you checked; don't invent problems. ${whole}\n\n${block}`;
+    } else if (act === 'better') {
+      label = 'Better ways';
+      prompt = `Is there a better way to write the new code in ${where}? Suggest alternatives that are simpler, clearer, ` +
+        `safer or more usual for this language, each with its trade-off and a short example, most useful first. ` +
+        `If the code is already a good choice, say so and why, rather than suggesting changes for their own sake. ${whole}\n\n${block}`;
     } else if (act === 'tests') {
       label = 'How to test it';
       prompt = `How would I check that ${where} works? List the cases worth testing, edge cases included, and for each ` +
@@ -2423,7 +2437,7 @@ class YavarSidePanel {
   // For the repo in the tab, the folder already open, or (folder: true) a folder you pick
   async openJourney({ folder = false } = {}) {
     try {
-      if (folder) return this.showFolderChoice();
+      if (folder) return this.showFolderChoice({ review: false });
       if (this._tabCtx?.gh) {
         await this.ensureRepoTree();
       }
@@ -2441,10 +2455,12 @@ class YavarSidePanel {
     else await this.createJourney();
   }
 
-  // "Read a project folder": the folders you read before, or a new one
-  async showFolderChoice() {
+  // "Read a project folder" or "Review my changes": the folders you opened
+  // before, or a new one
+  async showFolderChoice({ review = this._folderReview } = {}) {
+    this._folderReview = review;
     this.walkView = 'folders';
-    document.getElementById('walk-title').textContent = 'Reading';
+    document.getElementById('walk-title').textContent = review ? 'Review my changes' : 'Reading';
     document.getElementById('walk-sub').textContent = 'A project folder';
     this.walkPanel.classList.remove('hidden');
     let recent = window.showDirectoryPicker ? (await idbGet('recentFolders')) || [] : [];
@@ -2465,14 +2481,142 @@ class YavarSidePanel {
               `<span class="jr-folder-name">${esc(r.name)}</span>${status ? `<span class="jr-folder-status">${esc(status)}</span>` : ''}` +
               `<span class="home-chev" aria-hidden="true">›</span></button></li>`;
           }).join('')}</ul>`
-        : `<p class="wk-summary">Pick a folder on this computer. Yavar gives you the big picture first, then walks you through it file by file.</p>`) +
+        : `<p class="wk-summary">${review
+          ? 'Pick the project folder, the one holding its .git. Yavar compares it with your last commit, or with what you last pushed, and walks you through the changes line by line.'
+          : 'Pick a folder on this computer. Yavar gives you the big picture first, then walks you through it file by file.'}</p>`) +
       `<div class="jr-actions"><button type="button" class="files-send jr-primary" data-wk="folder-new">Choose a folder…</button></div>`;
+  }
+
+  // ----- Reviewing local changes -----
+  // Chrome can't run git, so .git is read directly (utils/git.js): the files
+  // on disk are compared with the last commit, or with the branch you push
+  // to, and the diff is walked part by part like any commit.
+
+  async startReview() {
+    if (!window.showDirectoryPicker) {
+      this.showNotification('Reviewing changes needs folder access, which this browser does not offer');
+      return;
+    }
+    this.walkPanel.classList.remove('hidden');
+    await this.showFolderChoice({ review: true });
+  }
+
+  // .git and the folder's files, in the shape utils/git.js reads
+  async localGit() {
+    const root = this.localRoot;
+    if (!root) throw new Error('open the folder again');
+    const at = async (dir, path, kind) => {
+      const parts = path.split('/').filter(Boolean);
+      for (const p of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(p);
+      return kind === 'dir' ? (parts.length ? dir.getDirectoryHandle(parts.at(-1)) : dir) : dir.getFileHandle(parts.at(-1));
+    };
+    let gitDir;
+    try { gitDir = await root.getDirectoryHandle('.git'); } catch (e) {
+      throw new Error(`${root.name} has no .git folder here; pick the repository's top folder`);
+    }
+    const git = {
+      file: async (p) => { try { return await (await at(gitDir, p, 'file')).getFile(); } catch (e) { return null; } },
+      list: async (p) => {
+        try {
+          const names = [];
+          for await (const [name] of (await at(gitDir, p, 'dir')).entries()) names.push(name);
+          return names;
+        } catch (e) { return []; }
+      }
+    };
+    const work = {
+      paths: async () => [...(this.localFiles?.keys() || [])],
+      file: async (p) => { try { return await (await at(root, p, 'file')).getFile(); } catch (e) { return null; } }
+    };
+    return { repo: gitRepo(git), git, work };
+  }
+
+  async showReviewChoice() {
+    this.walkView = 'folders';
+    const name = this.repoTree?.repo || '';
+    document.getElementById('walk-title').textContent = 'Review my changes';
+    document.getElementById('walk-sub').textContent = name;
+    const esc = (t) => this.escapeHtml(t || '');
+    let st;
+    try {
+      st = await (await this.localGit()).repo.state();
+      if (!st.sha) throw new Error('the repository has no commits yet');
+    } catch (e) {
+      this.walkBody.innerHTML = `<div class="rebuild-intro"><p>⚠️ ${esc(e.message)}.</p>` +
+        `<button type="button" class="files-send jr-primary" data-wk="folders">Choose another folder</button></div>`;
+      return;
+    }
+    this._review = st;
+    const option = (base, title, desc) => `<li><button type="button" class="jr-folder" data-wk="review" data-base="${base}">` +
+      `<span class="jr-folder-name">${esc(title)}</span><span class="jr-folder-status">${esc(desc)}</span>` +
+      `<span class="home-chev" aria-hidden="true">›</span></button></li>`;
+    this.walkBody.innerHTML =
+      `<p class="wk-summary">${st.branch ? `On <code>${esc(st.branch)}</code>. ` : ''}Which changes should Yavar walk you through?</p>` +
+      `<ul class="jr-folders">` +
+        option('head', 'Not committed yet', `What changed since your last commit (${st.sha.slice(0, 7)})`) +
+        (st.upstream && st.upstream.sha !== st.sha
+          ? option('upstream', 'Not pushed yet', `Your commits and changes since ${st.upstream.name}`) : '') +
+      `</ul>` +
+      `<div class="jr-actions"><button type="button" class="files-link-btn jr-link" data-wk="folders">Another folder</button></div>`;
+  }
+
+  // Walk the changes against the last commit or the pushed branch. The walk's
+  // key is made from the diff, so the same changes reopen their walk.
+  async reviewLocal(base) {
+    const st = this._review;
+    const name = this.repoTree?.repo;
+    if (!st || !name) return;
+    const up = base === 'upstream' && st.upstream;
+    this.walkBody.innerHTML = `<div class="rebuild-wait"><span class="files-spinner"></span>Comparing the files with ${up ? st.upstream.name : 'your last commit'}…</div>`;
+    const change = { local: true, owner: '', repo: name, ref: '', kind: 'local', title: '', base: up ? 'unpushed' : 'uncommitted',
+      sha: up ? st.upstream.sha : st.sha,
+      label: up ? `Not pushed · since ${st.upstream.name}` : 'Not committed yet',
+      what: up ? `the changes on ${st.branch} not pushed to ${st.upstream.name} yet, commits and uncommitted work together`
+        : `the changes not committed yet${st.branch ? ` on ${st.branch}` : ''}` };
+    try {
+      const diff = await this.localDiff(change);
+      if (!diff) {
+        this.walkBody.innerHTML = `<div class="rebuild-intro"><p>Nothing to review: the files match ${up ? st.upstream.name : 'your last commit'}.</p>` +
+          `<button type="button" class="files-link-btn jr-link" data-wk="review-back">Back</button></div>`;
+        return;
+      }
+      const hash = (await blobSha(new TextEncoder().encode(diff))).slice(0, 12);
+      change.key = `walk:local/${name}:@${change.base}-${hash}`;
+      this._localDiffs = { [change.key]: diff };
+      await this.walkChange(change);
+    } catch (e) {
+      this.walkBody.innerHTML = `<div class="rebuild-intro"><p>⚠️ Could not read the changes: ${this.escapeHtml(e.message)}.</p>` +
+        `<button type="button" class="files-link-btn jr-link" data-wk="review-back">Back</button></div>`;
+    }
+  }
+
+  // The diff of a local change: kept from reviewLocal, or read again (Ask again)
+  async localDiff(change) {
+    if (this._localDiffs?.[change.key]) {
+      const diff = this._localDiffs[change.key];
+      delete this._localDiffs[change.key];
+      return diff;
+    }
+    if (this.repoTree?.repo !== change.repo || !this.localRoot) throw new Error(`open ${change.repo} again with Review my changes`);
+    this.clearFileCache('local:');
+    const { repo, git, work } = await this.localGit();
+    // .gitignore files (the folder's and nested ones) and .git/info/exclude
+    const sources = [];
+    const exclude = await git.file('info/exclude');
+    if (exclude) sources.push({ dir: '', text: await exclude.text() });
+    for (const p of [...(this.localFiles?.keys() || [])].filter(p => p === '.gitignore' || p.endsWith('/.gitignore'))) {
+      const f = await work.file(p);
+      if (f) sources.push({ dir: p.slice(0, -'.gitignore'.length).replace(/\/$/, ''), text: await f.text() });
+    }
+    const { diff } = await workingDiff(repo, change.sha, work, { isIgnored: ignoreRules(sources), isPrivate: isSecretPath });
+    return diff;
   }
 
   // i: index into the recent list, or null to pick a new folder
   async openFolderJourney(i) {
     const recent = i == null ? null : this._recentFolders?.[Number(i)];
     if (!(await this.openLocalFolder(recent ? { handle: recent.handle } : {}))) return;
+    if (this._folderReview) return this.showReviewChoice();
     this.journey = await this.loadJourney();
     if (this.journey) this.showJourneyMap();
     else await this.createJourney();
@@ -2775,11 +2919,13 @@ class YavarSidePanel {
         if (!handle) handle = await window.showDirectoryPicker({ id: 'yavar-reader', mode: 'read' });
         idbSet('lastFolder', handle);
         await this.rememberFolder(handle);
+        this.localRoot = handle;
         this.showNotification(`Reading ${handle.name}…`);
         tree = await this.scanDirectoryHandle(handle);
       } else {
         const files = await this.pickFolderViaInput();
         if (!files) return false;
+        this.localRoot = null;
         tree = this.treeFromFileList(files);
       }
     } catch (e) {
@@ -3844,6 +3990,7 @@ class YavarSidePanel {
       hero = { kicker: 'Yavar', title: 'Ask anything' };
       ctx = `<div class="home-group">` +
         row('read_folder', icon('folder'), 'Read a project folder', 'The big picture first, then file by file') +
+        row('review_changes', icon('diff'), 'Review my changes', 'What changed before you commit or push, line by line') +
         `</div>`;
     }
     this.threadBody.innerHTML =
