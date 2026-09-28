@@ -15,7 +15,12 @@
       <span id="rd-repo" class="rd-repo"></span>
       <span id="rd-path" class="rd-path"></span>
     </div>
-    <span id="rd-label" class="rd-label" hidden></span>
+    <!-- Where the walk is; ‹ › (and ← →) step it from here -->
+    <span id="rd-nav" class="rd-nav" hidden>
+      <button type="button" id="rd-prev" class="rd-step" title="Previous (←)" aria-label="Previous">‹</button>
+      <span id="rd-label" class="rd-label" hidden></span>
+      <button type="button" id="rd-next" class="rd-step" title="Next (→)" aria-label="Next">›</button>
+    </span>
     <a id="rd-github" class="rd-github" target="_blank" rel="noopener noreferrer" hidden>Open on GitHub</a>
     <!-- A local file can be edited here and saved back to the folder -->
     <span id="rd-status" class="rd-status" role="status" aria-live="polite"></span>

@@ -191,6 +191,12 @@ class YavarSidePanel {
     this.walkBody = document.getElementById('walk-body');
     document.getElementById('walk-close')?.addEventListener('click', () => this.walkPanel.classList.add('hidden'));
     this.walkPanel?.addEventListener('keydown', (e) => {
+      // ← → (or j k) step through the walk, unless you're typing
+      const typing = e.target.closest?.('input, textarea, [contenteditable="true"], .CodeMirror');
+      if (!typing && !e.metaKey && !e.ctrlKey && !e.altKey && ['ArrowLeft', 'ArrowRight', 'j', 'k'].includes(e.key)) {
+        if (this.stepWalk(e.key === 'ArrowLeft' || e.key === 'k' ? -1 : 1)) e.preventDefault();
+        return;
+      }
       if (e.key !== 'Escape') return;
       if (!this.closeStepList(this.walkBody, true)) this.walkPanel.classList.add('hidden');
     });
@@ -1435,7 +1441,7 @@ class YavarSidePanel {
   // is highlighted (a walkthrough block). When several calls race (Next
   // clicked quickly), only the latest is shown. A local file carries its
   // walk's storage key, so an edit saved in the reader can move the walk.
-  async openRepoFile({ source = 'github', owner, repo, ref, path, lines = null, label = '', diff = null }) {
+  async openRepoFile({ source = 'github', owner, repo, ref, path, lines = null, label = '', diff = null, focus = false, nav = null }) {
     const seq = (this._readerSeq = (this._readerSeq || 0) + 1);
     try {
       const t = this.repoTree;
@@ -1447,7 +1453,7 @@ class YavarSidePanel {
       if (seq !== this._readerSeq) return;
       await chrome.storage.session.set({ readerView: {
         repo: { source, owner, repo, ref, name: owner ? `${owner}/${repo}` : repo },
-        path, content, lines, label, diff, walkKey: source === 'local' ? this.walkKey(path) : null, ts: Date.now()
+        path, content, lines, label, diff, focus, nav, walkKey: source === 'local' ? this.walkKey(path) : null, ts: Date.now()
       } });
       await this.showReaderTab();
     } catch (e) {
@@ -2072,14 +2078,54 @@ class YavarSidePanel {
     if (w.change) {
       // The file as it is after the change, with the part's diff drawn in it
       // (a walk saved before parts kept their lines just highlights them)
-      const { owner, repo, ref, local } = w.change;
-      if (b.start) this.openRepoFile({ source: local ? 'local' : 'github', owner, repo, ref, path: b.path, lines: { start: b.start, end: b.end },
-        label: `Part ${w.current + 1} of ${w.blocks.length} · ${b.title}`, diff: b.add ? { add: b.add, del: b.del } : null });
+      if (b.start) this.openRepoFile(this.partRef(b, { start: b.start, end: b.end }));
       return;
     }
     if (!this.repoTree) return;
     this.openRepoFile({ ...this.fileRefFor(w.path, { start: b.start, end: b.end }),
-      label: `Block ${w.current + 1} of ${w.blocks.length} · ${b.title}` });
+      label: `Block ${w.current + 1} of ${w.blocks.length} · ${b.title}`, nav: this.walkNav() });
+  }
+
+  // What the reader shows for a part of a change: the file after the change
+  // with the part's diff in it, and `lines` highlighted (a line an
+  // explanation names, with focus)
+  partRef(b, lines, focus = false) {
+    const w = this.walk;
+    const { owner, repo, ref, local } = w.change;
+    return { source: local ? 'local' : 'github', owner, repo, ref, path: b.path, lines, focus,
+      label: `Part ${w.current + 1} of ${w.blocks.length} · ${b.title}`, diff: b.add ? { add: b.add, del: b.del } : null, nav: this.walkNav() };
+  }
+
+  // Whether the reader's ‹ › can step from here
+  walkNav() {
+    const w = this.walk;
+    return { prev: w.current > 0, next: w.current < w.blocks.length - 1 || !!w.change };
+  }
+
+  // One step through the open walk (the arrow keys, the reader's buttons).
+  // False when there is no walk on screen to step.
+  stepWalk(dir) {
+    if (this.walkPanel.classList.contains('hidden') || this.walkView !== 'file' || !this.walk?.blocks) return false;
+    const w = this.walk;
+    const btn = dir < 0 ? this.walkBody.querySelector('.wk-steps [data-wk="prev"]:not(:disabled)')
+      : this.walkBody.querySelector('.wk-steps [data-wk="next"], .wk-steps [data-wk="summary"], .wk-steps [data-wk="continue"]');
+    if (!btn || (dir > 0 && w.summaryOpen)) return false;
+    btn.click();
+    return true;
+  }
+
+  // A line an explanation names (**12** or **12-14**), shown in the reader
+  showLineRef(start, end) {
+    const w = this.walk;
+    const b = w?.blocks?.[w.current];
+    if (!b) return;
+    if (w.change) {
+      if (b.start) this.openRepoFile(this.partRef(b, { start, end }, true));
+      return;
+    }
+    if (!this.repoTree) return;
+    this.openRepoFile({ ...this.fileRefFor(w.path, { start, end }),
+      label: `Block ${w.current + 1} of ${w.blocks.length} · ${b.title}`, nav: this.walkNav() });
   }
 
   // The current block's code, from the cached file. In a change: its new
@@ -2169,13 +2215,20 @@ class YavarSidePanel {
       `<div class="walk-next" aria-live="polite"></div>` +
       // Pinned to the bottom of the sheet, so answers never push them away
       `<div class="wk-dock">` + this.askBox('data-wk', 'Ask about these lines…',
-        (change ? `<button type="button" class="run-ask" data-wk="lines">Line by line</button>` : '') +
-        `<button type="button" class="run-ask" data-wk="more">Explain more</button>` +
-        (change ? `<button type="button" class="run-ask" data-wk="bugs">Find bugs</button>` +
-          `<button type="button" class="run-ask" data-wk="better">Better ways</button>` +
-          `<button type="button" class="run-ask" data-wk="tests">How to test it</button>` : '') +
-        `<button type="button" class="run-ask" data-wk="quiz">Quiz me</button>` +
-        (!change || b.added ? `<button type="button" class="run-ask" data-wk="type" aria-expanded="false">${change ? 'Write it yourself' : 'Practise typing'}${best != null ? ` · best ${best}%` : ''}</button>` : '')) +
+        (change
+          ? `<button type="button" class="run-ask" data-wk="lines">Line by line</button>` +
+            `<button type="button" class="run-ask" data-wk="bugs">Find bugs</button>` +
+            `<button type="button" class="run-ask" data-wk="better">Better ways</button>` +
+            `<button type="button" class="run-ask wk-more-toggle" data-wk="moreacts" aria-expanded="false">More</button>` +
+            `<span class="wk-extra" hidden>` +
+              `<button type="button" class="run-ask" data-wk="more">Explain more</button>` +
+              `<button type="button" class="run-ask" data-wk="tests">How to test it</button>` +
+              `<button type="button" class="run-ask" data-wk="quiz">Quiz me</button>` +
+              (b.added ? `<button type="button" class="run-ask" data-wk="type" aria-expanded="false">Write it yourself${best != null ? ` · best ${best}%` : ''}</button>` : '') +
+            `</span>`
+          : `<button type="button" class="run-ask" data-wk="more">Explain more</button>` +
+            `<button type="button" class="run-ask" data-wk="quiz">Quiz me</button>` +
+            `<button type="button" class="run-ask" data-wk="type" aria-expanded="false">Practise typing${best != null ? ` · best ${best}%` : ''}</button>`)) +
       `</div>`;
 
     // Earlier answers for this block, folded except the latest
@@ -2198,6 +2251,8 @@ class YavarSidePanel {
 
   async onWalkClick(e) {
     if (!e.target.closest('.wk-bar')) this.closeStepList(this.walkBody);
+    const ref = e.target.closest('.line-ref');
+    if (ref) return this.showLineRef(Number(ref.dataset.start), Number(ref.dataset.end));
     const el = e.target.closest('[data-wk]');
     if (!el || el.disabled) return;
     const act = el.dataset.wk;
@@ -2232,6 +2287,13 @@ class YavarSidePanel {
       this.followWalk();
     };
     if (act === 'list') return this.toggleStepList(this.walkBody, el);
+    if (act === 'moreacts') {
+      const extra = el.nextElementSibling;
+      extra.hidden = !extra.hidden;
+      el.setAttribute('aria-expanded', String(!extra.hidden));
+      el.textContent = extra.hidden ? 'More' : 'Less';
+      return;
+    }
     if (act === 'goto') return go(Number(el.dataset.i));
     if (act === 'prev') return go(w.summaryOpen ? i : Math.max(0, i - 1));
     if (act === 'summary') {
@@ -2371,9 +2433,11 @@ class YavarSidePanel {
         await this.addWalkNote(w.key || w.path, i, note);
       } else if (lineNums) {
         const text = await this.showAnswerIn(notesEl, label, prompt, { via: 'chat', inline: true, attachments });
+        this.markLineRefs(notesEl);
         if (text) await this.saveLines(w.key, lineNums, label, text);
       } else {
         const text = await this.showAnswerIn(notesEl, label, prompt, { via: 'chat', inline: true });
+        this.markLineRefs(notesEl);
         if (text) await this.addWalkNote(w.key || w.path, i, { label, text });
       }
     } finally {
@@ -2465,6 +2529,20 @@ class YavarSidePanel {
     }
   }
 
+  // Bold line numbers in an explanation (**12**, **lines 12-14**) become
+  // links that show those lines in the reader
+  markLineRefs(container) {
+    for (const el of container.querySelectorAll('.md strong:not(.line-ref)')) {
+      const m = /^(?:lines?\s+)?(\d+)(?:\s*[-–]\s*(\d+))?:?$/i.exec(el.textContent.trim());
+      if (!m) continue;
+      const start = Number(m[1]);
+      const end = Math.max(start, Number(m[2] || m[1]));
+      el.classList.add('line-ref');
+      Object.assign(el.dataset, { start, end });
+      el.title = 'Show in the reader';
+    }
+  }
+
   // One answer kept on a block: a quiz (answers hidden until asked for) or text
   renderWalkNote(container, note, folded) {
     if (note.quiz) {
@@ -2480,6 +2558,7 @@ class YavarSidePanel {
     }
     const card = this.answerCard(container, { title: note.label, collapsible: true, openInChat: false, inline: true });
     card.done(note.text);
+    this.markLineRefs(card.el);
     if (folded) card.el.classList.add('collapsed');
   }
 
@@ -4686,6 +4765,7 @@ class YavarSidePanel {
   setupStorageListener() {
     chrome.storage.onChanged.addListener((changes, areaName) => {
       if (areaName === 'sync' && changes.promptTemplates) this.loadPromptTemplates();
+      if (areaName === 'session' && changes.readerNav?.newValue) this.stepWalk(changes.readerNav.newValue.dir);
       if (areaName === 'sync' && changes.aiModels) this.onModelsChanged(changes.aiModels.newValue);
       if (areaName === 'sync' && changes.settings) {
         this.answerWith = changes.settings.newValue?.answerWith === 'api' ? 'api' : 'chat';

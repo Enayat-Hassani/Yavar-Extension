@@ -5,11 +5,13 @@
 //
 // readerView: { repo: { source, owner, repo, ref, name }, path, content,
 //               lines: { start, end } | null, label, walkKey, ts,
-//               diff: { add, del } | null }
+//               diff: { add, del } | null, focus, nav: { prev, next } | null }
 //
 // With `diff` (a part of a commit or pull request), the file is shown as it is
 // after the change, with the removed lines put back in red where they were and
-// the added lines in green; the part is the band around them.
+// the added lines in green; the part is the band around them, or with
+// `focus` the lines an explanation named. `nav` shows ‹ › to step the walk,
+// which the panel follows through `readerNav`.
 //
 // A local file can be edited here and saved back to its folder. Saving moves
 // the lines after the edit, so the file's walk, the highlighted lines and the
@@ -25,6 +27,14 @@ import { idbGet } from './utils/idb.js';
 const $ = (id) => document.getElementById(id);
 let shown = '';        // which file the code area holds, so a new range doesn't redraw it
 let shownBand = null;  // in a diff: the rows the part covers
+let shownRows = [];    // in a diff: the rows, to find a line's row
+
+// Lines of the file after the change as rows of the diff (1-based)
+function rowsOf({ start, end }) {
+  const a = shownRows.findIndex(r => r.n === start);
+  const z = shownRows.findIndex(r => r.n === end);
+  return a < 0 ? shownBand : { start: a + 1, end: (z < 0 ? a : z) + 1 };
+}
 let current = null;    // the view the panel last asked for
 let editing = null;    // { view, handle, text, modified, cm, clean, saving } while editing
 
@@ -46,6 +56,9 @@ function render(view, { top = null } = {}) {
   $('rd-path').replaceChildren(document.createTextNode(dir), Object.assign(document.createElement('strong'), { textContent: name }));
   $('rd-label').hidden = !label;
   $('rd-label').textContent = label || '';
+  $('rd-nav').hidden = !label;
+  $('rd-prev').hidden = $('rd-next').hidden = !view.nav;
+  if (view.nav) { $('rd-prev').disabled = !view.nav.prev; $('rd-next').disabled = !view.nav.next; }
   const gh = $('rd-github');
   gh.hidden = repo.source === 'local';
   if (!gh.hidden) gh.href = blobUrl(repo.owner, repo.repo, repo.ref, path, lines);
@@ -74,6 +87,7 @@ function render(view, { top = null } = {}) {
       });
       const marked = rows.map((r, k) => r.kind ? k : -1).filter(k => k >= 0);
       shownBand = marked.length ? { start: marked[0] + 1, end: marked.at(-1) + 1 } : null;
+      shownRows = rows;
     } else {
       $('rd-gutter').textContent = file.map((_, i) => i + 1).join('\n');
       $('rd-text').innerHTML = highlight(text, langFromPath(path));
@@ -82,7 +96,7 @@ function render(view, { top = null } = {}) {
     drawMarks();
   }
   // In a diff the band is in rows, which the removed lines have moved
-  if (diff) band = shownBand || null;
+  if (diff) band = view.focus && lines ? rowsOf(lines) : shownBand || null;
   $('rd-band').classList.toggle('is-diff', !!diff);
   place(band, top == null);
   if (top != null) $('rd-main').scrollTop = lineTop(top);
@@ -285,6 +299,15 @@ function say(text, isError = false) {
 }
 
 $('rd-edit').addEventListener('click', () => { say(''); startEdit(); });
+// The walk steps in the panel, which follows readerNav
+const step = (dir) => chrome.storage.session.set({ readerNav: { dir, ts: Date.now() } });
+$('rd-prev').addEventListener('click', () => step(-1));
+$('rd-next').addEventListener('click', () => step(1));
+document.addEventListener('keydown', (e) => {
+  if (editing || !current?.nav || e.metaKey || e.ctrlKey || e.altKey || e.target.closest('input, textarea')) return;
+  if ((e.key === 'ArrowLeft' || e.key === 'k') && current.nav.prev) { e.preventDefault(); step(-1); }
+  if ((e.key === 'ArrowRight' || e.key === 'j') && current.nav.next) { e.preventDefault(); step(1); }
+});
 $('rd-done').addEventListener('click', stopEdit);
 $('rd-save').addEventListener('click', () => save(true));
 document.addEventListener('keydown', (e) => {

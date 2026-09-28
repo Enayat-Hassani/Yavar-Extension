@@ -2089,6 +2089,13 @@ button.lens-item:focus-visible {
 .wk-explain.is-empty { color: var(--text-secondary); }
 /* A change: the part's file in the meta line, and what was taken out */
 .wk-meta code { font-size: 11.5px; color: var(--text-primary); overflow-wrap: anywhere; }
+/* A line an explanation names: shows it in the reader */
+.walk-notes .line-ref { color: var(--accent); cursor: pointer; border-radius: 3px; }
+.walk-notes .line-ref:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); text-decoration: underline; }
+/* More actions under the three a part needs most */
+.wk-extra { display: contents; }
+.wk-extra[hidden] { display: none; }
+.wk-more-toggle { color: var(--text-secondary); }
 .wk-found { margin: 4px 0 8px; padding-left: 18px; font-size: 13px; }
 .wk-found li { margin: 2px 0; }
 .wk-counts ins { color: var(--success); text-decoration: none; font-weight: 600; }
