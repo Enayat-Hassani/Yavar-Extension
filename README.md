@@ -1,6 +1,6 @@
 # Yavar - Your AI Sidekick
 
-A Chrome extension that embeds ChatGPT, Claude, and Gemini in a sidebar — so you can select anything on any page and route it to the AI, capture screenshots, read a GitHub repository, a commit or a local project block by block beside the code, run a web research agent, and keep your AI answers in a searchable history.
+A Chrome extension that embeds ChatGPT, Claude, and Gemini in a sidebar — so you can select anything on any page and route it to the AI, capture screenshots, read a GitHub repository, a commit or a local project block by block beside the code, and keep your AI answers in a searchable history.
 
 ## What it does
 
@@ -8,8 +8,8 @@ A Chrome extension that embeds ChatGPT, Claude, and Gemini in a sidebar — so y
 
 **The Yavar view**: Yavar opens as a full-page app. The chat (ChatGPT, Claude or Gemini) keeps running behind it; the chat button in the header shows it, and **‹ Yavar** brings you back.
 
-- **Header:** the model pill switches models; the new model picks up the conversation (API models get the earlier turns as their own, a chat site gets them as an attached `conversation-so-far.md`, newest turns first if it's long), and *Ask* on an API answer passes them on too, the pencil starts a new conversation, and **⋯** holds saved answers, notes, web research, *Continue in a fresh chat* and settings.
-- **Start page:** actions for the tab you're on. On GitHub: *Read <file>* on a file page, *Read this commit* or *Read pull request #N* on those pages, *Read this repository*, *Build it yourself* and *Recent changes*. On other pages: *Summarize*, *Ask about it*, *Fact-check it*. With no page open: *Read a project folder*.
+- **Header:** the model pill switches models; the new model picks up the conversation (API models get the earlier turns as their own, a chat site gets them as an attached `conversation-so-far.md`, newest turns first if it's long), and *Ask* on an API answer passes them on too, the pencil starts a new conversation, and **⋯** holds saved answers, notes, *Continue in a fresh chat* and settings.
+- **Start page:** actions for the tab you're on. On GitHub: *Read <file>* on a file page, *Read this commit* or *Read pull request #N* on those pages, *Read this repository*, *Build it yourself* and *Recent changes*. On other pages: *Summarize*, *Ask about it*. With no page open: *Read a project folder*.
 - **Composer:** type to the model, or press **+** to add the file open in your tab, **files from the repository** or **a folder**, **this page** (on YouTube, the video's transcript), or a **screenshot**: click an element on the page, or drag an area (↑ widens a click to the element around it, ✓ or Enter takes it). Along with the picture, Yavar sends what's in it as Markdown: text, a table as a table, links, image descriptions, the heading above it, and the HTML of a control or form. Each attachment chip shows its size in tokens, and the message box offers one-tap actions that fit what's attached: a table gets *Explain / Key takeaways / As CSV*, code *Explain / Find bugs / Line by line*, an error *Why this error? / How do I fix it?*, a paragraph *Summarize / Explain simply / Words to learn*. **Use a prompt** wraps what you typed in one of your templates. With files attached, one tap asks for *Explain*, *Line by line*, *How it fits*, *Review* or *Quiz me*.
 - **Selections, pages and screenshots from outside the panel** (the floating menu, the right-click menu, the shortcuts) arrive in the composer. A floating-menu prompt is sent at once if *Settings → Send floating-menu prompts right away* is on; otherwise it waits in the message box.
 - **Answers** stream in and render tables, checklists, nested lists and coloured code (long blocks fold). Under each: Copy, Ask again, Save, and *Open in chat*, or with **API** chosen, *Ask ChatGPT/Claude/Gemini* to put the same question to the free chat. API answers suggest three follow-up questions. Hover your question to edit and resend it. ■ stops waiting.
@@ -23,10 +23,6 @@ A Chrome extension that embeds ChatGPT, Claude, and Gemini in a sidebar — so y
 - **Summarize** — send it wrapped in a concise-summary prompt.
 
 Add, edit, or remove your own templates under *Settings → Prompts* using `{{selection}}`, `{{page}}`, `{{clipboard}}`, `{{url}}`, `{{title}}`, and `{{repo}}` placeholders. Pin the ones you use most to the menu; the rest (e.g. **Improve writing**, **Translate**) sit behind its **⋯** button.
-
-**Web research agent** — research any topic: the agent performs **SEARCH + READ** across the web and writes an answer with sources. Each search and read is logged in the conversation as it happens, and ■ stops it. Turn on **Deep research** in Settings for deeper coverage.
-
-**Fact-check it** (the start page on any web page) seeds the web research agent with the page, then lets it branch out via SEARCH/READ.
 
 **Reading code** — read a repository the way you would with a mentor beside you, without an API key. The chat site does the explaining, so reading costs no paid calls.
 
@@ -46,9 +42,9 @@ When a walkthrough, reading map or plan comes back in a form Yavar can't read, i
 
 **Add to Morfia** (off by default: *Settings → Morfia*) — adds the article in your tab to Morfia, a separate practice app running on your computer, in one click. Connect once with the code from Morfia's Settings. Morfia fetches and cleans the article itself, so select a passage first only if you want Morfia to open there.
 
-**Answers inside Yavar**: every answer, including research reports, streams into the conversation as the AI writes it. Code blocks get Copy, each answer has Copy, Ask again and Save, and the composer asks follow-ups in the same chat. *Open in chat* shows the real chat whenever you want it (API answers have no chat page, so they offer *Ask* the chat site instead).
+**Answers inside Yavar**: every answer streams into the conversation as the AI writes it. Code blocks get Copy, each answer has Copy, Ask again and Save, and the composer asks follow-ups in the same chat. *Open in chat* shows the real chat whenever you want it (API answers have no chat page, so they offer *Ask* the chat site instead).
 
-**Private chats for Yavar's work** (on by default): these requests, the rebuild hints and reviews, and the agents run in a temporary chat, so they don't fill your chat history: `chatgpt.com/?temporary-chat=true`, Claude's incognito chat, or Gemini's *Temporary chat* button. Follow-ups continue in the same temporary chat. Save the answers you want to keep. Turn it off under *Settings → Asking the AI* to keep everything in your normal history.
+**Private chats for Yavar's work** (on by default): these requests and the rebuild hints and reviews run in a temporary chat, so they don't fill your chat history: `chatgpt.com/?temporary-chat=true`, Claude's incognito chat, or Gemini's *Temporary chat* button. Follow-ups continue in the same temporary chat. Save the answers you want to keep. Turn it off under *Settings → Asking the AI* to keep everything in your normal history.
 
 **Model APIs**: choose **API** in the model menu to answer through model APIs instead of a chat site. Yavar tries a local OpenAI-compatible gateway first (OmniRoute, Ollama), then the OpenRouter free models you tick in *Settings → Model APIs*, then one paid model if you set one. A model that is busy, rate-limited or silent is skipped, and each answer names the model that wrote it. The paid model has a monthly limit ($3 by default): a paid answer shows what it cost, Settings shows this month's total, and at the limit Yavar uses only the free models until the next month. Keys stay on this device.
 
@@ -113,7 +109,7 @@ Yavar-Extension/
 ├── src/
 │   ├── content.js        # Content script: floating menu + text selection
 │   ├── background.js     # Service worker (lifecycle, screenshot, routing)
-│   ├── sidepanel.js      # Sidebar UI: the Yavar view, agents, file picker,
+│   ├── sidepanel.js      # Sidebar UI: the Yavar view, file picker,
 │   │                     #   walkthroughs, history, notes, rebuild
 │   ├── reader.js         # The reader tab: a file with its lines highlighted, editable when local
 │   ├── ai-bridge.js      # Auto-submit / auto-paste / answer capture on AI platforms
@@ -136,7 +132,6 @@ Yavar-Extension/
 │       │                    #   (classic script, shared by content script and pages)
 │       ├── templates.js  # ES-module wrapper around template-core for extension pages
 │       ├── frameRules.js # Lets the chat sites load in the sidebar (see below)
-│       ├── net.js        # URL guard for the research agent
 │       ├── models.js     # Built-in chat models, shared by the panel and Settings
 │       └── contextMenu.js
 ├── lib/
@@ -157,7 +152,6 @@ Yavar asks for broad permissions to do its job. Here's what they are and why:
 - **`<all_urls>`** — the floating text-selection menu needs to run on every page. This is the widest possible ask; you can review exactly what the content script does in `src/content.js`.
 - **Declarative Net Request (frame headers)** — ChatGPT, Claude, and Gemini send `X-Frame-Options` / `Content-Security-Policy` headers that stop them loading in an iframe. Yavar removes those headers **only for frames loaded by Yavar itself**: one session rule for Chrome's side panel (`tabIds: [-1]`, the ID Chrome gives requests that don't belong to a tab) and one for Yavar's own pages elsewhere, such as Opera's sidebar or the docked window (`initiatorDomains: [<extension id>]`). Both apply only to the chat sites plus any custom models you add. Your normal tabs keep the sites' full headers, and other websites can't use Yavar to frame your logged-in chats. See `src/utils/frameRules.js`.
 - **Talking to the chat frame** — the in-chat helper (`src/ai-bridge.js`) only accepts instructions from the Yavar sidebar's own origin and only sends answers back to it.
-- **Research agent** — pages the AI asks to READ are fetched without your cookies, and local or private-network addresses (localhost, `192.168.x.x`, cloud metadata, etc.) are refused, so text on a web page can't steer the agent into your LAN.
 
 ## Configuration
 

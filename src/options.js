@@ -12,7 +12,6 @@ const DEFAULT_SETTINGS = {
   disabledSites: [],
   autoSubmit: false,
   tempChats: true,
-  deepResearch: false,
   inChatButtons: true,
   answerWith: 'chat',
   apiFreeModels: [],
@@ -30,7 +29,6 @@ const TOGGLES = {
   'enable-floating-menu': 'enableFloatingMenu',
   'setting-auto-submit': 'autoSubmit',
   'setting-temp-chats': 'tempChats',
-  'setting-deep-research': 'deepResearch',
   'setting-inchat': 'inChatButtons',
   'setting-ielts-coach': 'ieltsCoach',
   'setting-morfia': 'morfia'
@@ -523,7 +521,7 @@ class OptionsPage {
         }
         if (Array.isArray(imported.apiFreeModels)) clean.apiFreeModels = imported.apiFreeModels.filter(x => typeof x === 'string');
         if (imported.answerWith === 'chat' || imported.answerWith === 'api') clean.answerWith = imported.answerWith;
-        for (const k of ['autoSubmit', 'tempChats', 'deepResearch', 'inChatButtons', 'ieltsCoach', 'morfia']) {
+        for (const k of ['autoSubmit', 'tempChats', 'inChatButtons', 'ieltsCoach', 'morfia']) {
           if (typeof imported[k] === 'boolean') clean[k] = imported[k];
         }
         await this.saveSetting(clean);

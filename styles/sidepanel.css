@@ -1413,36 +1413,6 @@ button.lens-item:focus-visible {
 
 .commit-meta code { font-size: 11px; }
 
-/* Research progress: a quiet log above the report */
-.agent-progress {
-  margin: 8px 0 4px;
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
-.agent-progress-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--text-primary);
-}
-
-.agent-progress.is-done .agent-progress-head { color: var(--text-secondary); }
-
-.agent-progress-log {
-  margin: 6px 0 0 6px;
-  padding-left: 12px;
-  list-style: none;
-  border-left: 1px solid var(--border);
-}
-
-.agent-progress-log li {
-  padding: 2px 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .thread-form {
   display: flex;
   align-items: flex-end;
@@ -1784,7 +1754,7 @@ button.lens-item:focus-visible {
   .app-view::before { transition: none; }
 }
 
-/* A research mode set on the message box */
+/* A tool mode set on the message box (the IELTS coach) */
 .composer-tool { color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface)); border-color: color-mix(in srgb, var(--accent) 30%, var(--border)); }
 .model-mark[data-model="api"] { background: var(--brand-api); box-shadow: inset 0 0 0 1px var(--border); }
 .composer-item-size { flex-shrink: 0; font-size: 10.5px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }

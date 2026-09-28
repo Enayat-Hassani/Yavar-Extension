@@ -256,7 +256,7 @@
         try { postToYavar({ action: 'ANSWER_WATCH_ERROR', message, requestId: rid }); } catch (e) {}
       } else if (!sawGenerating && elapsed >= STALL_MS) {
         // Never saw generation and no new answer appeared — the message probably
-        // never sent. Tell the agent so it can retry rather than hang.
+        // never sent. Say so rather than hang.
         console.warn('[Yavar Bridge] Watch stalled — no reply detected');
         emit('ANSWER_WATCH_STALLED');
       }
