@@ -19,7 +19,7 @@ A Chrome extension that embeds ChatGPT, Claude, and Gemini in a sidebar — so y
 **Floating menu** — select text (or code on GitHub, where it also tells the AI the file and line numbers) on any page and a compact icon menu appears, driven by **customizable prompt templates**. Built-ins include:
 
 - **Send** — add the selection to Yavar's message as a chip that remembers which page it came from (so does right-click → *Send selection to Yavar*).
-- **Explain** — send it wrapped in a "Guided Learning" prompt.
+- **Explain** — a step-by-step explanation in plain words, ending with one question to check you understood.
 - **Summarize** — send it wrapped in a concise-summary prompt.
 
 Add, edit, or remove your own templates under *Settings → Prompts* using `{{selection}}`, `{{page}}`, `{{clipboard}}`, `{{url}}`, `{{title}}`, and `{{repo}}` placeholders. Pin the ones you use most to the menu; the rest (e.g. **Improve writing**, **Translate**) sit behind its **⋯** button.
@@ -40,9 +40,9 @@ When a walkthrough, reading map or plan comes back in a form Yavar can't read, i
 
 **Build it yourself** — the best way to understand a codebase is to build a small version of it. From the start page on GitHub (or for the folder you last opened), one click sends the project's core files and the AI writes a plan of 5-10 small steps. For each step: the files to study (one click opens them in the reader and explains them), your task, how you know it works, a code editor for your version, **Hint** (not the solution), **Review my code** (compared against the original files), and a chat button for your own question about the step. Answers appear inside the step, with Copy and *Use in editor* on each code block. Progress and mentor notes are saved per project.
 
-**IELTS practice** (off by default) — five steps on the article in your tab, from its thesis to a Task 2 paragraph. You write each step first; the chat gives feedback after. Turn it on and edit its prompts under *Settings → Prompts*.
+**IELTS practice** (off by default) — five steps on the article in your tab, from its thesis to a Task 2 paragraph. You write each step first; the chat gives feedback after. Turn it on and edit its prompts under *Settings → Labs*.
 
-**Add to Morfia** (off by default: *Settings → Morfia*) — adds the article in your tab to Morfia, a separate practice app running on your computer, in one click. Connect once with the code from Morfia's Settings. Morfia fetches and cleans the article itself, so select a passage first only if you want Morfia to open there.
+**Add to Morfia** (off by default: *Settings → Labs*) — adds the article in your tab to Morfia, a separate practice app running on your computer, in one click. Connect once with the code from Morfia's Settings. Morfia fetches and cleans the article itself, so select a passage first only if you want Morfia to open there.
 
 **Answers inside Yavar**: every answer streams into the conversation as the AI writes it. Code blocks get Copy, each answer has Copy, Ask again and Save, and the composer asks follow-ups in the same chat. *Open in chat* shows the real chat whenever you want it (API answers have no chat page, so they offer *Ask* the chat site instead).
 
@@ -158,7 +158,7 @@ Yavar asks for broad permissions to do its job. Here's what they are and why:
 
 ## Configuration
 
-Settings live on the options page (`options.html`, or **⋯ → Settings** in Yavar); prompt templates and the IELTS coach are on its **Prompts** tab. Shortcuts are changed at `chrome://extensions/shortcuts`.
+Settings live on the options page (`options.html`, or **⋯ → Settings** in Yavar); prompt templates are on its **Prompts** tab, and the extras that are off by default (IELTS practice, Add to Morfia) on **Labs**. Shortcuts are changed at `chrome://extensions/shortcuts`.
 
 ## Development
 

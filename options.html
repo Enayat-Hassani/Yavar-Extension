@@ -14,6 +14,7 @@
       <nav class="page-nav" aria-label="Settings pages">
         <a href="#general" data-page="general">General</a>
         <a href="#prompts" data-page="prompts">Prompts</a>
+        <a href="#labs" data-page="labs">Labs</a>
       </nav>
     </header>
 
@@ -138,32 +139,6 @@
         </div>
       </section>
 
-      <section class="settings-section">
-        <h2>Morfia</h2>
-        <div class="setting-item">
-          <label class="toggle-label">
-            <span>Add to Morfia</span>
-            <input type="checkbox" id="setting-morfia">
-            <span class="toggle"></span>
-          </label>
-          <p class="help-text">Adds the article in your tab to Morfia's library in one click. Select a passage first and Morfia opens there.</p>
-        </div>
-
-        <div class="setting-item">
-          <label for="morfia-token">Connection code</label>
-          <div class="input-row">
-            <input type="password" id="morfia-token" placeholder="From Morfia's Settings → Yavar" autocomplete="off">
-            <button id="save-morfia-token" class="btn-secondary">Connect</button>
-          </div>
-          <p id="morfia-status" class="help-text" aria-live="polite">Stored on this device only, never synced or exported.</p>
-        </div>
-
-        <div class="setting-item">
-          <label for="morfia-base">Morfia address</label>
-          <input type="text" id="morfia-base" placeholder="http://localhost:8000">
-        </div>
-      </section>
-
       <!-- GitHub -->
       <section class="settings-section">
         <h2>GitHub access</h2>
@@ -215,6 +190,10 @@
         </div>
       </section>
 
+    </main>
+
+    <main class="settings-container" id="page-labs" hidden>
+      <p class="help-text labs-intro">Extras for particular ways of working. Each is off until you turn it on.</p>
       <section class="settings-section" id="coach">
         <h2>IELTS coach</h2>
         <div class="setting-item">
@@ -232,6 +211,31 @@
         </div>
         <p class="help-text"><code>{{selection}}</code> is what you type for that step, and every step needs it. <code>{{title}}</code> and <code>{{url}}</code> are the article's.</p>
         <div id="coach-steps" class="templates-list"></div>
+      </section>
+      <section class="settings-section">
+        <h2>Morfia</h2>
+        <div class="setting-item">
+          <label class="toggle-label">
+            <span>Add to Morfia</span>
+            <input type="checkbox" id="setting-morfia">
+            <span class="toggle"></span>
+          </label>
+          <p class="help-text">Adds the article in your tab to Morfia's library in one click. Select a passage first and Morfia opens there.</p>
+        </div>
+
+        <div class="setting-item">
+          <label for="morfia-token">Connection code</label>
+          <div class="input-row">
+            <input type="password" id="morfia-token" placeholder="From Morfia's Settings → Yavar" autocomplete="off">
+            <button id="save-morfia-token" class="btn-secondary">Connect</button>
+          </div>
+          <p id="morfia-status" class="help-text" aria-live="polite">Stored on this device only, never synced or exported.</p>
+        </div>
+
+        <div class="setting-item">
+          <label for="morfia-base">Morfia address</label>
+          <input type="text" id="morfia-base" placeholder="http://localhost:8000">
+        </div>
       </section>
     </main>
 

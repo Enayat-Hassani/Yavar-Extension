@@ -626,3 +626,6 @@ kbd {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: 1ms !important; animation-duration: 1ms !important; }
 }
+
+/* The Labs page: a line on what it holds */
+.labs-intro { margin: 0 4px; }

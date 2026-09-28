@@ -679,8 +679,9 @@ class OptionsPage {
 
   // ===== Pages =====
   showPage() {
-    const page = location.hash === '#prompts' ? 'prompts' : 'general';
-    for (const p of ['general', 'prompts']) document.getElementById('page-' + p).hidden = p !== page;
+    const pages = ['general', 'prompts', 'labs'];
+    const page = pages.find(p => location.hash === '#' + p) || 'general';
+    for (const p of pages) document.getElementById('page-' + p).hidden = p !== page;
     document.querySelectorAll('.page-nav a').forEach(a => {
       if (a.dataset.page === page) a.setAttribute('aria-current', 'page');
       else a.removeAttribute('aria-current');

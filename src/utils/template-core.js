@@ -18,7 +18,7 @@
 
   const DEFAULT_TEMPLATES = [
     { id: 'send',      name: 'Send',            icon: '➤', menu: true,  body: '{{selection}}' },
-    { id: 'explain',   name: 'Explain',         icon: '?', menu: true,  primary: true, body: 'Explain this to me using "Guided Learning" mode:\n\n{{selection}}' },
+    { id: 'explain',   name: 'Explain',         icon: '?', menu: true,  primary: true, body: 'Explain this to me step by step, in plain words: what it means, why it matters, and an example if one helps. Then ask me one short question to check I understood:\n\n{{selection}}' },
     { id: 'summarize', name: 'Summarize',       icon: '≡', menu: true,  body: 'Summarize the key points of this clearly and concisely:\n\n{{selection}}' },
     { id: 'improve',   name: 'Improve writing', icon: '✎', menu: false, body: 'Improve the clarity, grammar and flow of this text. Return only the rewritten version:\n\n{{selection}}' },
     { id: 'translate', name: 'Translate → EN',  icon: '文', menu: false, body: 'Translate this into natural English. Return only the translation:\n\n{{selection}}' },

@@ -4480,7 +4480,7 @@ class YavarSidePanel {
     try {
       const [{ settings }, { morfiaToken }] = await Promise.all([
         chrome.storage.sync.get('settings'), chrome.storage.local.get('morfiaToken')]);
-      if (!morfiaToken) throw new Error("Add Morfia's connection code in Settings → Morfia");
+      if (!morfiaToken) throw new Error("Add Morfia's connection code in Settings → Labs");
       const base = settings?.morfiaBase || 'http://localhost:8000';
       this.showNotification('Adding to Morfia…');
       const [tab] = await this.getActiveTabs();
