@@ -92,3 +92,13 @@ test('paths led by the folder name, or under other keys, still count', () => {
   assert.deepEqual(j.path, [{ file: 'backend/app.py', why: 'Entry' }, { file: 'backend/models.py', why: '' }]);
   assert.equal(parseJourney(reply, files), null, 'without the folder name the first path is unknown');
 });
+
+test('the project brief is the reading map, else the README opening, else nothing', async () => {
+  const { projectBrief } = await import('../src/utils/journey.js');
+  const journey = { summary: 'A cart service.', parts: [{ name: 'Core', role: 'Prices', files: ['src/cart.js', 'src/tax.js'] }, { role: 'Tests' }] };
+  assert.equal(projectBrief(journey), 'About the project, for context: A cart service.\nIts main parts:\n- Core: Prices (src/cart.js, src/tax.js)\n- Tests');
+  const readme = '# Cart\n\n[![CI](x)](y)\n\nA small cart that adds up prices.\n\nIt also handles tax.\n\n## Install\n\nnpm i';
+  assert.equal(projectBrief(null, readme), 'About the project, for context: A small cart that adds up prices.\n\nIt also handles tax.');
+  assert.equal(projectBrief(null, ''), '');
+  assert.equal(projectBrief({ summary: 'x'.repeat(50) }, '', 40).length, 'About the project, for context: '.length + 40);
+});

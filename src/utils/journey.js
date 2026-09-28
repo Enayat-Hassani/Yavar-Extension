@@ -106,3 +106,24 @@ export function connectionTree(order, importsOf, { maxDepth = 3, maxChildren = 8
   order.filter(f => !seen.has(f)).forEach(f => out.push(node(f, 0)));   // only reachable through a cycle
   return out;
 }
+
+// A few lines on the project a question is about, sent with every question
+// on its code so answers see the whole and not only the lines in front of
+// them: the reading map's overview and parts when the project has been read,
+// else the opening of its README. '' when neither is known.
+export function projectBrief(journey, readme = '', max = 1400) {
+  let text = '';
+  if (journey?.summary) {
+    const parts = (journey.parts || []).slice(0, 8).map(p =>
+      `- ${p.name ? `${p.name}: ` : ''}${p.role || ''}${p.files?.length ? ` (${p.files.slice(0, 4).join(', ')})` : ''}`);
+    text = `${journey.summary}${parts.length ? `\nIts main parts:\n${parts.join('\n')}` : ''}`;
+  } else if (readme) {
+    // The README's first paragraphs of prose: not its title, badges or images
+    text = readme.split(/\n\s*\n/)
+      .map(b => b.trim())
+      .filter(b => b && !/^#/.test(b) && !/^(\[!\[|!\[|<)/.test(b) && !/^[-=*_]{3,}$/.test(b))
+      .slice(0, 2).join('\n\n');
+  }
+  if (!text) return '';
+  return `About the project, for context: ${text.length > max ? text.slice(0, max - 1) + '…' : text}`;
+}

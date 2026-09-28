@@ -5,7 +5,7 @@ import { loadTemplates, expandTemplate, varsInTemplate } from './utils/templates
 import { renderMarkdown } from './utils/markdown.js';
 import { walkPrompt, parseWalkthrough, compareTyped, quizPrompt, parseQuiz } from './utils/walkthrough.js';
 import { cmModeFor, defineGenericMode, closeBracketKeys } from './utils/codeEditor.js';
-import { journeyPrompt, parseJourney, nextCandidates, nextPrompt, parseNext, connectionTree } from './utils/journey.js';
+import { journeyPrompt, parseJourney, nextCandidates, nextPrompt, parseNext, connectionTree, projectBrief } from './utils/journey.js';
 import { parseDiff, changeBlocks, changePack, partContext, partTitle, orderParts, linesBatch, linesPrompt, splitParts } from './utils/changes.js';
 import { DEFAULT_MODELS, loadModels as loadStoredModels } from './utils/models.js';
 import { captureLabel, captureMarkdown, hasCaptureText } from './utils/capture.js';
@@ -2340,7 +2340,9 @@ class YavarSidePanel {
     const where = c ? `part ${i + 1} of ${w.blocks.length} of ${c.label.toLowerCase()} in ${repo}${c.title ? ` ("${c.title}")` : ''}`
       : `lines ${b.start}-${b.end} of \`${w.path}\`${repo ? ` from ${repo}` : ''}`;
     const block = c ? partContext(b) : `${LINE_NUMBER_NOTE}\n\n${fencedFile({ path: w.path, content: code, lines: b })}`;
-    const whole = w.summary ? `(The ${c ? 'change' : 'file'} as a whole: ${w.summary})` : '';
+    const project = this.walkProject();
+    const brief = project ? await this.projectBriefFor(project) : '';
+    const whole = [w.summary ? `(The ${c ? 'change' : 'file'} as a whole: ${w.summary})` : '', brief].filter(Boolean).join('\n\n');
     // Cited lines open the loaded tree's version, which a change's lines don't match
     const cite = c ? '' : `\n\n${CITE_RULE}`;
     const typedText = this._walkCode?.getValue() || '';
@@ -2377,7 +2379,7 @@ class YavarSidePanel {
       lineNums = linesBatch(w.blocks, i, k => !!w.notes?.[k]?.length).map(k => k + 1);
       const first = !!w.fname && !w.summary && !Object.keys(w.notes || {}).length;
       prompt = linesPrompt({ blocks: w.blocks, nums: lineNums, what: w.what || c.label.toLowerCase(), repo, title: c.title,
-        fname: first ? w.fname : '', skipped: w.skipped || [], edits: this._promptEdits });
+        fname: first ? w.fname : '', skipped: w.skipped || [], edits: this._promptEdits, brief });
       if (first) attachments = [{ filename: w.fname, content: changePack(w.blocks, w.what) }];
     } else if (['bugs', 'better', 'tests'].includes(act)) {
       label = { bugs: 'Find bugs', better: 'Better ways', tests: 'How to test it' }[act];
@@ -2486,7 +2488,9 @@ class YavarSidePanel {
         ? ['commit', 'Commit message: In a code block, a title line under 60 characters saying what the change does, in the imperative, then a blank line and a short body on what changed and why']
         : ['push', 'Pull request description: In a code block, a title, then what changed, why, and how it was tested']
       : ['merge', 'Review comment: A short, kind review you could post, saying what is good and what to change'];
-    const prompt = `The attached "${w.fname || 'changes.md'}" is the whole diff of ${w.what || c.label.toLowerCase()} in ${repo}${c.title ? ` ("${c.title}")` : ''}, ` +
+    const brief = await this.projectBriefFor({ owner: c.owner, repo: c.repo, local: !!c.local });
+    const prompt = (brief ? `${brief}\n\n` : '') +
+      `The attached "${w.fname || 'changes.md'}" is the whole diff of ${w.what || c.label.toLowerCase()} in ${repo}${c.title ? ` ("${c.title}")` : ''}, ` +
       `which I have read part by part. Write the review summary, under these headings:\n\n` +
       `## What it does\nTwo or three sentences.\n\n` +
       `## Risks\nWhat could break and where, naming the parts.\n\n` +
@@ -2586,8 +2590,41 @@ class YavarSidePanel {
     try { return (await chrome.storage.local.get(key))[key] || null; } catch (e) { return null; }
   }
 
+  // The brief sent with every question on a project's code (projectBrief):
+  // { owner, repo } on GitHub, { repo, local: true } for a folder. Cached per
+  // project; a new reading map replaces it.
+  async projectBriefFor({ owner = '', repo, local = false }) {
+    const id = local ? `local/${repo}` : `${owner}/${repo}`;
+    this._briefs = this._briefs || {};
+    if (id in this._briefs) return this._briefs[id];
+    let journey = null;
+    try { journey = (await chrome.storage.local.get(`journey:${id}`))[`journey:${id}`] || null; } catch (e) { /* none */ }
+    let readme = '';
+    if (!journey?.summary) {
+      try {
+        const t = this.repoTree;
+        if (local) {
+          const path = t?.source === 'local' && t.repo === repo && [...(this.localFiles?.keys() || [])].find(p => /^readme(\.md|\.txt)?$/i.test(p));
+          if (path) readme = await this.readRepoFile(path);
+        } else {
+          readme = await this.fetchFileAt(owner, repo, 'HEAD', 'README.md');
+        }
+      } catch (e) { /* no README: no brief */ }
+    }
+    return (this._briefs[id] = projectBrief(journey, readme));
+  }
+
+  // The project the open walk or tree is in, for projectBriefFor
+  walkProject() {
+    const c = this.walk?.change;
+    if (c) return { owner: c.owner, repo: c.repo, local: !!c.local };
+    const t = this.repoTree;
+    return t ? { owner: t.owner, repo: t.repo, local: t.source === 'local' } : null;
+  }
+
   async saveJourney(state) {
     this.journey = state;
+    this._briefs = {};
     const key = this.journeyKey();
     if (key) try { await chrome.storage.local.set({ [key]: state }); } catch (e) { /* ignore */ }
     const gh = this._tabCtx?.gh;
@@ -3353,6 +3390,9 @@ class YavarSidePanel {
         ? (single.lines ? `lines ${single.lines.start}-${single.lines.end} of \`${single.path}\`` : `\`${single.path}\``)
         : `these ${files.length} files`;
       let question = readingPrompt(mode, { what, repo: repoName }, this._promptEdits);
+      const t = this.repoTree;
+      const brief = question && t ? await this.projectBriefFor({ owner: t.owner, repo: t.repo, local: t.source === 'local' }) : '';
+      if (brief) question = `${brief}\n\n${question}`;
       const totalChars = files.reduce((n, f) => n + f.content.length, 0);
 
       const modeLabel = READ_MODES.find(m => m.id === mode)?.label || 'Explain';

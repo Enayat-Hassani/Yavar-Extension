@@ -197,13 +197,13 @@ export function changePack(blocks, what) {
 
 // Line by line, for the parts `nums` (1-based) of the walk. The first
 // message also carries the whole diff and opens with what the change does.
-export function linesPrompt({ blocks, nums, what, repo, title = '', fname = '', skipped = [], edits = {} }) {
+export function linesPrompt({ blocks, nums, what, repo, title = '', fname = '', skipped = [], edits = {}, brief = '' }) {
   const head = fname
     ? `The attached "${fname}" is the whole diff of ${what} in ${repo}${title ? ` ("${title}")` : ''}, in ${blocks.length} numbered parts` +
       `${skipped.length ? ` (left out: ${skipped.length} lockfile, generated or binary file${skipped.length === 1 ? '' : 's'})` : ''}. ` +
       `I'm reading it part by part. Begin with two or three sentences on what the change does as a whole and why. Then go through the parts below.`
     : `I'm reading ${what} in ${repo}${title ? ` ("${title}")` : ''} part by part. Go through the parts below.`;
-  return `${head}\n\n` +
+  return `${brief ? `${brief}\n\n` : ''}${head}\n\n` +
     `Put each part under a heading "### Part N". Under it: ${intentText(edits, 'lines')} ${CHANGED} ${NUMBERS_NOTE}\n\n` +
     nums.map(n => `### Part ${n} · ${where(blocks[n - 1])}\n\n\`\`\`diff\n${blocks[n - 1].diff}\n\`\`\``).join('\n\n');
 }
