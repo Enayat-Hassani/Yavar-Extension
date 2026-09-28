@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { renderMarkdown, runnableLang } from '../src/utils/markdown.js';
+import { renderMarkdown } from '../src/utils/markdown.js';
 
 test('escapes HTML and never produces script or handlers', () => {
   const { html } = renderMarkdown('<script>alert(1)</script> <img src=x onerror=alert(1)> [x](javascript:alert(1))');
@@ -25,12 +25,10 @@ test('code blocks keep raw code and get run buttons for Python/JS only', () => {
     { lang: 'python', code: 'if a < b and "x":\n    print(a & b)' },
     { lang: 'bash', code: 'ls' }
   ]);
-  assert.equal((html.match(/data-md-act="run"/g) || []).length, 1);
+  assert.equal((html.match(/data-md-act="use"/g) || []).length, 2);
   // Coloured, but the text of the code is intact and escaped
   const text = html.match(/<pre><code>([\s\S]*?)<\/code><\/pre>/)[1].replace(/<[^>]+>/g, '');
   assert.equal(text, 'if a &lt; b and &quot;x&quot;:\n    print(a &amp; b)');
-  assert.equal(runnableLang('JS'), 'javascript');
-  assert.equal(runnableLang('ts'), null);
 });
 
 test('inline code contents are not formatted', () => {

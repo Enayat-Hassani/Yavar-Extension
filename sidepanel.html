@@ -82,36 +82,6 @@
       <div class="lens-list" id="tool-menu-list"></div>
     </div>
 
-    <!-- Code runner: run JS/Python from answers (or your own) in a sandbox -->
-    <div id="run-panel" class="run-panel sheet hidden" role="dialog" aria-label="Code runner">
-      <div class="run-header">
-        <div class="run-title">
-          <span>Run code</span>
-          <div class="files-tabs run-lang" role="tablist" aria-label="Language">
-            <button type="button" role="tab" class="files-tab" data-lang="python">Python</button>
-            <button type="button" role="tab" class="files-tab" data-lang="javascript">JavaScript</button>
-          </div>
-        </div>
-        <button id="run-close" class="history-action-btn" title="Close (Esc)">✕</button>
-      </div>
-      <div id="run-editor" class="run-editor"></div>
-      <div class="run-actions">
-        <button id="run-go" type="button" class="run-go" title="Run (Ctrl+Enter)">Run</button>
-        <button id="run-stop" type="button" class="run-stop hidden">Stop</button>
-        <span id="run-status" class="run-status" aria-live="polite"></span>
-      </div>
-      <div class="run-scroll">
-        <pre id="run-output" class="run-output" aria-label="Output"></pre>
-        <div id="run-followups" class="run-followups hidden">
-          <button type="button" class="run-ask" data-ask="fix">Fix it</button>
-          <button type="button" class="run-ask" data-ask="explain">Explain the output</button>
-          <button type="button" class="run-ask" data-ask="next">What to try next</button>
-        </div>
-        <!-- Answers to the buttons above appear here, streamed from the chat -->
-        <div id="run-answers" class="run-answers"></div>
-      </div>
-    </div>
-
     <!-- Build it yourself: a step-by-step plan to rebuild the project -->
     <div id="rebuild-panel" class="run-panel rebuild-panel sheet hidden" role="dialog" aria-label="Build it yourself">
       <div class="run-header">

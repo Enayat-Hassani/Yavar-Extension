@@ -7,10 +7,6 @@
 // Returns { html, code: [{ lang, code }] }; each code block's toolbar carries
 // data-code-index pointing into `code`.
 
-const RUNNABLE = { python: 'python', py: 'python', python3: 'python', javascript: 'javascript', js: 'javascript', node: 'javascript', mjs: 'javascript' };
-
-export const runnableLang = (lang) => RUNNABLE[String(lang || '').toLowerCase()] || null;
-
 // Code blocks longer than this start folded
 export const FOLD_LINES = 24;
 
@@ -141,16 +137,14 @@ export function renderMarkdown(md) {
       i++;
       while (i < lines.length && !new RegExp('^\\s*' + fence[1] + '\\s*$').test(lines[i])) body.push(lines[i++]);
       const lang = fence[2].toLowerCase();
-      // Store the raw (unescaped) code for Copy / Run
+      // Store the raw (unescaped) code for Copy and Use in editor
       const raw = unesc(body.join('\n'));
       const idx = code.push({ lang, code: raw }) - 1;
-      const run = runnableLang(lang)
-        ? `<button type="button" data-md-act="run">▶ Run</button><button type="button" data-md-act="use">Use in editor</button>` : '';
       const n = body.length;
       const fold = n > FOLD_LINES
         ? `<button type="button" class="md-code-more" data-md-act="unfold">Show all ${n} lines</button>` : '';
       out.push(`<div class="md-code${fold ? ' is-folded' : ''}" data-code-index="${idx}"><div class="md-code-bar"><span>${esc(lang) || 'code'}</span>` +
-        `<button type="button" data-md-act="copy">Copy</button>${run}</div><pre><code>${highlight(raw, lang)}</code></pre>${fold}</div>`);
+        `<button type="button" data-md-act="copy">Copy</button><button type="button" data-md-act="use">Use in editor</button></div><pre><code>${highlight(raw, lang)}</code></pre>${fold}</div>`);
       continue;
     }
 

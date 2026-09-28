@@ -3,7 +3,7 @@
 
 import { isPublicWebUrl } from './utils/net.js';
 import { loadTemplates, expandTemplate, varsInTemplate } from './utils/templates.js';
-import { renderMarkdown, runnableLang } from './utils/markdown.js';
+import { renderMarkdown } from './utils/markdown.js';
 import { walkPrompt, parseWalkthrough, compareTyped, quizPrompt, parseQuiz } from './utils/walkthrough.js';
 import { cmModeFor, defineGenericMode, closeBracketKeys } from './utils/codeEditor.js';
 import { journeyPrompt, parseJourney, nextCandidates, nextPrompt, parseNext, connectionTree } from './utils/journey.js';
@@ -106,14 +106,8 @@ class YavarSidePanel {
     this.repoTree = null;
     this.readMarks = new Set();
 
-    // Menus and the code runner
+    // Menus
     this.toolMenu = document.getElementById('tool-menu');
-    this.runPanel = document.getElementById('run-panel');
-    this.runOutput = document.getElementById('run-output');
-    this.runStatus = document.getElementById('run-status');
-    this.runGo = document.getElementById('run-go');
-    this.runStop = document.getElementById('run-stop');
-    this.runFollowups = document.getElementById('run-followups');
 
   }
 
@@ -229,20 +223,6 @@ class YavarSidePanel {
         e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
       });
     }
-    document.getElementById('run-close')?.addEventListener('click', () => this.closeRunPanel());
-    this.runGo?.addEventListener('click', () => this.runCode());
-    this.runStop?.addEventListener('click', () => this.stopCode());
-    this.runPanel?.querySelector('.run-lang')?.addEventListener('click', (e) => {
-      const lang = e.target.closest('[data-lang]')?.dataset.lang;
-      if (lang) this.setRunLang(lang);
-    });
-    this.runFollowups?.addEventListener('click', (e) => {
-      const ask = e.target.closest('[data-ask]')?.dataset.ask;
-      if (ask) this.askAboutRun(ask);
-    });
-    this.runPanel?.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') this.closeRunPanel();
-    });
 
     // Close popovers when clicking outside
     document.addEventListener('click', (e) => {
@@ -599,7 +579,7 @@ class YavarSidePanel {
   }
 
   // An answer shown inside Yavar: streams, renders Markdown, and wires the
-  // code-block buttons. onUseCode(code, lang) enables "Use in editor".
+  // code-block buttons. onUseCode(code) enables "Use in editor".
   // Under a finished answer: Copy, then Retry (onRetry), Save (saveAs), and
   // either "Ask <chat site>" (onAskChat, for API answers) or "Open in chat"
   // (openInChat, for answers the chat site wrote).
@@ -690,10 +670,8 @@ class YavarSidePanel {
       if (mdAct === 'copy') {
         try { await navigator.clipboard.writeText(block.code); btn.textContent = 'Copied ✓'; } catch (err) { /* ignore */ }
         setTimeout(() => { btn.textContent = 'Copy'; }, 1400);
-      } else if (mdAct === 'run') {
-        this.openRunPanel({ lang: runnableLang(block.lang), code: block.code, autoRun: true });
       } else if (mdAct === 'use' && onUseCode) {
-        onUseCode(block.code, runnableLang(block.lang));
+        onUseCode(block.code);
       }
     });
     const status = (text) => { card.querySelector('.answer-status').textContent = text; };
@@ -1291,7 +1269,6 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
         ? [{ id: 'save_morfia', icon: icon('forward'), name: 'Add to Morfia', desc: 'Add this article to your Morfia library' }] : []),
       { id: 'research_web', icon: icon('globe'), name: 'Web research', desc: 'Searches, reads sources, cites them', divider: true },
       { id: 'videos', icon: icon('video'), name: 'Video research', desc: 'What the top YouTube videos say' },
-      { id: 'run', icon: icon('code'), name: 'Code playground', desc: 'Run Python or JavaScript' },
       { id: 'carry_over', icon: icon('forward'), name: 'Continue in a fresh chat', desc: 'Summarize this chat into a new one', divider: true },
       { id: 'settings', icon: icon('settings'), name: 'Settings' }
     ];
@@ -1500,7 +1477,6 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       research_page: () => this.useComposerTool('research_page'),
       videos: () => this.useComposerTool('videos'),
       local: () => this.openPicker('local'),
-      run: () => this.openRunPanel(),
       carry_over: () => this.carryOverToNewChat(),
       ielts: () => this.startCoach(),
       save_morfia: () => this.saveForMorfia()
@@ -2082,11 +2058,6 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     return root;
   }
 
-  rebuildLang(plan) {
-    const l = plan?.language || '';
-    return /python/i.test(l) ? 'python' : /javascript|node|^js$/i.test(l) ? 'javascript' : null;
-  }
-
   rebuildKey() {
     const k = this.readMarksKey();
     return k ? k.replace(/^readMarks:/, 'rebuild:') : null;
@@ -2172,7 +2143,6 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     const n = plan.steps.length;
     const i = Math.min(current, n - 1);
     const s = plan.steps[i];
-    const lang = this.rebuildLang(plan);
     const isDone = done.includes(i);
     const study = (s.study || []).map(p => this.repoTree.fileSet.has(p)
       ? `<button type="button" class="jr-file" data-rb="study" data-path="${esc(p)}" title="Open ${esc(p)} in the reader and explain it for this step">${esc(p.split('/').pop())}</button>`
@@ -2194,7 +2164,6 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       (s.done_when ? `<div class="rebuild-label">Done when</div><p class="wk-explain">${esc(s.done_when)}</p>` : '') +
       `<div class="rebuild-label">Your code</div>` +
       `<div class="code-box" aria-label="Your code for this step"></div>` +
-      `<pre class="run-output rebuild-out" aria-label="Output of your code"></pre>` +
       `<div class="rebuild-mentor"></div>` +
       `<div class="rb-done">` + (isDone
         ? `<span class="rb-done-note">✓ Step done</span><button type="button" class="files-link-btn jr-link" data-rb="undone">Undo</button>`
@@ -2202,9 +2171,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       `</div>` +
       `<div class="wk-dock">` + this.askBox('data-rb', 'Ask about this step…',
         `<button type="button" class="run-ask" data-rb="hint">Hint</button>` +
-        `<button type="button" class="run-ask" data-rb="check">Review my code</button>` +
-        (lang ? `<button type="button" class="run-ask" data-rb="try" title="Ctrl+Enter">Run it</button>` : '') +
-        `<span class="rebuild-run-status"></span>`) +
+        `<button type="button" class="run-ask" data-rb="check">Review my code</button>`) +
       `</div>`;
 
     this._rbCode = this.makeCodeBox(this.rebuildBody.querySelector('.code-box'), {
@@ -2212,8 +2179,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       onChange: (value) => {
         clearTimeout(this._rbSave);
         this._rbSave = setTimeout(() => this.saveRebuild({ ...this.rebuild, code: { ...(this.rebuild.code || {}), [i]: value } }), 400);
-      },
-      onSubmit: () => this.rebuildBody.querySelector('[data-rb="try"]')?.click()
+      }
     });
 
     // Earlier hints and reviews for this step, folded
@@ -2367,16 +2333,7 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
         onDone: (text) => this.addMentorNote(i, title, text)
       });
       el.disabled = false;
-    } else if (act === 'try') {
-      // Run inline under the code, so hints and output stay in view together
-      if (!code.trim()) { this.showNotification('Write some code first'); return; }
-      const out = this.rebuildBody.querySelector('.rebuild-out');
-      el.disabled = true;
-      await this.runSnippet({
-        lang: this.rebuildLang(st.plan), code, outEl: out,
-        statusEl: this.rebuildBody.querySelector('.rebuild-run-status')
-      });
-      el.disabled = false;
+
     }
   }
 
@@ -2439,8 +2396,8 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
       extra + `</div></div>`;
   }
 
-  // A code editor with colours, line numbers and indentation (CodeMirror,
-  // like the runner) that starts one line tall and grows with the code.
+  // A code editor with colours, line numbers and indentation (CodeMirror)
+  // that starts one line tall and grows with the code.
   // firstLine numbers it like the file (a block of lines 16-49 starts at 16);
   // Ctrl/Cmd+Enter calls onSubmit.
   makeCodeBox(host, { value = '', lang = '', firstLine = 1, placeholder = '', onChange = null, onSubmit = null }) {
@@ -3829,11 +3786,6 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
         return;
       }
 
-      // "▶ Run" clicked on a code block in an answer
-      if (data.action === 'RUN_CODE' && typeof data.code === 'string') {
-        this.openRunPanel({ lang: data.lang, code: data.code, autoRun: true });
-        return;
-      }
 
 
       // ----- Research agent watch replies -----
@@ -4191,189 +4143,6 @@ Begin: state a one-line plan, then issue your first SEARCH or READ.`;
     } catch (e) {
       console.error('[Yavar] Failed to copy notes:', e);
     }
-  }
-
-  // ========== Code Runner ==========
-  // Runs snippets in runner.html, a sandboxed page (no extension APIs,
-  // opaque origin) that executes each run in a killable Web Worker.
-
-  ensureRunEditor() {
-    if (this.runEditor) return;
-    this.runEditor = CodeMirror(document.getElementById('run-editor'), {
-      mode: 'python',
-      theme: 'yavar',
-      lineNumbers: true,
-      lineWrapping: false,
-      viewportMargin: Infinity,   // the editor grows with the code (see .run-editor)
-      tabSize: 4,
-      indentUnit: 4,
-      indentWithTabs: false,
-      extraKeys: {
-        'Ctrl-Enter': () => this.runCode(),
-        'Cmd-Enter': () => this.runCode(),
-        Tab: (cm) => cm.somethingSelected() ? cm.indentSelection('add') : cm.replaceSelection(' '.repeat(cm.getOption('indentUnit')))
-      }
-    });
-    this.runEditor.addKeyMap(closeBracketKeys(CodeMirror));
-    this.runEditor.on('change', () => {
-      clearTimeout(this._runSaveTimer);
-      this._runSaveTimer = setTimeout(() => {
-        try { chrome.storage.local.set({ yavarPlayground: { lang: this.runLang, code: this.runEditor.getValue() } }); } catch (e) { /* ignore */ }
-      }, 500);
-    });
-  }
-
-  setRunLang(lang) {
-    this.runLang = lang === 'javascript' ? 'javascript' : 'python';
-    this.runPanel.querySelectorAll('.run-lang [data-lang]').forEach(b => {
-      const on = b.dataset.lang === this.runLang;
-      b.classList.toggle('active', on);
-      b.setAttribute('aria-selected', String(on));
-    });
-    this.runEditor?.setOption('mode', this.runLang);
-    this.runEditor?.setOption('indentUnit', this.runLang === 'python' ? 4 : 2);
-  }
-
-  async openRunPanel({ lang, code, autoRun = false } = {}) {
-    this.ensureRunEditor();
-    if (code == null) {
-      // Playground: restore the last snippet
-      let saved = null;
-      try { saved = (await chrome.storage.local.get('yavarPlayground')).yavarPlayground; } catch (e) { /* ignore */ }
-      lang = saved?.lang || lang || 'python';
-      code = saved?.code ?? (lang === 'python'
-        ? '# Write Python here and press Ctrl+Enter\nname = "world"\nprint(f"Hello, {name}!")\n'
-        : '// Write JavaScript here and press Ctrl+Enter\nconst name = "world";\nconsole.log(`Hello, ${name}!`);\n');
-    }
-    this.setRunLang(lang);
-    this.runPanel.classList.remove('hidden');
-    this.runEditor.setValue(code);
-    this.runEditor.refresh();
-    this.runEditor.focus();
-    this.runOutput.textContent = '';
-    this.runOutput.classList.remove('has-error');
-    this.runFollowups.classList.add('hidden');
-    this.runStatus.textContent = autoRun ? '' : 'Ctrl+Enter to run';
-    document.getElementById('run-answers').innerHTML = '';
-    if (autoRun) this.runCode();
-  }
-
-  closeRunPanel() {
-    this.runPanel?.classList.add('hidden');
-  }
-
-  // The sandbox iframe is created on first use
-  ensureRunner() {
-    if (this._runnerReady) return this._runnerReady;
-    this._runnerReady = new Promise((resolve) => {
-      const frame = document.createElement('iframe');
-      frame.src = 'runner.html';
-      frame.hidden = true;
-      frame.setAttribute('aria-hidden', 'true');
-      this.runnerFrame = frame;
-      window.addEventListener('message', (e) => {
-        if (e.source !== frame.contentWindow) return;
-        const m = e.data || {};
-        if (m.type === 'ready') resolve();
-        else this.onRunnerMessage(m);
-      });
-      document.body.appendChild(frame);
-    });
-    return this._runnerReady;
-  }
-
-  // Run a snippet in the sandbox, streaming output into outEl (batched per
-  // animation frame). Used by the Run panel and inline by Rebuild steps.
-  // Resolves with { ok, output, error, ms }.
-  async runSnippet({ lang, code, outEl, statusEl = null }) {
-    await this.ensureRunner();
-    const id = 'run_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
-    outEl.textContent = '';
-    outEl.classList.remove('has-error');
-    if (statusEl) statusEl.textContent = 'Running…';
-    this._runSinks = this._runSinks || new Map();
-    return new Promise((resolve) => {
-      let output = '';
-      let frag = null;
-      const flush = () => {
-        if (!frag) return;
-        outEl.appendChild(frag);
-        frag = null;
-        outEl.scrollTop = outEl.scrollHeight;
-      };
-      this._runSinks.set(id, (m) => {
-        if (m.type === 'status') {
-          if (statusEl) statusEl.textContent = m.text || 'Running…';
-        } else if (m.type === 'output') {
-          const span = document.createElement('span');
-          if (m.stream === 'stderr') span.className = 'run-err';
-          span.textContent = m.text;
-          if (!frag) { frag = document.createDocumentFragment(); requestAnimationFrame(flush); }
-          frag.appendChild(span);
-          output += m.text;
-        } else if (m.type === 'done') {
-          flush();
-          this._runSinks.delete(id);
-          outEl.classList.toggle('has-error', !m.ok);
-          if (!outEl.textContent) outEl.textContent = m.ok ? '(no output)' : (m.error || 'Error');
-          if (statusEl) {
-            statusEl.textContent = m.ok
-              ? `Done in ${m.ms < 1000 ? m.ms + ' ms' : (m.ms / 1000).toFixed(1) + ' s'}`
-              : '⚠️ ' + (m.error === 'timeout' ? 'Stopped' : 'Error');
-          }
-          resolve({ ok: m.ok, output, error: m.error, ms: m.ms });
-        }
-      });
-      this._lastRunId = id;
-      this.runnerFrame.contentWindow.postMessage({ type: 'run', id, lang, code, timeoutMs: 10000 }, '*');
-    });
-  }
-
-  async runCode() {
-    if (!this.runEditor || this._runBusy) return;
-    const code = this.runEditor.getValue();
-    if (!code.trim()) return;
-    this._runBusy = true;
-    this.runFollowups.classList.add('hidden');
-    this.runGo.disabled = true;
-    this.runStop.classList.remove('hidden');
-    const lang = this.runLang;
-    const r = await this.runSnippet({ lang, code, outEl: this.runOutput, statusEl: this.runStatus });
-    this._runBusy = false;
-    this._runResult = { code, lang, output: r.output, ok: r.ok };
-    this.runGo.disabled = false;
-    this.runStop.classList.add('hidden');
-    this.runFollowups.classList.remove('hidden');
-    const fix = this.runFollowups.querySelector('[data-ask="fix"]');
-    fix.classList.toggle('hidden', r.ok);
-    fix.classList.toggle('primary', !r.ok);
-  }
-
-  stopCode() {
-    if (this._lastRunId) this.runnerFrame?.contentWindow?.postMessage({ type: 'stop', id: this._lastRunId }, '*');
-  }
-
-  onRunnerMessage(m) {
-    this._runSinks?.get(m.id)?.(m);
-  }
-
-  askAboutRun(kind) {
-    const r = this._runResult;
-    if (!r) return;
-    const lang = r.lang;   // already 'python' | 'javascript' (setRunLang)
-    const name = lang === 'python' ? 'Python' : 'JavaScript';
-    const output = (r.output || '(no output)').slice(0, 8000);
-    const block = `\`\`\`${lang}\n${r.code.replace(/\n$/, '')}\n\`\`\`\n\nOutput:\n\`\`\`\n${output.replace(/\n$/, '')}\n\`\`\``;
-    const asks = {
-      fix: `I ran this ${name} code and it failed:\n\n${block}\n\nExplain in simple terms what went wrong and why, then give the corrected code. (It runs in a browser sandbox with only the standard library${lang === 'python' ? ', and input() is not available' : ''}.)`,
-      explain: `I ran this ${name} code:\n\n${block}\n\nWalk me through why it produces exactly this output, step by step.`,
-      next: `I ran this ${name} code:\n\n${block}\n\nSuggest 3 small changes I could try next to learn more from it (from easy to harder), and what I should expect to see for each.`
-    };
-    const titles = { fix: 'Fix', explain: 'Why this output', next: 'Try next' };
-    this.showAnswerIn(document.getElementById('run-answers'), titles[kind], asks[kind], {
-      via: 'chat', inline: true,
-      onUseCode: (code) => { this.runEditor.setValue(code); this.runEditor.focus(); }
-    });
   }
 
   // Ask in the background and stream the answer into a card in `container`

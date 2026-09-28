@@ -510,96 +510,6 @@
     })();
   }
 
-  // ---- "▶ Run" buttons on code blocks in answers ----
-  // Only inside the Yavar side panel (never in the user's normal chat tabs).
-  // Clicking sends the code to the panel, which runs it in a sandbox.
-
-  const RUNNABLE = {
-    javascript: 'javascript', js: 'javascript', node: 'javascript', nodejs: 'javascript', mjs: 'javascript',
-    python: 'python', py: 'python', python3: 'python', py3: 'python'
-  };
-
-  // Language from the code element's class, a nearby header label, or a
-  // guess. Returns false when the block is known not to be runnable (so it's
-  // never re-checked), null when it can't tell yet (e.g. still streaming).
-  function codeLanguage(pre, text) {
-    const code = pre.querySelector('code') || pre;
-    const cls = (code.className || '') + ' ' + (pre.className || '');
-    const m = cls.match(/(?:language|lang)-([\w+#-]+)/i);
-    if (m) return RUNNABLE[m[1].toLowerCase()] || false;
-
-    // ChatGPT / Gemini show the language as a small label above the block
-    const box = pre.closest('div');
-    const label = box?.parentElement?.querySelector('span, div')?.textContent?.trim().toLowerCase() || '';
-    if (RUNNABLE[label]) return RUNNABLE[label];
-    const header = pre.parentElement?.previousElementSibling?.textContent?.trim().toLowerCase() || '';
-    if (RUNNABLE[header]) return RUNNABLE[header];
-
-    // Heuristic fallback
-    if (/^\s*(def |class \w+.*:\s*$|from [\w.]+ import |import [\w.]+\s*$|print\()/m.test(text) && !/[;{]\s*$/m.test(text)) return 'python';
-    if (/\b(console\.log|const |let |function |=>|document\.)/.test(text)) return 'javascript';
-    return null;
-  }
-
-  function isInsideAnswer(el) {
-    const platform = detectPlatform();
-    const sel = platform && RESPONSE_SELECTORS[platform];
-    if (sel && el.closest(sel.message)) return true;
-    // Unknown DOM: accept any block that isn't in the message composer
-    return !el.closest('[contenteditable="true"], textarea, form');
-  }
-
-  // Code text without our own button's label
-  function codeText(pre) {
-    const el = pre.querySelector('code') || pre;
-    return (el.innerText || '').replace(/\n?▶ Run\s*$/, '').replace(/\n$/, '');
-  }
-
-  function decorateCodeBlocks(generating) {
-    const pres = document.querySelectorAll('pre:not([data-yavar-run])');
-    const lastPre = pres[pres.length - 1];
-    pres.forEach((pre) => {
-      if (!isInsideAnswer(pre)) { pre.setAttribute('data-yavar-run', 'skip'); return; }
-      const text = codeText(pre);
-      if (text.length > 100000) { pre.setAttribute('data-yavar-run', 'skip'); return; }
-      const lang = text.trim().length >= 3 ? codeLanguage(pre, text) : null;
-      if (!lang) {
-        // Unknown language: only a block that may still be streaming (the last
-        // one while the AI is answering) is worth looking at again later
-        if (lang === false || !(generating && pre === lastPre)) pre.setAttribute('data-yavar-run', 'skip');
-        return;
-      }
-      pre.setAttribute('data-yavar-run', lang);
-
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.textContent = '▶ Run';
-      btn.setAttribute('data-yavar-run-btn', '');
-      btn.title = `Run this ${lang === 'python' ? 'Python' : 'JavaScript'} in Yavar's sandbox`;
-      btn.setAttribute('aria-label', btn.title);
-      btn.style.cssText = [
-        'position:absolute', 'right:8px', 'bottom:8px', 'z-index:5',
-        'padding:3px 10px', 'font:600 12px/1.4 system-ui,-apple-system,sans-serif',
-        'color:#fff', 'background:#0071e3', 'border:none', 'border-radius:999px',
-        'cursor:pointer', 'opacity:0.85', 'box-shadow:0 1px 4px rgba(0,0,0,.25)'
-      ].join(';');
-      btn.addEventListener('mouseenter', () => { btn.style.opacity = '1'; });
-      btn.addEventListener('mouseleave', () => { btn.style.opacity = '0.85'; });
-      btn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        // Re-read at click time: the block may have finished streaming since
-        const code = codeText(pre);
-        postToYavar({ action: 'RUN_CODE', lang, code });
-      });
-      const cs = getComputedStyle(pre);
-      if (cs.position === 'static') pre.style.position = 'relative';
-      // Room for the button so it never covers the last line of code
-      pre.style.paddingBottom = `calc(${cs.paddingBottom} + 30px)`;
-      pre.appendChild(btn);
-    });
-  }
-
   // ---- Yavar controls inside the chat ----
   // An action row under each finished answer. Rendered in a shadow root so
   // the site's CSS can't touch it (and ours can't leak), re-attached when
@@ -739,12 +649,11 @@
     if (!inChatEnabled) return;
     isDark = looksDark();
     const generating = !!document.querySelector(STOP_SELECTORS);
-    decorateCodeBlocks(generating);
     decorateAnswers(generating);
   }
 
-  // Mutations caused only by our own buttons/bars don't need another pass
-  const isOwnNode = (n) => n.nodeType === 1 && (n.hasAttribute('data-yavar-ui') || n.hasAttribute('data-yavar-run-btn'));
+  // Mutations caused only by our own answer bars don't need another pass
+  const isOwnNode = (n) => n.nodeType === 1 && n.hasAttribute('data-yavar-ui');
   const onlyOwnChanges = (records) => records.every(r =>
     [...r.addedNodes, ...r.removedNodes].every(isOwnNode) || (r.type === 'attributes'));
 
@@ -758,7 +667,7 @@
       });
     } catch (e) { /* storage unavailable: keep defaults */ }
 
-    // One observer drives everything (code-block buttons, answer bars)
+    // One observer drives the answer bars
     let queued = null;
     const schedule = (records) => {
       if (queued || (records && onlyOwnChanges(records))) return;

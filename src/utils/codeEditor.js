@@ -1,5 +1,5 @@
-// Code boxes (walkthrough practice, rebuild steps) are CodeMirror editors,
-// like the runner. The bundled modes cover Python, JavaScript/TypeScript/JSON,
+// Code boxes (walkthrough practice, rebuild steps) are CodeMirror editors.
+// The bundled modes cover Python, JavaScript/TypeScript/JSON,
 // CSS and HTML; every other language gets a small mode that colours comments,
 // strings, numbers and keywords the same way the reader and answers do.
 
