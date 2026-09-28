@@ -460,7 +460,7 @@ export class WalkPart {
       : `lines ${b.start}-${b.end} of \`${w.path}\`${repo ? ` from ${repo}` : ''}`;
     const block = c ? partContext(b) : `${LINE_NUMBER_NOTE}\n\n${fencedFile({ path: w.path, content: code, lines: b })}`;
     const project = this.walkProject();
-    const listed = this._filesListedFor === w.key;
+    const listed = this._filesListedFor === (w.key || w.path);
     const files = project ? this.projectFiles(project, [b.path || w.path], { list: !listed }) : '';
     const brief = [project ? await this.projectBriefFor(project) : '', files].filter(Boolean).join('\n\n');
     const whole = [w.summary ? `(The ${c ? 'change' : 'file'} as a whole: ${w.summary})` : '', brief].filter(Boolean).join('\n\n');
@@ -551,15 +551,19 @@ export class WalkPart {
         this.renderWalkNote(notesEl, note, false);
         await this.addWalkNote(w.key || w.path, i, note);
       } else if (lineNums) {
-        if (files && !listed) this._filesListedFor = w.key;
-        let text = await this.showAnswerIn(notesEl, label, prompt, { via: 'chat', inline: true, attachments });
-        text = await this.answerWithFiles(notesEl, label, text, project);
+        if (files && !listed) this._filesListedFor = w.key || w.path;
+        const up = await this.walkContextFiles(notesEl, w, b, project);
+        let text = await this.showAnswerIn(notesEl, label, up ? `${prompt}\n\n${up.note}` : prompt,
+          { via: 'chat', inline: true, attachments: up ? [...attachments, up.attachment] : attachments });
+        text = await this.answerWithFiles(notesEl, label, text, project, this._sentFiles?.paths);
         this.markLineRefs(notesEl);
         if (text) await this.saveLines(w.key, lineNums, label, text);
       } else {
-        if (files && !listed) this._filesListedFor = w.key;
-        let text = await this.showAnswerIn(notesEl, label, prompt, { via: 'chat', inline: true });
-        text = await this.answerWithFiles(notesEl, label, text, project);
+        if (files && !listed) this._filesListedFor = w.key || w.path;
+        const up = await this.walkContextFiles(notesEl, w, b, project);
+        let text = await this.showAnswerIn(notesEl, label, up ? `${prompt}\n\n${up.note}` : prompt,
+          { via: 'chat', inline: true, attachments: up ? [up.attachment] : [] });
+        text = await this.answerWithFiles(notesEl, label, text, project, this._sentFiles?.paths);
         this.markLineRefs(notesEl);
         if (text) await this.addWalkNote(w.key || w.path, i, { label, text });
       }

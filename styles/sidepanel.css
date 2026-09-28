@@ -2089,6 +2089,10 @@ button.lens-item:focus-visible {
 .wk-explain.is-empty { color: var(--text-secondary); }
 /* A change: the part's file in the meta line, and what was taken out */
 .wk-meta code { font-size: 11.5px; color: var(--text-primary); overflow-wrap: anywhere; }
+/* What Yavar is doing for the AI while it gathers files */
+.work-status { display: flex; align-items: center; gap: 8px; margin: 8px 0; font-size: 12.5px; color: var(--text-secondary); animation: fadeIn var(--dur-base) var(--ease-std); }
+.work-status .files-spinner { flex: none; }
+
 /* A line an explanation names: shows it in the reader */
 .walk-notes .line-ref { color: var(--accent); cursor: pointer; border-radius: 3px; }
 .walk-notes .line-ref:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); text-decoration: underline; }
