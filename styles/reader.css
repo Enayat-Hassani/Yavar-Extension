@@ -10,6 +10,8 @@
   --border: rgba(0, 0, 0, 0.08);
   --surface: #ffffff;
   --band: color-mix(in srgb, var(--accent) 11%, transparent);
+  --add: #1f883d;
+  --del: #cf222e;
   --cm-keyword: #ad3da4;
   --cm-string: #c41a16;
   --cm-comment: #707f8c;
@@ -36,6 +38,8 @@
     --border: rgba(255, 255, 255, 0.1);
     --surface: #2c2c2e;
     --band: color-mix(in srgb, var(--accent) 20%, transparent);
+    --add: #3fb950;
+    --del: #f85149;
     --cm-keyword: #ff7ab2;
     --cm-string: #ff8170;
     --cm-comment: #7f8c98;
@@ -188,6 +192,13 @@ body {
 .rd-src pre { padding-left: 16px; padding-right: 24px; position: relative; }
 .rd-src code { white-space: pre; }
 
+/* A part of a change: removed lines in red, added in green, in the file */
+.rd-mark { position: absolute; left: 0; right: 0; pointer-events: none; }
+.rd-mark.is-add { background: color-mix(in srgb, var(--add) 14%, transparent); }
+.rd-mark.is-del { background: color-mix(in srgb, var(--del) 14%, transparent); }
+.rd-g-add { color: var(--add); font-weight: 600; }
+.rd-g-del { color: var(--del); font-weight: 600; }
+
 /* The lines under discussion */
 .rd-band {
   position: absolute;
@@ -199,6 +210,8 @@ body {
   pointer-events: none;
 }
 .rd-band[hidden] { display: none; }
+/* Over a diff the band only marks the part, so red and green stay true */
+.rd-band.is-diff { background: none; }
 .rd-band.is-new { animation: arrive var(--dur-slow) var(--ease-std); }
 @keyframes arrive {
   from { background: color-mix(in srgb, var(--accent) 26%, transparent); }

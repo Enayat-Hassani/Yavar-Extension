@@ -4,7 +4,12 @@
 // `readerView` to chrome.storage.session; this page follows every change.
 //
 // readerView: { repo: { source, owner, repo, ref, name }, path, content,
-//               lines: { start, end } | null, label, walkKey, ts }
+//               lines: { start, end } | null, label, walkKey, ts,
+//               diff: { add, del } | null }
+//
+// With `diff` (a part of a commit or pull request), the file is shown as it is
+// after the change, with the removed lines put back in red where they were and
+// the added lines in green; the part is the band around them.
 //
 // A local file can be edited here and saved back to its folder. Saving moves
 // the lines after the edit, so the file's walk, the highlighted lines and the
@@ -14,10 +19,12 @@ import { highlight } from './utils/markdown.js';
 import { langFromPath, blobUrl } from './utils/github.js';
 import { cmModeFor, defineGenericMode, closeBracketKeys } from './utils/codeEditor.js';
 import { editedLines, shiftRange, shiftWalk } from './utils/walkthrough.js';
+import { diffRows } from './utils/changes.js';
 import { idbGet } from './utils/idb.js';
 
 const $ = (id) => document.getElementById(id);
 let shown = '';        // which file the code area holds, so a new range doesn't redraw it
+let shownBand = null;  // in a diff: the rows the part covers
 let current = null;    // the view the panel last asked for
 let editing = null;    // { view, handle, text, modified, cm, clean, saving } while editing
 
@@ -43,15 +50,41 @@ function render(view, { top = null } = {}) {
   gh.hidden = repo.source === 'local';
   if (!gh.hidden) gh.href = blobUrl(repo.owner, repo.repo, repo.ref, path, lines);
 
-  const key = `${repo.source}:${repo.name}@${repo.ref}:${path}:${content.length}`;
+  const { diff } = view;
+  const key = `${repo.source}:${repo.name}@${repo.ref}:${path}:${content.length}:${diff ? JSON.stringify(diff) : ''}`;
+  let band = lines;
   if (key !== shown) {
     shown = key;
     const text = content.replace(/\n$/, '');
-    const count = text.split('\n').length;
-    $('rd-gutter').textContent = Array.from({ length: count }, (_, i) => i + 1).join('\n');
-    $('rd-text').innerHTML = highlight(text, langFromPath(path));
+    const file = text.split('\n');
+    const marks = $('rd-marks');
+    marks.replaceChildren();
+    if (diff) {
+      const rows = diffRows(file.length, diff.add, diff.del);
+      $('rd-gutter').innerHTML = rows.map(r => r.kind === 'del' ? '<span class="rd-g-del">−</span>'
+        : r.kind === 'add' ? `<span class="rd-g-add">${r.n}</span>` : r.n).join('\n');
+      $('rd-text').innerHTML = highlight(rows.map(r => r.kind === 'del' ? r.text : file[r.n - 1]).join('\n'), langFromPath(path));
+      // One mark per run of added or removed rows, drawn behind the code
+      rows.forEach((r, k) => {
+        if (!r.kind) return;
+        const last = marks.lastElementChild;
+        if (last && last.dataset.kind === r.kind && Number(last.dataset.end) === k - 1) { last.dataset.end = k; return; }
+        marks.append(Object.assign(document.createElement('div'), { className: `rd-mark is-${r.kind}` }));
+        Object.assign(marks.lastElementChild.dataset, { kind: r.kind, start: k, end: k });
+      });
+      const marked = rows.map((r, k) => r.kind ? k : -1).filter(k => k >= 0);
+      shownBand = marked.length ? { start: marked[0] + 1, end: marked.at(-1) + 1 } : null;
+    } else {
+      $('rd-gutter').textContent = file.map((_, i) => i + 1).join('\n');
+      $('rd-text').innerHTML = highlight(text, langFromPath(path));
+      shownBand = null;
+    }
+    drawMarks();
   }
-  place(lines, top == null);
+  // In a diff the band is in rows, which the removed lines have moved
+  if (diff) band = shownBand || null;
+  $('rd-band').classList.toggle('is-diff', !!diff);
+  place(band, top == null);
   if (top != null) $('rd-main').scrollTop = lineTop(top);
   offerEdit(view);
 }
@@ -61,6 +94,15 @@ function lineHeight() { return parseFloat(getComputedStyle($('rd-src').querySele
 function codePad() { return parseFloat(getComputedStyle($('rd-src').querySelector('pre')).paddingTop); }
 function lineTop(n) { return $('rd-code').offsetTop + codePad() + n * lineHeight(); }
 function topLine() { return Math.max(0, Math.floor(($('rd-main').scrollTop - $('rd-code').offsetTop - codePad()) / lineHeight())); }
+
+// The added and removed runs, placed by row
+function drawMarks() {
+  const lh = lineHeight();
+  for (const m of $('rd-marks').children) {
+    m.style.top = `${codePad() + Number(m.dataset.start) * lh}px`;
+    m.style.height = `${(Number(m.dataset.end) - Number(m.dataset.start) + 1) * lh}px`;
+  }
+}
 
 // Draw the highlight behind the lines and, unless `scroll` is false, bring them into view
 function place(lines, scroll = true) {

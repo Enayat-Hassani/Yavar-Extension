@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseDiff, changeBlocks, changeWalkPrompt, parseChangeWalk, changePack } from '../src/utils/changes.js';
+import { parseDiff, changeBlocks, changeWalkPrompt, parseChangeWalk, changePack, diffRows } from '../src/utils/changes.js';
 
 const DIFF = `diff --git a/src/app.js b/src/app.js
 index 111..222 100644
@@ -70,7 +70,46 @@ test('one part per hunk; noise is skipped; removals point at where they were', (
     [4, 'old.txt', null, null, 0, 2]       // deleted file: nothing to show in the reader
   ]);
   assert.equal(blocks[3].removedText, 'gone\ntoo');
-  assert.match(blocks[0].diff, /^@@ -10 \+10 @@ function start\(\) \{\n const a = 1;\n-const b = 2;\n\+const b = 3;/);
+  // Numbered: after the change, and a removed line by its number before it
+  assert.match(blocks[0].diff, /^@@ -10 \+10 @@ function start\(\) \{\n   10 \| const a = 1;\n-  11 \| const b = 2;\n\+  11 \| const b = 3;/);
+});
+
+test('the reader gets the added lines and where each removed line sits', () => {
+  const { blocks } = changeBlocks(parseDiff(DIFF));
+  assert.deepEqual(blocks.map(b => [b.add, b.del]), [
+    [[11, 12], [[11, 11, 'const b = 2;']]],        // above the line that replaced it
+    [[], [[42, 41, "log('stopped');"]]],           // above the next line still there
+    [[1, 2], []],
+    [[], []]                                         // deleted file: nothing in the reader
+  ]);
+  const onlyRemoves = `diff --git a/f.js b/f.js
+--- a/f.js
++++ b/f.js
+@@ -5,2 +4,0 @@
+-a
+-b
+`;
+  // Git's "+4,0": the lines went after line 4, so they sit above line 5
+  assert.deepEqual(changeBlocks(parseDiff(onlyRemoves)).blocks[0].del, [[5, 5, 'a'], [5, 6, 'b']]);
+});
+
+const big = (tail) => `diff --git a/big.js b/big.js
+--- a/big.js
++++ b/big.js
+@@ -1,2 +1,${20 + tail.filter(t => t[0] !== '-').length} @@
+${Array.from({ length: 20 }, (_, k) => `+a${k + 1}`).join('\n')}
+${tail.join('\n')}
+`;
+
+test('a big hunk is split at an unchanged line after about 20 changes', () => {
+  const { blocks } = changeBlocks(parseDiff(big([' c1', '+b1', '+b2', ' c2'])));
+  assert.deepEqual(blocks.map(b => [b.start, b.end, b.added]), [[1, 20, 20], [22, 23, 2]]);
+  assert.match(blocks[1].diff, /^@@ -1 \+21 @@\n   21 \| c1\n\+  22 \| b1/);
+});
+
+test('a split never leaves a part with only unchanged lines', () => {
+  const { blocks } = changeBlocks(parseDiff(big([' c1', ' c2'])));
+  assert.deepEqual(blocks.map(b => [b.start, b.end, b.added]), [[1, 20, 20]]);
 });
 
 test('over the cap, the busiest file is joined into one part', () => {
@@ -99,4 +138,11 @@ test('the prompt and pack name the parts and what was left out', () => {
   const pack = changePack(blocks, 'commit abc1234');
   assert.match(pack, /## Part 1 · `src\/app\.js` \(modified\), lines 11-12 after the change\n\n```diff\n@@/);
   assert.match(pack, /## Part 4 · `old\.txt` \(deleted\)\n/);
+});
+
+test('the reader rows put removed lines back where they were', () => {
+  const rows = diffRows(4, [2], [[2, 2, 'old two'], [9, 7, 'old end']]);
+  assert.deepEqual(rows.map(r => r.kind === 'del' ? `-${r.old} ${r.text}` : `${r.kind === 'add' ? '+' : ' '}${r.n}`), [
+    ' 1', '-2 old two', '+2', ' 3', ' 4', '-7 old end'
+  ]);
 });

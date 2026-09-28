@@ -1430,7 +1430,7 @@ class YavarSidePanel {
   // is highlighted (a walkthrough block). When several calls race (Next
   // clicked quickly), only the latest is shown. A local file carries its
   // walk's storage key, so an edit saved in the reader can move the walk.
-  async openRepoFile({ source = 'github', owner, repo, ref, path, lines = null, label = '' }) {
+  async openRepoFile({ source = 'github', owner, repo, ref, path, lines = null, label = '', diff = null }) {
     const seq = (this._readerSeq = (this._readerSeq || 0) + 1);
     try {
       const t = this.repoTree;
@@ -1442,7 +1442,7 @@ class YavarSidePanel {
       if (seq !== this._readerSeq) return;
       await chrome.storage.session.set({ readerView: {
         repo: { source, owner, repo, ref, name: owner ? `${owner}/${repo}` : repo },
-        path, content, lines, label, walkKey: source === 'local' ? this.walkKey(path) : null, ts: Date.now()
+        path, content, lines, label, diff, walkKey: source === 'local' ? this.walkKey(path) : null, ts: Date.now()
       } });
       await this.showReaderTab();
     } catch (e) {
@@ -2069,10 +2069,11 @@ class YavarSidePanel {
     const b = w?.blocks?.[w.current];
     if (!b) return;
     if (w.change) {
-      // The file as it is after the change, its new lines highlighted
+      // The file as it is after the change, with the part's diff drawn in it
+      // (a walk saved before parts kept their lines just highlights them)
       const { owner, repo, ref } = w.change;
       if (b.start) this.openRepoFile({ source: 'github', owner, repo, ref, path: b.path, lines: { start: b.start, end: b.end },
-        label: `Part ${w.current + 1} of ${w.blocks.length} · ${b.title}` });
+        label: `Part ${w.current + 1} of ${w.blocks.length} · ${b.title}`, diff: b.add ? { add: b.add, del: b.del } : null });
       return;
     }
     if (!this.repoTree) return;
@@ -2147,8 +2148,9 @@ class YavarSidePanel {
       (b.explain
         ? `<p class="wk-explain">${esc(b.explain)}</p>`
         : `<p class="wk-explain is-empty">The AI didn't explain ${change ? 'this part' : 'these lines'}. Ask with Explain more.</p>`) +
-      // The reader shows the file after the change; what was taken out is here
-      (change && b.removed ? `<details class="raw-reply wk-removed"${b.start ? '' : ' open'}><summary>${b.start ? 'What was removed' : 'The deleted lines'} (${b.removed} line${b.removed === 1 ? '' : 's'})</summary>` +
+      // The reader shows what was taken out, in place; a deleted file (or a
+      // walk saved before parts kept their lines) shows it here
+      (change && b.removed && (!b.start || !b.add) ? `<details class="raw-reply wk-removed"${b.start ? '' : ' open'}><summary>${b.start ? 'What was removed' : 'The deleted lines'} (${b.removed} line${b.removed === 1 ? '' : 's'})</summary>` +
         `<pre>${esc(b.removedText)}</pre></details>` : '') +
       `<div class="walk-type" hidden>` +
         `<div class="code-box" aria-label="Type lines ${b.start} to ${b.end}"></div>` +
@@ -2163,7 +2165,10 @@ class YavarSidePanel {
       `<div class="walk-next" aria-live="polite"></div>` +
       // Pinned to the bottom of the sheet, so answers never push them away
       `<div class="wk-dock">` + this.askBox('data-wk', 'Ask about these lines…',
+        (change ? `<button type="button" class="run-ask" data-wk="lines">Line by line</button>` : '') +
         `<button type="button" class="run-ask" data-wk="more">Explain more</button>` +
+        (change ? `<button type="button" class="run-ask" data-wk="bugs">Find bugs</button>` +
+          `<button type="button" class="run-ask" data-wk="tests">How to test it</button>` : '') +
         `<button type="button" class="run-ask" data-wk="quiz">Quiz me</button>` +
         (!change || b.added ? `<button type="button" class="run-ask" data-wk="type" aria-expanded="false">${change ? 'Write it yourself' : 'Practise typing'}${best != null ? ` · best ${best}%` : ''}</button>` : '')) +
       `</div>`;
@@ -2174,6 +2179,16 @@ class YavarSidePanel {
     notes.forEach((note, k) => this.renderWalkNote(notesEl, note, k < notes.length - 1));
 
     this._walkCode = null;   // the practice editor is made when practice opens
+    this.autoLines();
+  }
+
+  // A part of a change is explained line by line as soon as it opens, unless
+  // it has been already or the chat is busy (then Line by line asks for it)
+  autoLines() {
+    const w = this.walk;
+    if (!w?.change || !w.blocks || w.notes?.[w.current]?.length || this._panelAsk) return;
+    if (this.walkPanel.classList.contains('hidden') || this.walkView !== 'file') return;
+    this.walkBody.querySelector('[data-wk="lines"]:not(:disabled)')?.click();
   }
 
   async onWalkClick(e) {
@@ -2263,16 +2278,33 @@ class YavarSidePanel {
       }
       return;
     }
-    if (act !== 'more' && act !== 'quiz' && act !== 'feedback' && act !== 'ask') return;
+    if (!['more', 'lines', 'bugs', 'tests', 'quiz', 'feedback', 'ask'].includes(act)) return;
 
     const notesEl = this.walkBody.querySelector('.walk-notes');
     let prompt;
     let label;
-    if (act === 'more') {
+    if (act === 'lines') {
+      label = 'Line by line';
+      prompt = `I'm reading ${where}, part by part. Go through the changed lines of this part in order. ` +
+        `For each changed line, or a few lines that belong together, start with the line number(s) in bold, ` +
+        `then say what it did before, what it does now, and why. Put changes that are only formatting or renaming ` +
+        `into one item, and skip unchanged lines. A short list, one or two sentences an item. ${whole}\n\n${block}`;
+    } else if (act === 'bugs') {
+      label = 'Find bugs';
+      prompt = `Review the new code in ${where} for bugs: logic errors, edge cases (empty, missing, zero, very large, ` +
+        `at the same time), missing error handling, security problems, and anything that breaks code that calls it. ` +
+        `For each problem give the line number, what goes wrong, a concrete case that shows it, and a fix. ` +
+        `If a problem depends on code not shown here, say what to check. If there is nothing real, say so plainly ` +
+        `and name what you checked; don't invent problems. ${whole}\n\n${block}`;
+    } else if (act === 'tests') {
+      label = 'How to test it';
+      prompt = `How would I check that ${where} works? List the cases worth testing, edge cases included, and for each ` +
+        `what to do and what should happen. Say which ones an automated test should cover. Keep it short. ${whole}\n\n${block}`;
+    } else if (act === 'more') {
       label = 'Explain more';
       prompt = c
-        ? `I'm reading ${where}, part by part. Explain this part in more depth: what each changed line does, ` +
-          `what was there before, and why the change was needed. ${whole}\n\n${block}${cite}`
+        ? `I'm reading ${where}, part by part. Explain this part in more depth: the idea behind it, how it fits ` +
+          `with the rest of the change, and anything a reader could easily miss. ${whole}\n\n${block}${cite}`
         : `I'm walking through ${where}, block by block. Explain this block in more depth, line by line: ` +
           `what each line does and why, and anything that would surprise a beginner. ${whole}\n\n${block}${cite}`;
     } else if (act === 'ask') {
@@ -2318,6 +2350,8 @@ class YavarSidePanel {
       }
     } finally {
       el.disabled = false;
+      // Moved on while this was answered: the part now open gets its turn
+      if (c && this.walk?.key === w.key && this.walk.current !== i) this.autoLines();
     }
   }
 
