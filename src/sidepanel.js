@@ -9,11 +9,11 @@ import { journeyPrompt, parseJourney, nextCandidates, nextPrompt, parseNext, con
 import { parseDiff, changeBlocks, changePack, partContext, partTitle, orderParts, linesBatch, linesPrompt, splitParts } from './utils/changes.js';
 import { DEFAULT_MODELS, loadModels as loadStoredModels } from './utils/models.js';
 import { captureLabel, captureMarkdown, hasCaptureText } from './utils/capture.js';
-import { suggestActions } from './utils/actions.js';
+import { suggestActions, actionPrompt } from './utils/actions.js';
 import { coachSteps, loadCoach, coachPrompt } from './utils/coach.js';
 import { materialFile, addToMorfia } from './utils/material.js';
 import { gitRepo, workingDiff, ignoreRules, blobSha } from './utils/git.js';
-import { REVIEW_KEY, reviewText, loadReview } from './utils/review.js';
+import { PROMPTS_KEY, intentText, loadEdits } from './utils/intents.js';
 import { icon } from './utils/icons.js';
 import { idbGet, idbSet } from './utils/idb.js';
 import { transcriptMarkdown, turnsToMessages, HANDOFF_NOTE, earlierAnswers } from './utils/conversation.js';
@@ -121,7 +121,7 @@ class YavarSidePanel {
       const wanted = currentModelId || settings?.defaultAI;
       this.answerWith = settings?.answerWith === 'api' ? 'api' : 'chat';
       this._coachOn = !!settings?.ieltsCoach;
-      loadReview().then(r => { this._reviewEdits = r; }).catch(() => {});
+      loadEdits().then(r => { this._promptEdits = r; }).catch(() => {});
       idbGet('reviewFolder').then(h => { if (h) { this._reviewFolder = h; this.renderHome(); } }).catch(() => {});
       this._morfiaOn = !!settings?.morfia;
       if (wanted && this.models.some(m => m.id === wanted)) {
@@ -1760,7 +1760,7 @@ class YavarSidePanel {
         const title = 'About ' + name;
         await this.showAnswerIn(this.rebuildBody.querySelector('.rebuild-mentor'), title,
           `The attached "${fname}" is \`${path}\` from ${this.repoDisplayName()}. I am rebuilding this project step by step ` +
-          `and am on the step "${st.plan.steps[i].title}". ${readingPrompt('explain', { what: `\`${path}\``, repo: this.repoDisplayName() })}\n\n` +
+          `and am on the step "${st.plan.steps[i].title}". ${readingPrompt('explain', { what: `\`${path}\``, repo: this.repoDisplayName() }, this._promptEdits)}\n\n` +
           'Point out the parts that matter for this step. Do not write the step for me.', {
             attachments: [{ filename: fname, content: this.packFor([file]) }],
             via: 'chat', inline: true,
@@ -2377,20 +2377,19 @@ class YavarSidePanel {
       lineNums = linesBatch(w.blocks, i, k => !!w.notes?.[k]?.length).map(k => k + 1);
       const first = !!w.fname && !w.summary && !Object.keys(w.notes || {}).length;
       prompt = linesPrompt({ blocks: w.blocks, nums: lineNums, what: w.what || c.label.toLowerCase(), repo, title: c.title,
-        fname: first ? w.fname : '', skipped: w.skipped || [], howTo: reviewText(this._reviewEdits, 'lines') });
+        fname: first ? w.fname : '', skipped: w.skipped || [], edits: this._promptEdits });
       if (first) attachments = [{ filename: w.fname, content: changePack(w.blocks, w.what) }];
     } else if (['bugs', 'better', 'tests'].includes(act)) {
       label = { bugs: 'Find bugs', better: 'Better ways', tests: 'How to test it' }[act];
       // In a change, the question is about what it adds or changes
-      prompt = `I'm reading ${where}${c ? '; look at the code it adds or changes' : ''}. ${reviewText(this._reviewEdits, act)} ${whole}\n\n${block}${cite}`;
+      prompt = `I'm reading ${where}${c ? '; look at the code it adds or changes' : ''}. ${intentText(this._promptEdits, act)} ${whole}\n\n${block}${cite}`;
     } else if (act === 'more') {
       // A file's block is explained up front, so here it goes line by line
       label = c ? 'Explain more' : 'Line by line';
       prompt = c
         ? `I'm reading ${where}, part by part. Explain this part in more depth: the idea behind it, how it fits ` +
           `with the rest of the change, and anything a reader could easily miss. ${whole}\n\n${block}${cite}`
-        : `I'm walking through ${where}, block by block. Explain this block in more depth, line by line: ` +
-          `what each line does and why, and anything that would surprise a beginner. ${whole}\n\n${block}${cite}`;
+        : `I'm walking through ${where}, block by block. ${intentText(this._promptEdits, 'lines')} ${whole}\n\n${block}${cite}`;
     } else if (act === 'ask') {
       const q = this.takeQuestion(this.walkBody);
       if (!q) return;
@@ -3353,7 +3352,7 @@ class YavarSidePanel {
       const what = single
         ? (single.lines ? `lines ${single.lines.start}-${single.lines.end} of \`${single.path}\`` : `\`${single.path}\``)
         : `these ${files.length} files`;
-      let question = readingPrompt(mode, { what, repo: repoName });
+      let question = readingPrompt(mode, { what, repo: repoName }, this._promptEdits);
       const totalChars = files.reduce((n, f) => n + f.content.length, 0);
 
       const modeLabel = READ_MODES.find(m => m.id === mode)?.label || 'Explain';
@@ -4381,7 +4380,7 @@ class YavarSidePanel {
       if (action) {
         const what = items.length === 1 ? items[0].what : `these ${items.length} attachments`;
         const repo = items.find(it => it.repo)?.repo || '';
-        const ask = action.readMode ? readingPrompt(action.readMode, { what, repo }) : action.prompt;
+        const ask = action.readMode ? readingPrompt(action.readMode, { what, repo }, this._promptEdits) : actionPrompt(action, this._promptEdits);
         prompt = `${intro}\n\n${ask}${text ? `\n\nAlso: ${text}` : ''}`;
         label = action.label + (text ? `: ${text}` : '');
       } else {
@@ -4762,7 +4761,7 @@ class YavarSidePanel {
   setupStorageListener() {
     chrome.storage.onChanged.addListener((changes, areaName) => {
       if (areaName === 'sync' && changes.promptTemplates) this.loadPromptTemplates();
-      if (areaName === 'sync' && changes[REVIEW_KEY]) this._reviewEdits = changes[REVIEW_KEY].newValue || {};
+      if (areaName === 'sync' && changes[PROMPTS_KEY]) this._promptEdits = changes[PROMPTS_KEY].newValue || {};
       if (areaName === 'session' && changes.readerNav?.newValue) this.stepWalk(changes.readerNav.newValue.dir);
       if (areaName === 'sync' && changes.aiModels) this.onModelsChanged(changes.aiModels.newValue);
       if (areaName === 'sync' && changes.settings) {

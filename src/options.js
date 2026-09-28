@@ -3,7 +3,7 @@
 import { loadTemplates, saveTemplates, DEFAULT_TEMPLATES } from './utils/templates.js';
 import { loadModels } from './utils/models.js';
 import { COACH_KEY, coachSteps, lacksAttempt, loadCoach } from './utils/coach.js';
-import { REVIEW_KEY, reviewSteps, loadReview } from './utils/review.js';
+import { PROMPTS_KEY, editableIntents, loadEdits } from './utils/intents.js';
 import { pingMorfia } from './utils/material.js';
 import { OPENROUTER_BASE, DEFAULT_MONTHLY_CAP, isFreeModel, loadApiConfig, buildRoute, askWithBudget, loadSpend, spentThisMonth } from './utils/llm.js';
 
@@ -57,7 +57,7 @@ class OptionsPage {
     this.renderTemplates();
     this.coach = await loadCoach();
     this.renderCoach();
-    this.review = await loadReview();
+    this.review = await loadEdits();
     this.renderReview();
     this.showPage();
     window.addEventListener('hashchange', () => this.showPage());
@@ -564,7 +564,7 @@ class OptionsPage {
       }
 
       if (parsed.yavarExport && parsed.review && typeof parsed.review === 'object') {
-        this.review = Object.fromEntries(reviewSteps().map(s => [s.id, parsed.review[s.id]])
+        this.review = Object.fromEntries(editableIntents().map(s => [s.id, parsed.review[s.id]])
           .filter(([, body]) => typeof body === 'string' && body.trim()));
         await this.persistReview();
         this.renderReview();
@@ -707,11 +707,11 @@ class OptionsPage {
     fitVisible();
   }
 
-  // ===== Reviewing changes =====
-  // Only edited prompts are stored, as with the coach's steps
+  // ===== Reading code =====
+  // The code-reading intents; only edited ones are stored, as with the coach's steps
   renderReview() {
     if (!this.reviewList) return;
-    this.reviewList.innerHTML = reviewSteps(this.review).map(s => `
+    this.reviewList.innerHTML = editableIntents(this.review).map(s => `
       <div class="template-card">
         <div class="template-row">
           <span class="coach-step-name">${this.escapeHtml(s.name)}</span>
@@ -727,7 +727,7 @@ class OptionsPage {
     if (!el) return;
     fitHeight(el);
     const id = el.dataset.review;
-    const def = reviewSteps().find(s => s.id === id).body;
+    const def = editableIntents().find(s => s.id === id).body;
     if (el.value.trim() && el.value !== def) this.review[id] = el.value;
     else delete this.review[id];
     el.closest('.template-card').querySelector('[data-reset-review]').hidden = !this.review[id];
@@ -739,10 +739,10 @@ class OptionsPage {
     return new Promise((resolve) => {
       this._reviewTimer = setTimeout(async () => {
         try {
-          await chrome.storage.sync.set({ [REVIEW_KEY]: this.review });
+          await chrome.storage.sync.set({ [PROMPTS_KEY]: this.review });
         } catch (error) {
-          console.error('[Yavar] Failed to save the review prompts:', error);
-          this.showToast('Could not save the review prompts', true);
+          console.error('[Yavar] Failed to save the prompts:', error);
+          this.showToast('Could not save the prompts', true);
         }
         resolve();
       }, 400);

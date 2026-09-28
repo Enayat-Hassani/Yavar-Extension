@@ -4,7 +4,10 @@
 // by line, a few small parts to a message, and the reader shows each part as
 // a diff inside the file as it is after the change. Pure functions (tested).
 
-import { REVIEW_STEPS } from './review.js';
+import { intentText } from './intents.js';
+
+// What Line by line adds for a change, whatever the intent's wording
+const CHANGED = 'For a changed line, say what it did before and what it does now, and why. Put changes that are only formatting or renaming into one item, and skip unchanged lines.';
 
 // A unified diff (git's) as files with their hunks. Each hunk line is
 // { type: '+' | '-' | ' ', text, old?, new? } with its line numbers.
@@ -194,14 +197,14 @@ export function changePack(blocks, what) {
 
 // Line by line, for the parts `nums` (1-based) of the walk. The first
 // message also carries the whole diff and opens with what the change does.
-export function linesPrompt({ blocks, nums, what, repo, title = '', fname = '', skipped = [], howTo = REVIEW_STEPS[0].body }) {
+export function linesPrompt({ blocks, nums, what, repo, title = '', fname = '', skipped = [], edits = {} }) {
   const head = fname
     ? `The attached "${fname}" is the whole diff of ${what} in ${repo}${title ? ` ("${title}")` : ''}, in ${blocks.length} numbered parts` +
       `${skipped.length ? ` (left out: ${skipped.length} lockfile, generated or binary file${skipped.length === 1 ? '' : 's'})` : ''}. ` +
       `I'm reading it part by part. Begin with two or three sentences on what the change does as a whole and why. Then go through the parts below.`
     : `I'm reading ${what} in ${repo}${title ? ` ("${title}")` : ''} part by part. Go through the parts below.`;
   return `${head}\n\n` +
-    `Put each part under a heading "### Part N". Under it: ${howTo} ${NUMBERS_NOTE}\n\n` +
+    `Put each part under a heading "### Part N". Under it: ${intentText(edits, 'lines')} ${CHANGED} ${NUMBERS_NOTE}\n\n` +
     nums.map(n => `### Part ${n} · ${where(blocks[n - 1])}\n\n\`\`\`diff\n${blocks[n - 1].diff}\n\`\`\``).join('\n\n');
 }
 

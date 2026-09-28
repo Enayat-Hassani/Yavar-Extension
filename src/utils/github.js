@@ -2,6 +2,8 @@
 // resolution, reading order and "pack" building. Pure functions (no chrome.*,
 // no fetch) so they can be unit-tested; network code lives in the side panel.
 
+import { intentText } from './intents.js';
+
 const RESERVED_OWNERS = new Set(['settings', 'notifications', 'orgs', 'features', 'marketplace',
   'explore', 'topics', 'sponsors', 'about', 'pricing', 'enterprise', 'login', 'join', 'search',
   'new', 'codespaces', 'apps', 'collections', 'events', 'trending', 'dashboard', 'pulls', 'issues']);
@@ -273,7 +275,8 @@ export const READ_MODES = [
   { id: 'explain', label: 'Explain', hint: 'What it does and how it works' },
   { id: 'lines',   label: 'Line by line', hint: 'Walk through the code slowly' },
   { id: 'fit',     label: 'How it fits', hint: 'Its role in the whole repo' },
-  { id: 'review',  label: 'Review', hint: 'Bugs, risks, improvements' },
+  { id: 'bugs',    label: 'Find bugs', hint: 'Bugs, risks, edge cases' },
+  { id: 'better',  label: 'Better ways', hint: 'Simpler or safer alternatives' },
   { id: 'quiz',    label: 'Quiz me', hint: 'Test your understanding' },
   { id: 'add',     label: 'Just add', hint: 'Attach without a question' }
 ];
@@ -283,28 +286,11 @@ export const READ_MODES = [
 export const CITE_RULE = 'When you refer to code, cite it as `path/to/file.ext:START-END` in backticks, ' +
   'using the full path from the repository and the line numbers shown in the code.';
 
-export function readingPrompt(mode, { what, repo }) {
-  const prompt = modePrompt(mode, what, repo ? ` from the ${repo} repository` : '');
-  return prompt && `${prompt}\n\n${CITE_RULE}`;
-}
-
-function modePrompt(mode, what, where) {
-  switch (mode) {
-    case 'explain':
-      return `I'm learning from ${what}${where}. Explain it for someone reading this codebase for the first time:\n` +
-        `1. A 2-3 sentence summary of its purpose.\n2. The key parts (functions, classes, data flow) and how they work together, citing names and line numbers.\n` +
-        `3. Any patterns or techniques worth learning, and unfamiliar terms defined simply.\n4. End with 2 short questions that check my understanding.`;
-    case 'lines':
-      return `Walk me through ${what}${where} step by step, in order. Group lines into small blocks, quote each block briefly, and explain what it does and why. Point out anything clever, surprising, or error-prone.`;
-    case 'fit':
-      return `Explain how ${what}${where} fits into the rest of the project: what calls it, what it depends on, and where data comes from and goes. Use the repository map to name the related files, and suggest which file I should read next and why.`;
-    case 'review':
-      return `Review ${what}${where} like a senior engineer mentoring a junior: likely bugs, edge cases, security or performance risks, and readability issues. For each, cite the line, explain the problem, and show a small fix. Also note what is done well.`;
-    case 'quiz':
-      return `Quiz me on ${what}${where}. Ask 5 questions, one at a time, from basic (what does X do) to deeper (why was it designed this way, what breaks if Y changes). Wait for my answer before giving feedback and the next question.`;
-    default:
-      return '';
-  }
+// A reading mode is an intent (utils/intents.js) asked about files, with
+// the user's edits; '' for "Just add"
+export function readingPrompt(mode, { what, repo }, edits = {}) {
+  if (!READ_MODES.some(m => m.id === mode && m.id !== 'add')) return '';
+  return `I'm reading ${what}${repo ? ` from the ${repo} repository` : ''}. ${intentText(edits, mode)}\n\n${CITE_RULE}`;
 }
 
 // Compact tree outline for the pack header: every directory that contains a

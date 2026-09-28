@@ -5,10 +5,11 @@
 // models are busy. The message box shows the actions as buttons; tapping
 // one sends it, with anything typed added as "Also: …".
 //
-// An action is { id, label, hint, prompt } or, for repo files, { id, label,
-// hint, readMode } (the reading prompts in github.js).
+// An action is { id, intent, label, hint, about } or, for repo files,
+// { id, label, hint, readMode } (the reading modes in github.js).
 
 import { READ_MODES } from './github.js';
+import { intentText } from './intents.js';
 
 const ERROR_RE = /(Traceback \(most recent call last\)|\b[A-Z]\w*(Error|Exception)\b\s*[:(]|\bUncaught\b|npm ERR!|Segmentation fault|exit(ed)? (with )?code [1-9]|\bFATAL\b|\bpanic:)/;
 const CODE_LINE = /(;\s*$|[{}]\s*$|=>|^\s*(def|class|import|from|return|const|let|var|function|if|for|while|public|private|#include|fn|func|package)\b|^\s*\w+\s*\(.*\)\s*;?\s*$)/;
@@ -36,49 +37,30 @@ export function itemKind(it) {
   return words(text) >= 25 ? 'prose' : 'short';
 }
 
+// Each action is an intent (utils/intents.js) asked about this kind of
+// attachment; `about` is the one line that fits the job to the subject
+const TABLE = 'It is a table: say what each column means and what stands out.';
+const ELEMENT = 'It is an element from a web page, with its HTML.';
+const act = (id, intent, label, hint, about = '') => ({ id, intent, label, hint, about });
 const ACTIONS = {
-  table: [
-    { id: 'explain', label: 'Explain', hint: 'What the table shows', prompt: 'Explain what this table shows: what each column means and what stands out.' },
-    { id: 'takeaways', label: 'Key takeaways', hint: 'The 3-5 points that matter', prompt: 'Give the 3-5 most important takeaways from this table, each with the numbers behind it.' },
-    { id: 'csv', label: 'As CSV', hint: 'Copyable data', prompt: 'Convert the table to CSV in a single code block, keeping every row and column exactly. No commentary.' }
-  ],
-  code: [
-    { id: 'explain', label: 'Explain', hint: 'What it does and how', prompt: 'Explain what this code does and how it works, step by step, for someone learning it.' },
-    { id: 'bugs', label: 'Find bugs', hint: 'Bugs, risks, edge cases', prompt: 'Review this code for bugs, risky edge cases and unclear parts. For each, say why it matters and show a fix.' },
-    { id: 'lines', label: 'Line by line', hint: 'Walk through it slowly', prompt: 'Walk through this code line by line, explaining what each line does and why.' }
-  ],
-  error: [
-    { id: 'why', label: 'Why this error?', hint: 'What it means and what causes it', prompt: 'Explain what this error means and the most likely causes, most likely first.' },
-    { id: 'fix', label: 'How do I fix it?', hint: 'Concrete steps', prompt: 'Tell me how to fix this error: concrete steps, with the exact commands or code changes.' }
-  ],
-  control: [
-    { id: 'broken', label: "Why isn't it working?", hint: 'From its HTML', prompt: "This is an element from a web page, with its HTML. List the likely reasons it isn't working as expected (disabled, hidden, validation, missing handler…) and how to check each." },
-    { id: 'explain', label: 'Explain', hint: 'What it is for', prompt: 'Explain what this page element is and what it does.' }
-  ],
-  prose: [
-    { id: 'summarize', label: 'Summarize', hint: 'The main point and key details', prompt: 'Summarize this: the main point in 2 sentences, then the key details as short bullets.' },
-    { id: 'simple', label: 'Explain simply', hint: 'Plain words', prompt: 'Explain this in plain, simple words, as if to a smart 15-year-old.' },
-    { id: 'vocab', label: 'Words to learn', hint: 'Vocabulary for an advanced learner', prompt: 'List 8-10 words or phrases from this text worth learning for an advanced English learner (IELTS level). For each: its meaning in simple words, the sentence it appears in, and one new example sentence.' }
-  ],
-  short: [
-    { id: 'explain', label: 'Explain', hint: 'What it means', prompt: 'Explain what this means, with the context needed to understand it.' },
-    { id: 'examples', label: 'Examples', hint: 'How it is used', prompt: 'Show how this is used, with 3 short, varied examples.' },
-    { id: 'translate', label: 'Translate', hint: 'Into natural English', prompt: 'Translate this into natural English. If it is already English, rephrase it more simply.' }
-  ],
-  image: [
-    { id: 'describe', label: 'Describe', hint: 'What the image shows', prompt: 'Describe what this screenshot shows and what matters in it.' },
-    { id: 'text', label: 'Read the text', hint: 'Transcribe it', prompt: 'Transcribe all the text in this screenshot exactly, keeping its structure.' }
-  ],
-  page: [
-    { id: 'summarize', label: 'Summarize', hint: 'The main point and key details', prompt: 'Summarize this: the main point in 2 sentences, then the key details as short bullets.' },
-    { id: 'questions', label: 'Questions to ask', hint: 'Check your understanding', prompt: 'Give me 5 questions that test whether I understood this, with short answers at the end.' },
-    { id: 'vocab', label: 'Words to learn', hint: 'Vocabulary for an advanced learner', prompt: 'List 8-10 words or phrases from this text worth learning for an advanced English learner (IELTS level). For each: its meaning in simple words, the sentence it appears in, and one new example sentence.' }
-  ],
-  several: [
-    { id: 'compare', label: 'Compare', hint: 'How they differ', prompt: 'Compare these attachments: what they have in common and where they differ.' },
-    { id: 'summarize', label: 'Summarize all', hint: 'One summary', prompt: 'Summarize these attachments together: the main points and how they relate.' }
-  ]
+  table: [act('explain', 'explain', 'Explain', 'What the table shows', TABLE), act('takeaways', 'takeaways', 'Key takeaways', 'The 3-5 points that matter'),
+    act('csv', 'csv', 'As CSV', 'Copyable data')],
+  code: [act('explain', 'explain', 'Explain', 'What it does and how'), act('bugs', 'bugs', 'Find bugs', 'Bugs, risks, edge cases'),
+    act('lines', 'lines', 'Line by line', 'Walk through it slowly')],
+  error: [act('why', 'why', 'Why this error?', 'What it means and what causes it'), act('fix', 'fix', 'How do I fix it?', 'Concrete steps')],
+  control: [act('broken', 'broken', "Why isn't it working?", 'From its HTML', ELEMENT), act('explain', 'explain', 'Explain', 'What it is for', ELEMENT)],
+  prose: [act('summarize', 'summarize', 'Summarize', 'The main point and key details'), act('simple', 'simple', 'Explain simply', 'Plain words'),
+    act('vocab', 'vocab', 'Words to learn', 'Vocabulary for an advanced learner')],
+  short: [act('explain', 'explain', 'Explain', 'What it means'), act('examples', 'examples', 'Examples', 'How it is used'),
+    act('translate', 'translate', 'Translate', 'Into natural English')],
+  image: [act('describe', 'describe', 'Describe', 'What the image shows'), act('text', 'transcribe', 'Read the text', 'Transcribe it')],
+  page: [act('summarize', 'summarize', 'Summarize', 'The main point and key details'), act('questions', 'questions', 'Questions to ask', 'Check your understanding'),
+    act('vocab', 'vocab', 'Words to learn', 'Vocabulary for an advanced learner')],
+  several: [act('compare', 'compare', 'Compare', 'How they differ'), act('summarize', 'summarizeAll', 'Summarize all', 'One summary')]
 };
+
+// What an action asks, with the user's edits to the intents
+export const actionPrompt = (action, edits) => [action.about, intentText(edits, action.intent)].filter(Boolean).join(' ');
 
 export function suggestActions(items) {
   if (!items?.length) return [];

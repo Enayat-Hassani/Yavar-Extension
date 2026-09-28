@@ -35,7 +35,7 @@ test('looksLikeCode needs most lines to read like code', () => {
 
 test('actions per kind; files keep the reading modes; several items get compare', () => {
   assert.deepEqual(ids([capture({ rows: [['a']] })]), ['explain', 'takeaways', 'csv']);
-  assert.deepEqual(ids([{ kind: 'files' }]), ['explain', 'lines', 'fit', 'review', 'quiz']);
+  assert.deepEqual(ids([{ kind: 'files' }]), ['explain', 'lines', 'fit', 'bugs', 'better', 'quiz']);
   assert.equal(suggestActions([{ kind: 'files' }])[0].readMode, 'explain');
   assert.deepEqual(ids([selection('ubiquitous'), capture({ rows: [['a']] })]), ['compare', 'summarize']);
   assert.deepEqual(ids([{ kind: 'page' }]), ['summarize', 'questions', 'vocab']);
