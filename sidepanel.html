@@ -36,7 +36,7 @@
     <!-- Notes Panel -->
     <div id="notes-panel" class="notes-panel sheet hidden">
       <div class="history-header">
-        <span class="history-title">Notes</span>
+        <div class="lib-tabs" role="tablist" aria-label="Library"><button type="button" role="tab" data-lib="answers" aria-selected="false">Saved answers</button><button type="button" role="tab" data-lib="notes" aria-selected="true">Notes</button></div>
         <div class="history-header-actions">
           <button id="btn-clear-notes" class="history-action-btn" title="Clear notes">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
@@ -53,15 +53,15 @@
       <div id="notes-editor"></div>
     </div>
 
-    <!-- History Panel (captured AI answers) -->
+    <!-- The Library: saved answers, and the notes tab below (one sheet, two tabs) -->
     <div id="history-panel" class="history-panel sheet hidden">
       <div class="history-header">
-        <span class="history-title">Saved Answers</span>
+        <div class="lib-tabs" role="tablist" aria-label="Library"><button type="button" role="tab" data-lib="answers" aria-selected="true">Saved answers</button><button type="button" role="tab" data-lib="notes" aria-selected="false">Notes</button></div>
         <div class="history-header-actions">
           <button id="btn-save-current" class="history-action-btn" title="Save the chat's latest answer (Ctrl+Shift+S)">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>
           </button>
-          <button id="btn-export-history" class="history-action-btn" title="Export saved answers (.md)">
+          <button id="btn-export-history" class="history-action-btn" title="Export saved answers and notes (.md)">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
           </button>
           <button id="btn-clear-history" class="history-action-btn" title="Clear all">

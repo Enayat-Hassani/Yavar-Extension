@@ -29,6 +29,9 @@ export class NotesPart {
   toggleNotes() {
     this.notesOpen = !this.notesOpen;
     if (this.notesOpen) {
+      // Notes are the Library's second tab: the answers tab steps aside
+      this._libTab = 'notes';
+      this.historyPanel?.classList.add('hidden');
       this.notesPanel.classList.remove('hidden');
       this.loadNotes();
       this.cmEditor.refresh();

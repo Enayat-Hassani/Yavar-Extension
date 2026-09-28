@@ -44,13 +44,23 @@ export class HistoryPart {
   }
 
   toggleHistory() {
-    if (this.historyPanel.classList.contains('hidden')) {
-      this.renderHistory();
-      this.historyPanel.classList.remove('hidden');
-      this.historySearch.focus();
-    } else {
+    if (this.historyPanel.classList.contains('hidden')) this.openLibrary('answers');
+    else this.historyPanel.classList.add('hidden');
+  }
+
+  // The Library: saved answers and notes, one sheet with two tabs. It opens
+  // on the tab used last; `tab` picks one.
+  openLibrary(tab = this._libTab || 'answers') {
+    this._libTab = tab;
+    if (tab === 'notes') {
       this.historyPanel.classList.add('hidden');
+      if (!this.notesOpen) this.toggleNotes();
+      return;
     }
+    if (this.notesOpen) this.toggleNotes();
+    this.renderHistory();
+    this.historyPanel.classList.remove('hidden');
+    this.historySearch.focus();
   }
 
   async renderHistory() {
@@ -146,10 +156,13 @@ export class HistoryPart {
     this.showNotification('📝 Added to notes');
   }
 
+  // Everything in the Library as one Markdown file: the saved answers, then the notes
   async exportHistory() {
     const history = await this.getHistory();
-    if (!history.length) {
-      this.showNotification('No saved answers to export');
+    let notes = '';
+    try { notes = ((await chrome.storage.local.get('yavarNotes')).yavarNotes || '').trim(); } catch (e) { /* no notes */ }
+    if (!history.length && !notes) {
+      this.showNotification('Nothing in the Library to export yet');
       return;
     }
     const blocks = history.map(e => {
@@ -158,9 +171,9 @@ export class HistoryPart {
       const prompt = e.prompt ? `\n\n**Prompt:**\n\n${e.prompt}` : '';
       return `${head}${src}${prompt}\n\n**Answer:**\n\n${e.answer || ''}`;
     });
-    const md = `# Yavar saved answers\n\nExported ${new Date().toLocaleString()} · ${history.length} answer(s)\n\n---\n\n` +
-      blocks.join('\n\n---\n\n') + '\n';
-    this.downloadText(`yavar-answers-${this.fileDateStamp()}.md`, md);
-    this.showNotification(`⬇️ Exported ${history.length} answer(s)`);
+    const md = `# Yavar Library\n\nExported ${new Date().toLocaleString()} · ${history.length} answer(s)${notes ? ' and your notes' : ''}\n\n---\n\n` +
+      blocks.join('\n\n---\n\n') + (notes ? `${blocks.length ? '\n\n---\n\n' : ''}# Notes\n\n${notes}` : '') + '\n';
+    this.downloadText(`yavar-library-${this.fileDateStamp()}.md`, md);
+    this.showNotification(`⬇️ Exported ${history.length} answer(s)${notes ? ' and your notes' : ''}`);
   }
 }

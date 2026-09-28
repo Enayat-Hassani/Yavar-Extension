@@ -8,7 +8,7 @@ A Chrome extension that embeds ChatGPT, Claude, and Gemini in a sidebar — so y
 
 **The Yavar view**: Yavar opens as a full-page app. The chat (ChatGPT, Claude or Gemini) keeps running behind it; the chat button in the header shows it, and **‹ Yavar** brings you back.
 
-- **Header:** the model pill switches models; the new model picks up the conversation (API models get the earlier turns as their own, a chat site gets them as an attached `conversation-so-far.md`, newest turns first if it's long), and *Ask* on an API answer passes them on too, the pencil starts a new conversation, and **⋯** holds saved answers, notes, *Continue in a fresh chat* and settings.
+- **Header:** the model pill switches models; the new model picks up the conversation (API models get the earlier turns as their own, a chat site gets them as an attached `conversation-so-far.md`, newest turns first if it's long), and *Ask* on an API answer passes them on too, the pencil starts a new conversation, and **⋯** holds the Library (saved answers and notes), *Continue in a fresh chat* and settings.
 - **Start page:** actions for the tab you're on. On GitHub: *Read <file>* on a file page, *Read this commit* or *Read pull request #N* on those pages, *Read this repository* and *Recent changes*. On other pages: *Summarize*, *Ask about it*. With no page open: *Read a project folder*.
 - **Composer:** type to the model, or press **+** to add the file open in your tab, **files from the repository** or **a folder**, **this page** (on YouTube, the video's transcript), or a **screenshot**: click an element on the page, or drag an area (↑ widens a click to the element around it, ✓ or Enter takes it). Along with the picture, Yavar sends what's in it as Markdown: text, a table as a table, links, image descriptions, the heading above it, and the HTML of a control or form. Each attachment chip shows its size in tokens, and the message box offers one-tap actions that fit what's attached: a table gets *Explain / Key takeaways / As CSV*, code *Explain / Find bugs / Line by line*, an error *Why this error? / How do I fix it?*, a paragraph *Summarize / Explain simply / Words to learn*. **Use a prompt** wraps what you typed in one of your templates. With files attached, one tap asks for *Explain*, *Line by line*, *How it fits*, *Find bugs*, *Better ways* or *Quiz me*.
 - **Selections, pages and screenshots from outside the panel** (the floating menu, the right-click menu, the shortcuts) arrive in the composer. A floating-menu prompt is sent at once if *Settings → Send floating-menu prompts right away* is on; otherwise it waits in the message box.
@@ -48,13 +48,9 @@ When a walkthrough, reading map or plan comes back in a form Yavar can't read, i
 
 **Model APIs**: choose **API** in the model menu to answer through model APIs instead of a chat site. Yavar tries a local OpenAI-compatible gateway first (OmniRoute, Ollama), then the OpenRouter free models you tick in *Settings → Model APIs*, then one paid model if you set one. A model that is busy, rate-limited or silent is skipped, and each answer names the model that wrote it. The paid model has a monthly limit ($3 by default): a paid answer shows what it cost, Settings shows this month's total, and at the limit Yavar uses only the free models until the next month. Keys stay on this device.
 
-**Sheets**: reading, notes and saved answers each fill the panel. ✕ or Esc goes back to the Yavar view.
+**Sheets**: reading and the Library each fill the panel. ✕ or Esc goes back to the Yavar view.
 
-**History & saved answers** — capture the AI's last answer and keep it in a searchable saved-answers panel. Answers saved while reading a repo are tagged with it (click the tag to see everything about that repo). The **+** in the panel's header saves the chat's latest answer. Expand, copy, send to Notes, or **export everything as Markdown**.
-
-**Continue in a fresh chat** — long chats get slow and hit free-plan limits. *Continue in a fresh chat* in **⋯** asks the AI for a handoff note, starts a new conversation, and attaches the note to your next message so the new chat picks up where you left off. The note is also kept in Saved answers.
-
-**Notes panel** — a built-in CodeMirror-powered scratchpad inside the sidebar, toggled with the notes shortcut. Download it as a `.md` file anytime.
+**Library** — one place for what you keep, with two tabs. *Saved answers*: capture the AI's last answer and keep it, searchable; answers saved while reading a repo are tagged with it (click the tag to see everything about that repo), and the **+** in its header saves the chat's latest answer. *Notes*: a scratchpad for your own words, which the notes shortcut opens and **→ Notes** on any answer adds to. The export button writes the whole Library, answers and notes, to one Markdown file.
 
 **Light & dark** — the sidebar and Settings follow your OS theme, matching the chat sites.
 

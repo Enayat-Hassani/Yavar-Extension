@@ -238,6 +238,13 @@ class YavarSidePanel {
 
     // History panel buttons
     this.btnCloseHistory.addEventListener('click', () => this.historyPanel.classList.add('hidden'));
+    // The Library's two tabs, in the header of each
+    for (const sheet of [this.historyPanel, this.notesPanel]) {
+      sheet.addEventListener('click', (e) => {
+        const tab = e.target.closest('[data-lib]')?.dataset.lib;
+        if (tab) this.openLibrary(tab);
+      });
+    }
     this.historyPanel.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') this.historyPanel.classList.add('hidden');
     });
@@ -399,8 +406,7 @@ class YavarSidePanel {
       ...repoItems,
       { id: 'read_folder', icon: icon('folder'), name: 'Read a project folder', desc: 'A project on this computer', divider: repoItems.length > 0 },
       { id: 'review_changes', icon: icon('diff'), name: 'Review my changes', desc: 'Before you commit or push' },
-      { id: 'history', icon: icon('bookmark'), name: 'Saved answers', desc: 'Everything you saved, searchable', divider: true },
-      { id: 'notes', icon: icon('note'), name: 'Notes', desc: 'Your scratchpad' },
+      { id: 'library', icon: icon('bookmark'), name: 'Library', desc: 'Your saved answers and notes', divider: true },
       ...(this._morfiaOn && this._tabCtx?.usable && !this._tabCtx.video
         ? [{ id: 'save_morfia', icon: icon('forward'), name: 'Add to Morfia', desc: 'Add this article to your Morfia library' }] : []),
       { id: 'carry_over', icon: icon('forward'), name: 'Continue in a fresh chat', desc: 'Summarize this chat into a new one', divider: true },
@@ -480,7 +486,8 @@ class YavarSidePanel {
       read_folder: () => this.openJourney({ folder: true }),
       review_changes: () => this.startReview(),
       review_last: () => this.reviewLast(),
-      history: () => this.toggleHistory(),
+      library: () => this.openLibrary(),
+      history: () => this.openLibrary('answers'),
       notes: () => this.toggleNotes(),
       settings: () => chrome.runtime.openOptionsPage(),
       manage_models: () => chrome.runtime.openOptionsPage(),
