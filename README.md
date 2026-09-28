@@ -164,9 +164,10 @@ This is a vanilla JavaScript (MV3) extension with no bundler. Edit source files,
 ```bash
 npm test          # unit tests (node:test, no install needed)
 npm run check     # manifest + referenced files + syntax
+npm run e2e       # browser journeys: Yavar in Chromium, real git repositories
 ```
 
-CI runs both on every push and pull request.
+The journeys in `tests/e2e/` need `npm install` and `npx playwright install chromium` once (or `YAVAR_E2E_CHROME` pointing at a Chromium). They stand in for the chat, which refuses headless browsers. CI runs all three on every push and pull request.
 
 - **Content scripts:** Browser DevTools → Console
 - **Background worker:** `chrome://extensions/` → "Inspect views: background page"

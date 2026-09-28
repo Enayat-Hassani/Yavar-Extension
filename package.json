@@ -11,6 +11,10 @@
   "scripts": {
     "test": "node --test",
     "check": "node scripts/check.mjs",
-    "ci": "npm run check && npm test"
+    "ci": "npm run check && npm test",
+    "e2e": "node --test --test-concurrency=1 \"tests/e2e/*.e2e.mjs\""
+  },
+  "devDependencies": {
+    "playwright": "^1.63.0"
   }
 }

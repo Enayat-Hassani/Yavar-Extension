@@ -148,3 +148,9 @@ test('a hunk is named after the declaration above it, as git does', () => {
   // At the top there is nothing above to name it after
   assert.match(fileDiff('f.js', before, 'import z from "y";' + before.slice(18)), /^@@ -1,\d+ \+1,\d+ @@$/m);
 });
+
+test('a hunk is named after the declaration above its first change, not an import above the hunk', () => {
+  const before = "import { x } from './x.js';\n\nexport function total(items) {\n  let sum = 0;\n  return sum;\n}\n";
+  const diff = fileDiff('f.js', before, before.replace('  return sum;', '  return sum * 2;'));
+  assert.match(diff, /^@@ -2,5 \+2,5 @@ export function total\(items\) \{$/m);
+});

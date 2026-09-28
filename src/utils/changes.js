@@ -154,10 +154,15 @@ export function changeBlocks(files, { max = 40 } = {}) {
 const where = (b) => `\`${b.path}\` (${b.status}${b.status === 'renamed' ? ` from \`${b.oldPath}\`` : ''})` +
   (b.start ? `, lines ${b.start}${b.end > b.start ? `-${b.end}` : ''} after the change` : '');
 
+// Lines that bring names in rather than declare them: never a part's name
+export const IMPORT_LINE = /^(import|from|export\s*\{|export\s*\*|#include|using|use|require|package)\b/;
+
 // The part's name in lists: the function or class it is in, as git shows
 // it above the hunk, else what happened to the file, else the file's name
 export function partTitle(b) {
-  const ctx = (b.context || '').trim()
+  // An import line (git's own hunk names can be one) says nothing about the part
+  const raw = (b.context || '').trim();
+  const ctx = (IMPORT_LINE.test(raw) ? '' : raw)
     .replace(/^(export\s+)?(default\s+)?(async\s+)?(def|function|fn|func)\s+/, '')
     .replace(/\s*[{:]\s*$/, '');
   if (ctx) return ctx.length > 48 ? ctx.slice(0, 47) + '…' : ctx;

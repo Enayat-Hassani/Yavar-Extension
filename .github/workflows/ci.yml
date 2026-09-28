@@ -19,3 +19,18 @@ jobs:
         run: npm run check
       - name: Unit tests
         run: npm test
+
+  e2e:
+    # Yavar loaded as an extension in Chromium, reading real git repositories
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Chromium for the journeys
+        run: npx playwright install --with-deps chromium
+      - name: Browser journeys
+        run: npm run e2e

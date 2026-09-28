@@ -124,6 +124,7 @@ test('a part is named after its function, else what happened to the file', () =>
   assert.equal(partTitle({ context: 'export default async function load(url, { retries = 3, timeout = 5000, signal } = {}) {', path: 'a.js' }),
     'load(url, { retries = 3, timeout = 5000, signal…');
   assert.equal(partTitle({ context: 'class Cart:', path: 'cart.py' }), 'class Cart');
+  assert.equal(partTitle({ context: "import { withTax } from './tax.js';", status: 'modified', path: 'src/cart.js' }), 'cart.js');
   assert.equal(partTitle({ context: '', status: 'modified', path: 'src/app.js' }), 'app.js');
 });
 
