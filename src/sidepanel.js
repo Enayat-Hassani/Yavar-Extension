@@ -6,7 +6,7 @@ import { renderMarkdown } from './utils/markdown.js';
 import { walkPrompt, parseWalkthrough, compareTyped, quizPrompt, parseQuiz } from './utils/walkthrough.js';
 import { cmModeFor, defineGenericMode, closeBracketKeys } from './utils/codeEditor.js';
 import { journeyPrompt, parseJourney, nextCandidates, nextPrompt, parseNext, connectionTree } from './utils/journey.js';
-import { parseDiff, changeBlocks, changePack, changeWalkPrompt, parseChangeWalk, partContext } from './utils/changes.js';
+import { parseDiff, changeBlocks, changePack, partContext, partTitle, orderParts, linesBatch, linesPrompt, splitParts } from './utils/changes.js';
 import { DEFAULT_MODELS, loadModels as loadStoredModels } from './utils/models.js';
 import { captureLabel, captureMarkdown, hasCaptureText } from './utils/capture.js';
 import { suggestActions } from './utils/actions.js';
@@ -2037,18 +2037,12 @@ class YavarSidePanel {
       const files = parseDiff(change.local ? await this.localDiff(change) : await this.fetchDiff({ owner, repo, kind, sha, number }));
       const { blocks, skipped } = changeBlocks(files);
       if (!blocks.length) throw new Error(files.length ? 'only lockfiles, generated or binary files changed' : 'the diff is empty');
+      // The parts are ready at once, in reading order and named after their
+      // functions; the chat explains them as they are opened (lines)
       const what = change.local ? change.what : kind === 'pull' ? `pull request #${number}` : `commit ${sha.slice(0, 7)}`;
       const fname = `${repo}-${change.local ? change.base : kind === 'pull' ? `pr-${number}` : sha.slice(0, 7)}-changes.md`.replace(/[^\w.-]+/g, '-');
-      const { value: parsed, text, tried } = await this.askForJson(changeWalkPrompt({ what, repo: owner ? `${owner}/${repo}` : repo, title, fname, skipped }), {
-        attachments: [{ filename: fname, content: changePack(blocks, what) }], live: this.walkBody, list: 'title',
-        hint: `Reading ${blocks.length} part${blocks.length === 1 ? '' : 's'} of the change…`,
-        parse: (t) => parseChangeWalk(t, blocks)
-      });
-      if (!parsed) {
-        this._walkRaw = text;
-        throw new Error(`couldn't find the parts in the replies (asked ${tried})`);
-      }
-      await this.saveWalk({ key, change, summary: parsed.summary, blocks: parsed.blocks, skipped, current: 0, typed: {}, created: Date.now() });
+      const parts = orderParts(blocks).map(b => ({ ...b, title: partTitle(b), explain: '' }));
+      await this.saveWalk({ key, change, what, fname, summary: '', blocks: parts, skipped, current: 0, typed: {}, created: Date.now() });
       this._readingContext = { label: owner ? `${owner}/${repo}` : repo, ts: Date.now() };
       this.followWalk();
     } catch (e) {
@@ -2112,7 +2106,7 @@ class YavarSidePanel {
         ? `<div class="rebuild-intro"><p>⚠️ Could not make the walkthrough: ${esc(w.error)}.</p>` +
           `<button type="button" class="files-send jr-primary" data-wk="retry">Ask again</button></div>` +
           this.replyDisclosure(this._walkRaw)
-        : `<div class="rebuild-wait"><span class="files-spinner"></span>${w?.change ? `The AI is reading ${esc(w.change.label.toLowerCase())}…`
+        : `<div class="rebuild-wait"><span class="files-spinner"></span>${w?.change ? `Reading the diff of ${esc(w.change.label.toLowerCase())}…`
           : `The AI is splitting ${esc(w?.path?.split('/').pop())} into blocks…`}<div class="rebuild-live"></div></div>`);
       return;
     }
@@ -2126,7 +2120,8 @@ class YavarSidePanel {
     const lines = (x) => !x.start ? '' : x.end > x.start ? `lines ${x.start}-${x.end}` : `line ${x.start}`;
     // A change's parts each have their own file; a file's blocks share one
     const where = change
-      ? `<span><code>${esc(b.path)}</code>${b.start ? ` · ${lines(b)}` : ` · ${b.status}`}</span>`
+      ? `<span><code>${esc(b.path)}</code>${b.start ? ` · ${lines(b)}` : ` · ${b.status}`}` +
+        `<span class="wk-counts">${b.added ? ` <ins>+${b.added}</ins>` : ''}${b.removed ? ` <del>−${b.removed}</del>` : ''}</span></span>`
       : `<span>Lines ${b.start}-${b.end}${b.edited ? ' · edited after this was explained' : ''}</span>`;
     const skippedNote = change && i === 0 && w.skipped?.length
       ? ` <span class="wk-skipped" title="${esc(w.skipped.join('\n'))}">Left out: ${w.skipped.length} lockfile, generated or binary file${w.skipped.length === 1 ? '' : 's'}.</span>` : '';
@@ -2151,9 +2146,8 @@ class YavarSidePanel {
       `<div class="wk-meta">${where}` +
         (b.start ? `<button type="button" class="files-link-btn wk-show" data-wk="show">Show in reader</button>` : '') + `</div>` +
       `<h3 class="wk-title">${esc(b.title)}</h3>` +
-      (b.explain
-        ? `<p class="wk-explain">${esc(b.explain)}</p>`
-        : `<p class="wk-explain is-empty">The AI didn't explain ${change ? 'this part' : 'these lines'}. Ask with Explain more.</p>`) +
+      (b.explain ? `<p class="wk-explain">${esc(b.explain)}</p>`
+        : change ? '' : `<p class="wk-explain is-empty">The AI didn't explain these lines. Ask with Explain more.</p>`) +
       // The reader shows what was taken out, in place; a deleted file (or a
       // walk saved before parts kept their lines) shows it here
       (change && b.removed && (!b.start || !b.add) ? `<details class="raw-reply wk-removed"${b.start ? '' : ' open'}><summary>${b.start ? 'What was removed' : 'The deleted lines'} (${b.removed} line${b.removed === 1 ? '' : 's'})</summary>` +
@@ -2292,12 +2286,18 @@ class YavarSidePanel {
     const notesEl = this.walkBody.querySelector('.walk-notes');
     let prompt;
     let label;
+    let attachments = [];
+    let lineNums = null;
     if (act === 'lines') {
       label = 'Line by line';
-      prompt = `I'm reading ${where}, part by part. Go through the changed lines of this part in order. ` +
-        `For each changed line, or a few lines that belong together, start with the line number(s) in bold, ` +
-        `then say what it did before, what it does now, and why. Put changes that are only formatting or renaming ` +
-        `into one item, and skip unchanged lines. A short list, one or two sentences an item. ${whole}\n\n${block}`;
+      // The next small parts not explained yet come along in the same message.
+      // The first message of a walk also carries the whole diff, and opens
+      // with what the change does as a whole.
+      lineNums = linesBatch(w.blocks, i, k => !!w.notes?.[k]?.length).map(k => k + 1);
+      const first = !!w.fname && !w.summary && !Object.keys(w.notes || {}).length;
+      prompt = linesPrompt({ blocks: w.blocks, nums: lineNums, what: w.what || c.label.toLowerCase(), repo, title: c.title,
+        fname: first ? w.fname : '', skipped: w.skipped || [] });
+      if (first) attachments = [{ filename: w.fname, content: changePack(w.blocks, w.what) }];
     } else if (act === 'bugs') {
       label = 'Find bugs';
       prompt = `Review the new code in ${where} for bugs: logic errors, edge cases (empty, missing, zero, very large, ` +
@@ -2358,6 +2358,9 @@ class YavarSidePanel {
         const note = quiz ? { label, quiz } : { label, text: reply };
         this.renderWalkNote(notesEl, note, false);
         await this.addWalkNote(w.key || w.path, i, note);
+      } else if (lineNums) {
+        const text = await this.showAnswerIn(notesEl, label, prompt, { via: 'chat', inline: true, attachments });
+        if (text) await this.saveLines(w.key, lineNums, label, text);
       } else {
         const text = await this.showAnswerIn(notesEl, label, prompt, { via: 'chat', inline: true });
         if (text) await this.addWalkNote(w.key || w.path, i, { label, text });
@@ -2366,6 +2369,22 @@ class YavarSidePanel {
       el.disabled = false;
       // Moved on while this was answered: the part now open gets its turn
       if (c && this.walk?.key === w.key && this.walk.current !== i) this.autoLines();
+    }
+  }
+
+  // A line-by-line reply for several parts: each part keeps its own section,
+  // and the opening words about the whole change become the walk's summary
+  async saveLines(key, nums, label, text) {
+    const { intro, parts } = splitParts(text, nums);
+    for (const [n, body] of parts) await this.addWalkNote(key, n - 1, { label, text: body });
+    const w = this.walk;
+    if (w?.key !== key) return;
+    if (intro && !w.summary) await this.saveWalk({ ...w, summary: intro });
+    // The part on screen showed the whole reply while it streamed
+    if (nums.length > 1 || intro) {
+      const top = this.walkBody.scrollTop;
+      await this.renderWalk();
+      this.walkBody.scrollTop = top;
     }
   }
 

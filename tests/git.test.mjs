@@ -140,3 +140,11 @@ test('far-apart changes are separate hunks; close ones share one', () => {
   assert.equal((near.match(/^@@/gm) || []).length, 1);
   assert.equal(fileDiff('f.js', before, before), '');
 });
+
+test('a hunk is named after the declaration above it, as git does', () => {
+  const before = 'import x from "y";\n\nexport function total(items) {\n  let sum = 0;\n  a();\n  b();\n  c();\n  return sum;\n}\n';
+  const diff = fileDiff('f.js', before, before.replace('  return sum;', '  return sum * 2;'));
+  assert.match(diff, /^@@ -5,5 \+5,5 @@ export function total\(items\) \{$/m);
+  // At the top there is nothing above to name it after
+  assert.match(fileDiff('f.js', before, 'import z from "y";' + before.slice(18)), /^@@ -1,\d+ \+1,\d+ @@$/m);
+});

@@ -1,9 +1,8 @@
-// Walking through a change (a commit or a pull request) the way a file is
-// walked: the diff is split here into parts (a hunk, or a slice of a big one),
-// the chat orders and explains them, and the reader shows each part as a diff
-// inside the file as it is after the change. Pure functions (tested).
-
-import { jsonCandidates } from './rebuild.js';
+// Walking through a change (a commit, a pull request, or your own changes)
+// the way a file is walked: the diff is split here into parts (a hunk, or a
+// slice of a big one) and put in reading order, the chat explains them line
+// by line, a few small parts to a message, and the reader shows each part as
+// a diff inside the file as it is after the change. Pure functions (tested).
 
 // A unified diff (git's) as files with their hunks. Each hunk line is
 // { type: '+' | '-' | ' ', text, old?, new? } with its line numbers.
@@ -139,7 +138,8 @@ export function changeBlocks(files, { max = 40 } = {}) {
         id: blocks.length + 1, path: f.path, oldPath: f.oldPath, status: f.status, start, end,
         added: added.length, removed: removed.length, removedText: removed.map(l => l.text).join('\n'),
         diff: diff.length > DIFF_CHARS ? diff.slice(0, DIFF_CHARS) + '\n… (cut)' : diff,
-        add: f.status === 'deleted' ? [] : added.map(l => l.new), del: f.status === 'deleted' ? [] : del
+        add: f.status === 'deleted' ? [] : added.map(l => l.new), del: f.status === 'deleted' ? [] : del,
+        context: hunks[0].context || ''
       });
     }
   }
@@ -149,49 +149,79 @@ export function changeBlocks(files, { max = 40 } = {}) {
 const where = (b) => `\`${b.path}\` (${b.status}${b.status === 'renamed' ? ` from \`${b.oldPath}\`` : ''})` +
   (b.start ? `, lines ${b.start}${b.end > b.start ? `-${b.end}` : ''} after the change` : '');
 
-// A short name for a part the AI didn't title
-const partTitle = (b) => `${b.path.split('/').pop()}: ${[b.added && `+${b.added}`, b.removed && `−${b.removed}`].filter(Boolean).join(' ')}`;
+// The part's name in lists: the function or class it is in, as git shows
+// it above the hunk, else what happened to the file, else the file's name
+export function partTitle(b) {
+  const ctx = (b.context || '').trim()
+    .replace(/^(export\s+)?(default\s+)?(async\s+)?(def|function|fn|func)\s+/, '')
+    .replace(/\s*[{:]\s*$/, '');
+  if (ctx) return ctx.length > 48 ? ctx.slice(0, 47) + '…' : ctx;
+  return b.status === 'added' ? 'New file' : b.status === 'deleted' ? 'Deleted file' : b.path.split('/').pop();
+}
 
-// The parts as one Markdown file for the chat
+// Reading order: the code first, then its tests, then config and build
+// files, then docs; diff order within each
+const TESTS = /(^|\/)(tests?|spec|__tests__)\/|[._-](test|spec)\.[a-z]+$/i;
+const DOCS = /\.(md|mdx|rst|txt|adoc)$|(^|\/)docs?\//i;
+const CONFIG = /\.(json|ya?ml|toml|ini|cfg|lock|env\.example)$|(^|\/)\.github\/|(^|\/)(Dockerfile|Makefile|\.[\w-]+rc)$/i;
+const rank = (p) => (DOCS.test(p) ? 3 : CONFIG.test(p) ? 2 : TESTS.test(p) ? 1 : 0);
+export function orderParts(blocks) {
+  return blocks.map((b, k) => [b, k]).sort((x, y) => rank(x[0].path) - rank(y[0].path) || x[1] - y[1]).map(([b]) => b);
+}
+
+// The parts one line-by-line message covers, from part `i`: the next small
+// ones too, while they add up to at most `maxLines` changed lines. Parts
+// that `done(k)` already explained end the run.
+export function linesBatch(blocks, i, done = () => false, { maxLines = 30, maxParts = 4 } = {}) {
+  const out = [i];
+  let total = blocks[i].added + blocks[i].removed;
+  for (let k = i + 1; k < blocks.length && out.length < maxParts && !done(k); k++) {
+    const n = blocks[k].added + blocks[k].removed;
+    if (total + n > maxLines) break;
+    out.push(k);
+    total += n;
+  }
+  return out;
+}
+
+// The parts as one Markdown file for the chat, numbered as the walk shows them
 export function changePack(blocks, what) {
   return `# The changes in ${what}\n\n${NUMBERS_NOTE}\n\n` +
-    blocks.map(b => `## Part ${b.id} · ${where(b)}\n\n\`\`\`diff\n${b.diff}\n\`\`\``).join('\n\n') + '\n';
+    blocks.map((b, k) => `## Part ${k + 1} · ${where(b)}\n\n\`\`\`diff\n${b.diff}\n\`\`\``).join('\n\n') + '\n';
 }
 
-export function changeWalkPrompt({ what, repo, title, fname, skipped = [] }) {
-  return `The attached "${fname}" is the diff of ${what} in ${repo}${title ? ` ("${title}")` : ''}, split into numbered parts` +
-    `${skipped.length ? ` (left out: ${skipped.length} lockfile, generated or binary file${skipped.length === 1 ? '' : 's'})` : ''}. ` +
-    `I want to understand this change by reading it part by part, well enough to write it myself.\n\n` +
-    `Reply with ONLY one JSON code block, exactly in this shape:\n` +
-    '```json\n' +
-    `{"summary": "2-3 sentences: the goal of the change and how it gets there",\n` +
-    ` "parts": [{"id": 1, "title": "short title: what this part does", "explain": "2-4 sentences: what changed here and why it was needed"}]}\n` +
-    '```\n\n' +
-    `- List every part once, in the order to read them: the core of the change first, then what uses it, then tests, config and docs.\n` +
-    `- "explain" is about the change: what was there before, what it does now, and why.`;
+// Line by line, for the parts `nums` (1-based) of the walk. The first
+// message also carries the whole diff and opens with what the change does.
+export function linesPrompt({ blocks, nums, what, repo, title = '', fname = '', skipped = [] }) {
+  const head = fname
+    ? `The attached "${fname}" is the whole diff of ${what} in ${repo}${title ? ` ("${title}")` : ''}, in ${blocks.length} numbered parts` +
+      `${skipped.length ? ` (left out: ${skipped.length} lockfile, generated or binary file${skipped.length === 1 ? '' : 's'})` : ''}. ` +
+      `I'm reading it part by part. Begin with two or three sentences on what the change does as a whole and why. Then go through the parts below.`
+    : `I'm reading ${what} in ${repo}${title ? ` ("${title}")` : ''} part by part. Go through the parts below.`;
+  return `${head}\n\n` +
+    `Put each part under a heading "### Part N". Under it, go through the changed lines in order: for each changed line, ` +
+    `or a few that belong together, the line number(s) in bold, then what it did before, what it does now, and why. ` +
+    `Put changes that are only formatting or renaming into one item, and skip unchanged lines. One or two sentences an item. ` +
+    `${NUMBERS_NOTE}\n\n` +
+    nums.map(n => `### Part ${n} · ${where(blocks[n - 1])}\n\n\`\`\`diff\n${blocks[n - 1].diff}\n\`\`\``).join('\n\n');
 }
 
-// The AI's order and explanations over the parts made here. Unknown ids are
-// dropped; parts it left out follow at the end. { summary, blocks } or null.
-export function parseChangeWalk(text, blocks) {
-  const str = v => (v == null ? '' : String(v)).trim();
-  const byId = new Map(blocks.map(b => [b.id, b]));
-  for (const obj of jsonCandidates(text)) {
-    const parts = obj?.parts || obj?.blocks;
-    if (!Array.isArray(parts)) continue;
-    const seen = new Set();
-    const out = [];
-    for (const p of parts) {
-      const b = byId.get(Number(p?.id));
-      if (!b || seen.has(b.id)) continue;
-      seen.add(b.id);
-      out.push({ ...b, title: str(p.title) || partTitle(b), explain: str(p.explain) });
-    }
-    if (!out.length) continue;
-    blocks.filter(b => !seen.has(b.id)).forEach(b => out.push({ ...b, title: partTitle(b), explain: '' }));
-    return { summary: str(obj.summary), blocks: out };
+// A line-by-line reply cut at its "### Part N" headings: { intro, parts }
+// where parts maps each asked number to its text. Without headings, the
+// whole reply belongs to the first part asked.
+export function splitParts(text, nums) {
+  const heads = [...String(text || '').matchAll(/^#{1,4}\s*\**\s*Part\s+(\d+)\b[^\n]*$/gim)];
+  const parts = new Map();
+  if (!heads.length) {
+    if (nums.length) parts.set(nums[0], String(text || '').trim());
+    return { intro: '', parts };
   }
-  return null;
+  heads.forEach((h, k) => {
+    const n = Number(h[1]);
+    const body = text.slice(h.index + h[0].length, heads[k + 1]?.index ?? text.length).trim();
+    if (nums.includes(n) && body) parts.set(n, parts.has(n) ? `${parts.get(n)}\n\n${body}` : body);
+  });
+  return { intro: text.slice(0, heads[0].index).trim(), parts };
 }
 
 // What a part is, for a question about it: where it is and its diff

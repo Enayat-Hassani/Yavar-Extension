@@ -276,7 +276,11 @@ export function fileDiff(path, before, after, status = 'modified') {
     // An empty side starts at the line before it, as git prints it
     const oStart = olds.length ? olds[0].o : part[0].o;
     const nStart = news.length ? news[0].n : part[0].n;
-    return `@@ -${oStart},${olds.length} +${nStart},${news.length} @@\n` + part.map(r => r.s + r.text).join('\n') + '\n';
+    // Like git, name the hunk after the nearest line above it that starts a
+    // declaration (one that begins at the margin with a letter, _ or $)
+    const above = a.slice(0, Math.max(0, oStart - 1)).reverse().find(l => /^[A-Za-z_$]/.test(l)) || '';
+    return `@@ -${oStart},${olds.length} +${nStart},${news.length} @@${above ? ' ' + above.slice(0, 80) : ''}\n` +
+      part.map(r => r.s + r.text).join('\n') + '\n';
   }).join('');
 }
 
