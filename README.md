@@ -14,7 +14,7 @@ A Chrome extension that embeds ChatGPT, Claude, and Gemini in a sidebar — so y
 - **Selections, pages and screenshots from outside the panel** (the floating menu, the right-click menu, the shortcuts) arrive in the composer. A floating-menu prompt is sent at once if *Settings → Send floating-menu prompts right away* is on; otherwise it waits in the message box.
 - **Answers** stream in and render tables, checklists, nested lists and coloured code (long blocks fold). Under each: Copy, Ask again, Save, and *Open in chat*, or with **API** chosen, *Ask ChatGPT/Claude/Gemini* to put the same question to the free chat. API answers suggest three follow-up questions. Hover your question to edit and resend it. ■ stops waiting.
 
-**Inside the chat** — when you open the chat itself (the chat button in the header), each finished answer gets **Save** (stores that exact answer *with the question you asked*), **→ Notes** and **Copy MD**, and Python and JavaScript code blocks get **▶ Run**. They sit in isolated shadow DOM, so they never clash with the site's styles, and never appear in your normal chat tabs. Turn them off under *Settings → Asking the AI*.
+**Inside the chat** — when you open the chat itself (the chat button in the header), each finished answer gets **Save** (stores that exact answer *with the question you asked*), **→ Notes** and **Copy MD**. They sit in isolated shadow DOM, so they never clash with the site's styles, and never appear in your normal chat tabs. Turn them off under *Settings → Asking the AI*.
 
 **Floating menu** — select text (or code on GitHub, where it also tells the AI the file and line numbers) on any page and a compact icon menu appears, driven by **customizable prompt templates**. Built-ins include:
 
