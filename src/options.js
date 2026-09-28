@@ -3,6 +3,7 @@
 import { loadTemplates, saveTemplates, DEFAULT_TEMPLATES } from './utils/templates.js';
 import { loadModels } from './utils/models.js';
 import { COACH_KEY, coachSteps, lacksAttempt, loadCoach } from './utils/coach.js';
+import { REVIEW_KEY, reviewSteps, loadReview } from './utils/review.js';
 import { pingMorfia } from './utils/material.js';
 import { OPENROUTER_BASE, DEFAULT_MONTHLY_CAP, isFreeModel, loadApiConfig, buildRoute, askWithBudget, loadSpend, spentThisMonth } from './utils/llm.js';
 
@@ -56,6 +57,8 @@ class OptionsPage {
     this.renderTemplates();
     this.coach = await loadCoach();
     this.renderCoach();
+    this.review = await loadReview();
+    this.renderReview();
     this.showPage();
     window.addEventListener('hashchange', () => this.showPage());
     // Wrapping changes with the width: fit the open page's prompts again
@@ -153,6 +156,12 @@ class OptionsPage {
     this.coachList?.addEventListener('click', (e) => {
       const id = e.target.closest('[data-reset-step]')?.dataset.resetStep;
       if (id) this.resetCoachStep(id);
+    });
+    this.reviewList = document.getElementById('review-steps');
+    this.reviewList?.addEventListener('input', (e) => this.handleReviewEdit(e));
+    this.reviewList?.addEventListener('click', (e) => {
+      const id = e.target.closest('[data-reset-review]')?.dataset.resetReview;
+      if (id) { delete this.review[id]; this.persistReview(); this.renderReview(); }
     });
     this.coachAbout?.addEventListener('input', () => {
       this.coach.about = this.coachAbout.value;
@@ -486,6 +495,7 @@ class OptionsPage {
       settings: this.settings,
       promptTemplates: this.templates,
       coach: this.coach,
+      review: this.review,
       aiModels: Array.isArray(aiModels) ? aiModels : undefined
     };
     const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
@@ -551,6 +561,13 @@ class OptionsPage {
         this.coach = { about: typeof parsed.coach.about === 'string' ? parsed.coach.about : '', prompts };
         await this.persistCoach();
         this.renderCoach();
+      }
+
+      if (parsed.yavarExport && parsed.review && typeof parsed.review === 'object') {
+        this.review = Object.fromEntries(reviewSteps().map(s => [s.id, parsed.review[s.id]])
+          .filter(([, body]) => typeof body === 'string' && body.trim()));
+        await this.persistReview();
+        this.renderReview();
       }
 
       if (parsed.yavarExport && Array.isArray(parsed.aiModels)) {
@@ -688,6 +705,48 @@ class OptionsPage {
     });
     // Textareas measured while hidden have no height
     fitVisible();
+  }
+
+  // ===== Reviewing changes =====
+  // Only edited prompts are stored, as with the coach's steps
+  renderReview() {
+    if (!this.reviewList) return;
+    this.reviewList.innerHTML = reviewSteps(this.review).map(s => `
+      <div class="template-card">
+        <div class="template-row">
+          <span class="coach-step-name">${this.escapeHtml(s.name)}</span>
+          <button type="button" class="btn-secondary btn-small" data-reset-review="${s.id}" ${s.edited ? '' : 'hidden'}>Reset</button>
+        </div>
+        <textarea class="template-body-input" data-review="${s.id}" rows="1" aria-label="Prompt for ${this.escapeHtml(s.name)}">${this.escapeHtml(s.body)}</textarea>
+      </div>`).join('');
+    this.reviewList.querySelectorAll('textarea').forEach(fitHeight);
+  }
+
+  handleReviewEdit(e) {
+    const el = e.target.closest('[data-review]');
+    if (!el) return;
+    fitHeight(el);
+    const id = el.dataset.review;
+    const def = reviewSteps().find(s => s.id === id).body;
+    if (el.value.trim() && el.value !== def) this.review[id] = el.value;
+    else delete this.review[id];
+    el.closest('.template-card').querySelector('[data-reset-review]').hidden = !this.review[id];
+    this.persistReview();
+  }
+
+  persistReview() {
+    clearTimeout(this._reviewTimer);
+    return new Promise((resolve) => {
+      this._reviewTimer = setTimeout(async () => {
+        try {
+          await chrome.storage.sync.set({ [REVIEW_KEY]: this.review });
+        } catch (error) {
+          console.error('[Yavar] Failed to save the review prompts:', error);
+          this.showToast('Could not save the review prompts', true);
+        }
+        resolve();
+      }, 400);
+    });
   }
 
   // ===== IELTS coach =====

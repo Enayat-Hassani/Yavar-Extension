@@ -13,6 +13,7 @@ import { suggestActions } from './utils/actions.js';
 import { coachSteps, loadCoach, coachPrompt } from './utils/coach.js';
 import { materialFile, addToMorfia } from './utils/material.js';
 import { gitRepo, workingDiff, ignoreRules, blobSha } from './utils/git.js';
+import { REVIEW_KEY, reviewText, loadReview } from './utils/review.js';
 import { icon } from './utils/icons.js';
 import { idbGet, idbSet } from './utils/idb.js';
 import { transcriptMarkdown, turnsToMessages, HANDOFF_NOTE, earlierAnswers } from './utils/conversation.js';
@@ -120,6 +121,7 @@ class YavarSidePanel {
       const wanted = currentModelId || settings?.defaultAI;
       this.answerWith = settings?.answerWith === 'api' ? 'api' : 'chat';
       this._coachOn = !!settings?.ieltsCoach;
+      loadReview().then(r => { this._reviewEdits = r; }).catch(() => {});
       idbGet('reviewFolder').then(h => { if (h) { this._reviewFolder = h; this.renderHome(); } }).catch(() => {});
       this._morfiaOn = !!settings?.morfia;
       if (wanted && this.models.some(m => m.id === wanted)) {
@@ -2369,24 +2371,11 @@ class YavarSidePanel {
       lineNums = linesBatch(w.blocks, i, k => !!w.notes?.[k]?.length).map(k => k + 1);
       const first = !!w.fname && !w.summary && !Object.keys(w.notes || {}).length;
       prompt = linesPrompt({ blocks: w.blocks, nums: lineNums, what: w.what || c.label.toLowerCase(), repo, title: c.title,
-        fname: first ? w.fname : '', skipped: w.skipped || [] });
+        fname: first ? w.fname : '', skipped: w.skipped || [], howTo: reviewText(this._reviewEdits, 'lines') });
       if (first) attachments = [{ filename: w.fname, content: changePack(w.blocks, w.what) }];
-    } else if (act === 'bugs') {
-      label = 'Find bugs';
-      prompt = `Review the new code in ${where} for bugs: logic errors, edge cases (empty, missing, zero, very large, ` +
-        `at the same time), missing error handling, security problems, and anything that breaks code that calls it. ` +
-        `For each problem give the line number, what goes wrong, a concrete case that shows it, and a fix. ` +
-        `If a problem depends on code not shown here, say what to check. If there is nothing real, say so plainly ` +
-        `and name what you checked; don't invent problems. ${whole}\n\n${block}`;
-    } else if (act === 'better') {
-      label = 'Better ways';
-      prompt = `Is there a better way to write the new code in ${where}? Suggest alternatives that are simpler, clearer, ` +
-        `safer or more usual for this language, each with its trade-off and a short example, most useful first. ` +
-        `If the code is already a good choice, say so and why, rather than suggesting changes for their own sake. ${whole}\n\n${block}`;
-    } else if (act === 'tests') {
-      label = 'How to test it';
-      prompt = `How would I check that ${where} works? List the cases worth testing, edge cases included, and for each ` +
-        `what to do and what should happen. Say which ones an automated test should cover. Keep it short. ${whole}\n\n${block}`;
+    } else if (['bugs', 'better', 'tests'].includes(act)) {
+      label = { bugs: 'Find bugs', better: 'Better ways', tests: 'How to test it' }[act];
+      prompt = `I'm reading ${where}. ${reviewText(this._reviewEdits, act)} ${whole}\n\n${block}`;
     } else if (act === 'more') {
       label = 'Explain more';
       prompt = c
@@ -4765,6 +4754,7 @@ class YavarSidePanel {
   setupStorageListener() {
     chrome.storage.onChanged.addListener((changes, areaName) => {
       if (areaName === 'sync' && changes.promptTemplates) this.loadPromptTemplates();
+      if (areaName === 'sync' && changes[REVIEW_KEY]) this._reviewEdits = changes[REVIEW_KEY].newValue || {};
       if (areaName === 'session' && changes.readerNav?.newValue) this.stepWalk(changes.readerNav.newValue.dir);
       if (areaName === 'sync' && changes.aiModels) this.onModelsChanged(changes.aiModels.newValue);
       if (areaName === 'sync' && changes.settings) {
