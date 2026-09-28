@@ -120,6 +120,7 @@ class YavarSidePanel {
       const wanted = currentModelId || settings?.defaultAI;
       this.answerWith = settings?.answerWith === 'api' ? 'api' : 'chat';
       this._coachOn = !!settings?.ieltsCoach;
+      idbGet('reviewFolder').then(h => { if (h) { this._reviewFolder = h; this.renderHome(); } }).catch(() => {});
       this._morfiaOn = !!settings?.morfia;
       if (wanted && this.models.some(m => m.id === wanted)) {
         this.currentModelId = wanted;
@@ -1123,6 +1124,7 @@ class YavarSidePanel {
       explain_repo: () => this.openJourney(),
       read_folder: () => this.openJourney({ folder: true }),
       review_changes: () => this.startReview(),
+      review_last: () => this.reviewLast(),
       history: () => this.toggleHistory(),
       notes: () => this.toggleNotes(),
       settings: () => chrome.runtime.openOptionsPage(),
@@ -2595,6 +2597,21 @@ class YavarSidePanel {
     await this.showFolderChoice({ review: true });
   }
 
+  // "Review my changes · <folder>" on the start page: the folder reviewed
+  // last, its uncommitted changes, or what isn't pushed when all is committed
+  async reviewLast() {
+    const handle = this._reviewFolder || await idbGet('reviewFolder');
+    if (!handle) return this.startReview();
+    this.walkPanel.classList.remove('hidden');
+    this._folderReview = true;
+    if (!(await this.openLocalFolder({ handle }))) return;
+    await this.showReviewChoice();
+    if (!this._review) return;   // not a repository any more: the choice says why
+    if (!(await this.reviewLocal('head')) && this._review.upstream && this._review.upstream.sha !== this._review.sha) {
+      await this.reviewLocal('upstream');
+    }
+  }
+
   // .git and the folder's files, in the shape utils/git.js reads
   async localGit() {
     const root = this.localRoot;
@@ -2631,6 +2648,7 @@ class YavarSidePanel {
     document.getElementById('walk-title').textContent = 'Review my changes';
     document.getElementById('walk-sub').textContent = name;
     const esc = (t) => this.escapeHtml(t || '');
+    this._review = null;
     let st;
     try {
       st = await (await this.localGit()).repo.state();
@@ -2672,12 +2690,19 @@ class YavarSidePanel {
       if (!diff) {
         this.walkBody.innerHTML = `<div class="rebuild-intro"><p>Nothing to review: the files match ${up ? st.upstream.name : 'your last commit'}.</p>` +
           `<button type="button" class="files-link-btn jr-link" data-wk="review-back">Back</button></div>`;
-        return;
+        return false;
       }
       const hash = (await blobSha(new TextEncoder().encode(diff))).slice(0, 12);
       change.key = `walk:local/${name}:@${change.base}-${hash}`;
       this._localDiffs = { [change.key]: diff };
+      // The start page offers this folder next time, one click away
+      if (this.localRoot && this._reviewFolder !== this.localRoot) {
+        this._reviewFolder = this.localRoot;
+        idbSet('reviewFolder', this.localRoot);
+        this.renderHome();
+      }
       await this.walkChange(change);
+      return true;
     } catch (e) {
       this.walkBody.innerHTML = `<div class="rebuild-intro"><p>⚠️ Could not read the changes: ${this.escapeHtml(e.message)}.</p>` +
         `<button type="button" class="files-link-btn jr-link" data-wk="review-back">Back</button></div>`;
@@ -4087,10 +4112,14 @@ class YavarSidePanel {
         row('review_changes', icon('diff'), 'Review my changes', 'What changed before you commit or push, line by line') +
         `</div>`;
     }
+    // The project reviewed last, whatever the tab shows
+    const review = this._reviewFolder
+      ? `<div class="home-group">${row('review_last', icon('diff'), `Review my changes · ${this._reviewFolder.name}`, 'Not committed or not pushed yet, line by line')}</div>` : '';
+    if (review) ctx = ctx.replace(row('review_changes', icon('diff'), 'Review my changes', 'What changed before you commit or push, line by line'), '');
     this.threadBody.innerHTML =
       `<div class="home">` +
         `<div class="home-hero"><span class="home-kicker">${this.escapeHtml(hero.kicker)}</span><h2>${this.escapeHtml(hero.title)}</h2></div>` +
-        ctx +
+        ctx + review +
       `</div>`;
     document.getElementById('thread-title').textContent = '';
     document.getElementById('thread-sub').textContent = '';
