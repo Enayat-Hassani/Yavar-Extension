@@ -2228,9 +2228,15 @@ class YavarSidePanel {
               `<button type="button" class="run-ask" data-wk="quiz">Quiz me</button>` +
               (b.added ? `<button type="button" class="run-ask" data-wk="type" aria-expanded="false">Write it yourself${best != null ? ` · best ${best}%` : ''}</button>` : '') +
             `</span>`
-          : `<button type="button" class="run-ask" data-wk="more">Explain more</button>` +
-            `<button type="button" class="run-ask" data-wk="quiz">Quiz me</button>` +
-            `<button type="button" class="run-ask" data-wk="type" aria-expanded="false">Practise typing${best != null ? ` · best ${best}%` : ''}</button>`)) +
+          : `<button type="button" class="run-ask" data-wk="more">Line by line</button>` +
+            `<button type="button" class="run-ask" data-wk="bugs">Find bugs</button>` +
+            `<button type="button" class="run-ask" data-wk="better">Better ways</button>` +
+            `<button type="button" class="run-ask wk-more-toggle" data-wk="moreacts" aria-expanded="false">More</button>` +
+            `<span class="wk-extra" hidden>` +
+              `<button type="button" class="run-ask" data-wk="quiz">Quiz me</button>` +
+              `<button type="button" class="run-ask" data-wk="type" aria-expanded="false">Practise typing${best != null ? ` · best ${best}%` : ''}</button>` +
+              `<button type="button" class="run-ask" data-wk="tests">How to test it</button>` +
+            `</span>`)) +
       `</div>`;
 
     // Earlier answers for this block, folded except the latest
@@ -2375,9 +2381,11 @@ class YavarSidePanel {
       if (first) attachments = [{ filename: w.fname, content: changePack(w.blocks, w.what) }];
     } else if (['bugs', 'better', 'tests'].includes(act)) {
       label = { bugs: 'Find bugs', better: 'Better ways', tests: 'How to test it' }[act];
-      prompt = `I'm reading ${where}. ${reviewText(this._reviewEdits, act)} ${whole}\n\n${block}`;
+      // In a change, the question is about what it adds or changes
+      prompt = `I'm reading ${where}${c ? '; look at the code it adds or changes' : ''}. ${reviewText(this._reviewEdits, act)} ${whole}\n\n${block}${cite}`;
     } else if (act === 'more') {
-      label = 'Explain more';
+      // A file's block is explained up front, so here it goes line by line
+      label = c ? 'Explain more' : 'Line by line';
       prompt = c
         ? `I'm reading ${where}, part by part. Explain this part in more depth: the idea behind it, how it fits ` +
           `with the rest of the change, and anything a reader could easily miss. ${whole}\n\n${block}${cite}`
