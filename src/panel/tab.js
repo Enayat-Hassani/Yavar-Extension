@@ -35,14 +35,13 @@ export class TabPart {
     const usable = isHttp && !isAIHost;
     const video = usable && (/:\/\/(www\.)?youtube\.com\/watch\?/i.test(url) || /:\/\/youtu\.be\//i.test(url));
     const gh = parseGitHubUrl(url);
-    // A plan you started for this repo, so the menus can offer to continue it
-    let rebuild = null;
+    // The reading map you started for this repo, so the menus can offer to continue it
     let journey = null;
     if (gh) {
-      const keys = [`rebuild:${gh.owner}/${gh.repo}`, `journey:${gh.owner}/${gh.repo}`];
-      try { ({ [keys[0]]: rebuild = null, [keys[1]]: journey = null } = await chrome.storage.local.get(keys)); } catch (e) { /* none yet */ }
+      const key = `journey:${gh.owner}/${gh.repo}`;
+      try { journey = (await chrome.storage.local.get(key))[key] || null; } catch (e) { /* none yet */ }
     }
-    this._tabCtx = { usable, gh, url, video, rebuild: this.rebuildStatus(rebuild), journey: this.journeyStatus(journey) };
+    this._tabCtx = { usable, gh, url, video, journey: this.journeyStatus(journey) };
     this.renderHome();
   }
 

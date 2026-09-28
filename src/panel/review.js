@@ -76,7 +76,7 @@ export class ReviewPart {
       st = await (await this.localGit()).repo.state();
       if (!st.sha) throw new Error('the repository has no commits yet');
     } catch (e) {
-      this.walkBody.innerHTML = `<div class="rebuild-intro"><p>⚠️ ${esc(e.message)}.</p>` +
+      this.walkBody.innerHTML = `<div class="sheet-intro"><p>⚠️ ${esc(e.message)}.</p>` +
         `<button type="button" class="files-send jr-primary" data-wk="folders">Choose another folder</button></div>`;
       return;
     }
@@ -101,7 +101,7 @@ export class ReviewPart {
     const name = this.repoTree?.repo;
     if (!st || !name) return;
     const up = base === 'upstream' && st.upstream;
-    this.walkBody.innerHTML = `<div class="rebuild-wait"><span class="files-spinner"></span>Comparing the files with ${up ? st.upstream.name : 'your last commit'}…</div>`;
+    this.walkBody.innerHTML = `<div class="sheet-wait"><span class="files-spinner"></span>Comparing the files with ${up ? st.upstream.name : 'your last commit'}…</div>`;
     const change = { local: true, owner: '', repo: name, ref: '', kind: 'local', title: '', base: up ? 'unpushed' : 'uncommitted',
       sha: up ? st.upstream.sha : st.sha,
       label: up ? `Not pushed · since ${st.upstream.name}` : 'Not committed yet',
@@ -110,7 +110,7 @@ export class ReviewPart {
     try {
       const diff = await this.localDiff(change);
       if (!diff) {
-        this.walkBody.innerHTML = `<div class="rebuild-intro"><p>Nothing to review: the files match ${up ? st.upstream.name : 'your last commit'}.</p>` +
+        this.walkBody.innerHTML = `<div class="sheet-intro"><p>Nothing to review: the files match ${up ? st.upstream.name : 'your last commit'}.</p>` +
           `<button type="button" class="files-link-btn jr-link" data-wk="review-back">Back</button></div>`;
         return false;
       }
@@ -126,7 +126,7 @@ export class ReviewPart {
       await this.walkChange(change);
       return true;
     } catch (e) {
-      this.walkBody.innerHTML = `<div class="rebuild-intro"><p>⚠️ Could not read the changes: ${this.escapeHtml(e.message)}.</p>` +
+      this.walkBody.innerHTML = `<div class="sheet-intro"><p>⚠️ Could not read the changes: ${this.escapeHtml(e.message)}.</p>` +
         `<button type="button" class="files-link-btn jr-link" data-wk="review-back">Back</button></div>`;
     }
   }

@@ -2,10 +2,9 @@
 // connect.
 // Its methods join YavarSidePanel's (see the end of sidepanel.js), so `this` is the panel.
 
-import { journeyPrompt, parseJourney, connectionTree } from '../utils/journey.js';
+import { journeyPrompt, parseJourney, connectionTree, pickCoreFiles } from '../utils/journey.js';
 import { idbGet } from '../utils/idb.js';
 import { extractImports, resolveImports } from '../utils/github.js';
-import { pickCoreFiles } from '../utils/rebuild.js';
 
 export class JourneyPart {
   // The big picture first: the free chat reads the README and core files and
@@ -86,7 +85,7 @@ export class JourneyPart {
     const esc = (t) => this.escapeHtml(t || '');
     this.walkBody.innerHTML =
       (recent.length
-        ? `<div class="rebuild-label">Recent</div><ul class="jr-folders">${recent.map((r, k) => {
+        ? `<div class="sheet-label">Recent</div><ul class="jr-folders">${recent.map((r, k) => {
             const status = this.journeyStatus(states[`journey:local/${r.name}`]);
             return `<li><button type="button" class="jr-folder" data-wk="folder" data-i="${k}">` +
               `<span class="jr-folder-name">${esc(r.name)}</span>${status ? `<span class="jr-folder-status">${esc(status)}</span>` : ''}` +
@@ -168,9 +167,9 @@ export class JourneyPart {
     // A failed new overview says so, even when an older map exists
     if (this._journeyPending || this._journeyError || !j) {
       this.walkBody.innerHTML = this._journeyPending
-        ? `<div class="rebuild-wait"><span class="files-spinner"></span>Reading the README and core files for the big picture…<div class="rebuild-live"></div></div>`
-        : `<div class="rebuild-intro"><p>⚠️ Could not get an overview${this._journeyError ? `: ${esc(this._journeyError)}` : ''}.</p>` +
-          `<div class="jr-actions rb-start">` +
+        ? `<div class="sheet-wait"><span class="files-spinner"></span>Reading the README and core files for the big picture…<div class="sheet-live"></div></div>`
+        : `<div class="sheet-intro"><p>⚠️ Could not get an overview${this._journeyError ? `: ${esc(this._journeyError)}` : ''}.</p>` +
+          `<div class="jr-actions jr-start">` +
             (j ? `<button type="button" class="files-link-btn jr-link" data-wk="map">Back to the current map</button>` : '<span></span>') +
             `<button type="button" class="files-send jr-primary" data-wk="journey-create">Ask again</button></div></div>` +
           this.replyDisclosure(this._journeyRaw) + other;
@@ -182,18 +181,18 @@ export class JourneyPart {
     const chip = (f) => `<button type="button" class="jr-file" data-wk="open" data-path="${esc(f)}" title="Open ${esc(f)} in the reader">${esc(f.split('/').pop())}</button>`;
     this.walkBody.innerHTML =
       (j.summary ? `<p class="jr-summary">${esc(j.summary)}</p>` : '') +
-      `<div class="jr-head"><span class="rebuild-label">Reading order</span>` +
+      `<div class="jr-head"><span class="sheet-label">Reading order</span>` +
         (read ? `<span class="jr-count">${read} of ${j.path.length} read</span>` : '') + `</div>` +
-      `<ol class="rebuild-steps jr-path">${j.path.map((p, k) =>
+      `<ol class="sheet-steps jr-path">${j.path.map((p, k) =>
         `<li class="${p === next ? 'current' : ''}${done.has(p.file) ? ' done' : ''}" data-wk="walkfile" data-path="${esc(p.file)}">` +
-        `<span class="rebuild-step-dot">${done.has(p.file) ? '✓' : k + 1}</span>` +
+        `<span class="sheet-step-dot">${done.has(p.file) ? '✓' : k + 1}</span>` +
         `<span class="jr-step"><code>${esc(p.file)}</code>${p.why ? `<span>${esc(p.why)}</span>` : ''}</span></li>`).join('')}</ol>` +
       (next
         ? `<div class="jr-actions"><button type="button" class="files-send jr-primary" data-wk="walkfile" data-path="${esc(next.file)}">` +
           `${read ? 'Continue with' : 'Start with'} ${esc(next.file.split('/').pop())} →</button></div>`
         : '') +
       (j.parts?.length
-        ? `<div class="rebuild-label">How it is organised</div><ul class="jr-parts">${j.parts.map(p =>
+        ? `<div class="sheet-label">How it is organised</div><ul class="jr-parts">${j.parts.map(p =>
             `<li><strong>${esc(p.name)}</strong> ${esc(p.role)}${p.files.length ? `<span class="jr-files">${p.files.map(chip).join('')}</span>` : ''}</li>`).join('')}</ul>`
         : '') +
       `<div class="jr-connections"></div>` +
@@ -220,7 +219,7 @@ export class JourneyPart {
       `<li><button type="button" class="jr-node${n.repeat ? ' is-repeat' : ''}${done.has(n.file) ? ' is-read' : ''}" data-wk="walkfile" data-path="${esc(n.file)}" title="${esc(n.file)}">` +
       `${esc(n.file.split('/').pop())}${done.has(n.file) ? ' <span aria-label="read">✓</span>' : ''}${n.repeat ? ' <span>(above)</span>' : ''}</button>` +
       (n.children.length ? draw(n.children) : '') + `</li>`).join('')}</ul>`;
-    box.innerHTML = `<div class="rebuild-label">How the files connect</div><p class="jr-legend">Each file, then the files it uses.</p>` +
+    box.innerHTML = `<div class="sheet-label">How the files connect</div><p class="jr-legend">Each file, then the files it uses.</p>` +
       `<div class="jr-tree">${draw(connectionTree(order, importsOf))}</div>`;
   }
 }

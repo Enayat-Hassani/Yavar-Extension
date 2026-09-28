@@ -291,19 +291,19 @@ export class ChatPart {
   // map, a plan). One that fails is usually fine the second time, so before
   // giving up, ask the same chat again, then another chat site, then the
   // free API models (never the paid one). The chosen chat comes back after.
-  // `live`: the sheet whose .rebuild-live box shows what's happening: the
+  // `live`: the sheet whose .sheet-live box shows what's happening: the
   // values of the `list` field(s) as the reply streams in, else `hint`.
   // Returns { value, text, tried }: value null when replies came but none
   // could be read (text: the fullest one, to show; tried: who was asked,
   // "ChatGPT twice, Gemini"). Throws when no attempt got an answer at all.
   async askForJson(prompt, { attachments = [], parse, live = null, list = 'title', hint = 'Reading the code…' }) {
     const say = (msg) => {
-      const box = live?.querySelector('.rebuild-live');
-      if (box) box.innerHTML = `<span class="rebuild-live-hint">${this.escapeHtml(msg)}</span>`;
+      const box = live?.querySelector('.sheet-live');
+      if (box) box.innerHTML = `<span class="sheet-live-hint">${this.escapeHtml(msg)}</span>`;
     };
     const field = new RegExp(`"(?:${list})"\\s*:\\s*"((?:[^"\\\\]|\\\\.)+)"`, 'g');
     const onProgress = (text) => {
-      const box = live?.querySelector('.rebuild-live');
+      const box = live?.querySelector('.sheet-live');
       if (!box) return;
       const found = [...text.matchAll(field)].map(m => m[1]);
       if (found.length) box.innerHTML = `<ol>${found.map(t => `<li>${this.escapeHtml(t)}</li>`).join('')}</ol>`;
@@ -370,14 +370,6 @@ export class ChatPart {
   // Read the chat's latest answer and resolve with its text
   captureLastAnswerText() {
     return this.chatRequest('CAPTURE_LAST_ANSWER', { timeoutMs: 5000 });
-  }
-
-  async loadPlanFromChat() {
-    try {
-      await this.adoptPlan(await this.captureLastAnswerText());
-    } catch (e) {
-      this.showNotification('⚠️ ' + e.message);
-    }
   }
 
   // Attach text as a file (paste-a-File, like screenshots) so large files don't overflow the input

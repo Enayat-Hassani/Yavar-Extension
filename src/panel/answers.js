@@ -12,7 +12,7 @@ export class AnswersPart {
   // Under a finished answer: Copy, then Retry (onRetry), Save (saveAs), and
   // either "Ask <chat site>" (onAskChat, for API answers) or "Open in chat"
   // (openInChat, for answers the chat site wrote).
-  // inline: drawn as part of what it answers (a walkthrough block, a rebuild
+  // inline: drawn as part of what it answers (a walkthrough block, a review
   // step) rather than as a separate card
   answerCard(container, { title, onUseCode = null, collapsible = false, saveAs = null, onRetry = null, onAskChat = null, openInChat = true, inline = false } = {}) {
     const card = document.createElement('div');

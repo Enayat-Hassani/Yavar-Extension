@@ -15,7 +15,6 @@ import { SheetsPart } from './panel/sheets.js';
 import { WalkPart } from './panel/walk.js';
 import { JourneyPart } from './panel/journey.js';
 import { ReviewPart } from './panel/review.js';
-import { RebuildPart } from './panel/rebuild.js';
 import { ComposerPart } from './panel/composer.js';
 import { TabPart } from './panel/tab.js';
 import { CapturePart } from './panel/capture.js';
@@ -178,14 +177,6 @@ class YavarSidePanel {
       if (e.key === 'Escape') this.toolMenu.classList.add('hidden');
     });
 
-    this.rebuildPanel = document.getElementById('rebuild-panel');
-    this.rebuildBody = document.getElementById('rebuild-body');
-    document.getElementById('rebuild-close')?.addEventListener('click', () => this.rebuildPanel.classList.add('hidden'));
-    this.rebuildPanel?.addEventListener('keydown', (e) => {
-      if (e.key !== 'Escape') return;
-      if (!this.closeStepList(this.rebuildBody, true)) this.rebuildPanel.classList.add('hidden');
-    });
-    this.rebuildBody?.addEventListener('click', (e) => this.onRebuildClick(e));
     this.walkPanel = document.getElementById('walk-panel');
     this.walkBody = document.getElementById('walk-body');
     document.getElementById('walk-close')?.addEventListener('click', () => this.walkPanel.classList.add('hidden'));
@@ -200,7 +191,7 @@ class YavarSidePanel {
       if (!this.closeStepList(this.walkBody, true)) this.walkPanel.classList.add('hidden');
     });
     this.walkBody?.addEventListener('click', (e) => this.onWalkClick(e));
-    for (const body of [this.rebuildBody, this.walkBody]) {
+    for (const body of [this.walkBody]) {
       body?.addEventListener('click', (e) => {
         if (e.target.closest('.wk-ask-open')) this.toggleAsk(body, true);
       });
@@ -402,7 +393,6 @@ class YavarSidePanel {
     const repoItems = gh ? [
       ...(file ? [{ id: 'walk_file', icon: icon('lines'), name: `Read ${file}`, desc: 'Block by block, beside the code' }] : []),
       { id: 'explain_repo', icon: icon('compass'), name: 'Read this repository', desc: this._tabCtx.journey || 'The big picture, then file by file' },
-      { id: 'rebuild', icon: icon('layers'), name: 'Build it yourself', desc: this._tabCtx.rebuild || 'Recreate a small version, step by step' },
       { id: 'changes', icon: icon('commit'), name: 'Recent changes', desc: 'What the latest commits are about' }
     ] : [];
     return [
@@ -480,7 +470,6 @@ class YavarSidePanel {
     if (id === 'answer:api') { this.useApi(); return; }
     const tools = {
       changes: () => this.showRecentChanges(),
-      rebuild: () => this.openRebuild(),
       add_page: () => this.attachActivePage(),
       attach_page: () => this.attachActivePage(),
       attach_file: () => this.quickAddActiveFile('add'),
@@ -666,7 +655,6 @@ class YavarSidePanel {
           ? row('walk_diff', icon('diff'), gh.kind === 'pull' ? `Read pull request #${gh.number}` : 'Read this commit', 'Part by part, beside the code') : '') +
         (file ? row('walk_file', icon('lines'), `Read ${file}`, 'Block by block, beside the code') : '') +
         row('explain_repo', icon('compass'), 'Read this repository', this._tabCtx.journey || 'The big picture first, then file by file') +
-        row('rebuild', icon('layers'), 'Build it yourself', this._tabCtx.rebuild || 'Recreate a small version, step by step') +
         row('changes', icon('commit'), 'Recent changes', 'What the latest commits are about') +
         `</div>`;
     } else if (usable) {
@@ -944,7 +932,7 @@ class YavarSidePanel {
 
 // The panel's features live in src/panel/, one class of methods each; their
 // methods join the panel's here, so each keeps `this` as the panel.
-for (const part of [ChatPart, AnswersPart, RepoPart, ContextPart, SheetsPart, WalkPart, JourneyPart, ReviewPart, RebuildPart, ComposerPart, TabPart, CapturePart, HistoryPart, NotesPart, LabsPart]) {
+for (const part of [ChatPart, AnswersPart, RepoPart, ContextPart, SheetsPart, WalkPart, JourneyPart, ReviewPart, ComposerPart, TabPart, CapturePart, HistoryPart, NotesPart, LabsPart]) {
   for (const [name, desc] of Object.entries(Object.getOwnPropertyDescriptors(part.prototype))) {
     if (name === 'constructor') continue;
     if (name in YavarSidePanel.prototype) throw new Error(`${part.name}.${name} is defined twice`);

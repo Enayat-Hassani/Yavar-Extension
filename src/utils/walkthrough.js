@@ -2,7 +2,7 @@
 // the panel shows them one at a time (and highlights each in your tab), and
 // you can retype a block from memory to practise. Pure functions (tested).
 
-import { jsonCandidates } from './rebuild.js';
+import { jsonCandidates } from './json.js';
 import { keywordInfo } from './markdown.js';
 
 // A gap the AI left between two blocks that is at most this many lines

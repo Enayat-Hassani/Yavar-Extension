@@ -2,8 +2,82 @@
 // reading order), then each file block by block, and after each file a
 // suggestion for the next one. Pure functions (tested).
 
-import { jsonCandidates } from './rebuild.js';
-import { parseFileRef } from './github.js';
+import { jsonCandidates } from './json.js';
+import { parseFileRef, isReadablePath, suggestStartFiles } from './github.js';
+
+const SOURCE_EXT = /\.(py|js|mjs|cjs|jsx|ts|tsx|go|rs|rb|php|java|kt|c|h|cpp|cc|hpp|cs|swift|dart|lua|ex|exs|scala|vue|svelte|sh)$/i;
+const TEST_PATH = /(^|\/)(tests?|__tests__|spec|specs|e2e|fixtures|examples?|docs?|benchmarks?)\//i;
+
+// Files that best show how the project works, within a size budget:
+// docs/manifest/entry points first, then shallow source files, small first.
+export function pickCoreFiles(items, budgetBytes = 120000, maxFiles = 25) {
+  const blobs = items.filter(i => i.type === 'blob' && isReadablePath(i.path));
+  const size = new Map(blobs.map(b => [b.path, b.size || 0]));
+  const picks = [];
+  let used = 0;
+  const take = (p) => {
+    if (picks.includes(p) || picks.length >= maxFiles) return;
+    const s = size.get(p) || 0;
+    if (s > budgetBytes * 0.4 || used + s > budgetBytes) return;
+    picks.push(p);
+    used += s;
+  };
+  suggestStartFiles(blobs.map(b => b.path)).forEach(take);
+  blobs
+    .filter(b => SOURCE_EXT.test(b.path) && !TEST_PATH.test(b.path + '/') && !/\.(d\.ts|test\.\w+|spec\.\w+)$/.test(b.path))
+    .sort((a, b) => a.path.split('/').length - b.path.split('/').length || (a.size || 0) - (b.size || 0))
+    .forEach(b => take(b.path));
+  return picks;
+}
+
+export function planPrompt(projectName) {
+  return `I want to learn how ${projectName} is built by rebuilding a simplified version of it myself, step by step. ` +
+    `The attached pack contains its key files and a map of the repository.\n\n` +
+    `Act as a coding mentor and design a rebuild plan:\n` +
+    `- 5 to 10 steps, from an empty folder to a small working core version (skip polish, config and edge cases).\n` +
+    `- Each step is small (30-60 minutes for a beginner), builds on the previous one, and ends with something I can run or check.\n` +
+    `- For each step, list the original files (paths from the map) I should study for it.\n\n` +
+    `Reply with ONLY one JSON code block, exactly in this shape:\n` +
+    '```json\n' +
+    `{"project": "short name", "language": "main language", "summary": "one or two sentences on what we will build",\n` +
+    ` "steps": [{"title": "short title", "goal": "the concept this step teaches", "study": ["path/in/repo"],\n` +
+    `   "task": "concretely what to write in this step", "done_when": "how I can tell it works"}]}\n` +
+    '```';
+}
+
+export function hintPrompt(plan, i) {
+  const s = plan.steps[i];
+  return `I'm rebuilding ${plan.project}, step ${i + 1} of ${plan.steps.length}: "${s.title}".\n` +
+    `Task: ${s.task}\n\n` +
+    `Give me a hint, not the solution: the next small thing to do, the idea I'm missing, and which part of ` +
+    `${s.study?.length ? s.study.join(', ') : 'the original code'} to look at. Keep it short.`;
+}
+
+// A question of the user's own about the current step. `earlier`: what the
+// mentor already said on it (earlierAnswers), so follow-ups make sense in
+// any chat.
+export function askPrompt(plan, i, code, question, earlier = '') {
+  const s = plan.steps[i];
+  return `I'm rebuilding ${plan.project}, step ${i + 1} of ${plan.steps.length}: "${s.title}".\n` +
+    `Task: ${s.task}\n` + (s.done_when ? `Done when: ${s.done_when}\n` : '') + `\n` +
+    (code.trim() ? `My code so far:\n\n\`\`\`${plan.language ? plan.language.toLowerCase() : ''}\n${code.replace(/\n$/, '')}\n\`\`\`\n\n` : '') +
+    (earlier ? `${earlier}\n\n` : '') +
+    `My question: ${question}\n\n` +
+    `Answer it like a mentor: help me understand, and don't write the step for me unless I ask for code.`;
+}
+
+export function checkPrompt(plan, i, code, attached) {
+  const s = plan.steps[i];
+  return `I'm rebuilding ${plan.project}, step ${i + 1} of ${plan.steps.length}: "${s.title}".\n` +
+    `Task: ${s.task}\nDone when: ${s.done_when}\n\n` +
+    `Here is my attempt:\n\n\`\`\`${plan.language ? plan.language.toLowerCase() : ''}\n${code.replace(/\n$/, '')}\n\`\`\`\n\n` +
+    (attached ? `The attached pack has the original files for this step.\n\n` : '') +
+    `Review it like a mentor:\n` +
+    `1. Does it do what the step asks? If not, what is missing?\n` +
+    `2. The key differences from the original, and why the original does it that way.\n` +
+    `3. One or two concrete improvements.\n` +
+    `Don't rewrite everything for me; show only small snippets where needed.`;
+}
 
 export function journeyPrompt(name, fname) {
   return `The attached "${fname}" has the README and core files of ${name}, starting with a map of the repository. ` +

@@ -9,7 +9,7 @@ A Chrome extension that embeds ChatGPT, Claude, and Gemini in a sidebar — so y
 **The Yavar view**: Yavar opens as a full-page app. The chat (ChatGPT, Claude or Gemini) keeps running behind it; the chat button in the header shows it, and **‹ Yavar** brings you back.
 
 - **Header:** the model pill switches models; the new model picks up the conversation (API models get the earlier turns as their own, a chat site gets them as an attached `conversation-so-far.md`, newest turns first if it's long), and *Ask* on an API answer passes them on too, the pencil starts a new conversation, and **⋯** holds saved answers, notes, *Continue in a fresh chat* and settings.
-- **Start page:** actions for the tab you're on. On GitHub: *Read <file>* on a file page, *Read this commit* or *Read pull request #N* on those pages, *Read this repository*, *Build it yourself* and *Recent changes*. On other pages: *Summarize*, *Ask about it*. With no page open: *Read a project folder*.
+- **Start page:** actions for the tab you're on. On GitHub: *Read <file>* on a file page, *Read this commit* or *Read pull request #N* on those pages, *Read this repository* and *Recent changes*. On other pages: *Summarize*, *Ask about it*. With no page open: *Read a project folder*.
 - **Composer:** type to the model, or press **+** to add the file open in your tab, **files from the repository** or **a folder**, **this page** (on YouTube, the video's transcript), or a **screenshot**: click an element on the page, or drag an area (↑ widens a click to the element around it, ✓ or Enter takes it). Along with the picture, Yavar sends what's in it as Markdown: text, a table as a table, links, image descriptions, the heading above it, and the HTML of a control or form. Each attachment chip shows its size in tokens, and the message box offers one-tap actions that fit what's attached: a table gets *Explain / Key takeaways / As CSV*, code *Explain / Find bugs / Line by line*, an error *Why this error? / How do I fix it?*, a paragraph *Summarize / Explain simply / Words to learn*. **Use a prompt** wraps what you typed in one of your templates. With files attached, one tap asks for *Explain*, *Line by line*, *How it fits*, *Find bugs*, *Better ways* or *Quiz me*.
 - **Selections, pages and screenshots from outside the panel** (the floating menu, the right-click menu, the shortcuts) arrive in the composer. A floating-menu prompt is sent at once if *Settings → Send floating-menu prompts right away* is on; otherwise it waits in the message box.
 - **Answers** stream in and render tables, checklists, nested lists and coloured code (long blocks fold). Under each: Copy, Ask again, Save, and *Open in chat*, or with **API** chosen, *Ask ChatGPT/Claude/Gemini* to put the same question to the free chat. API answers suggest three follow-up questions. Hover your question to edit and resend it. ■ stops waiting.
@@ -38,19 +38,17 @@ Add, edit, or remove your own templates under *Settings → Prompts* using `{{se
 
 When a walkthrough, reading map or plan comes back in a form Yavar can't read, it asks again before showing an error: the same chat once more, then another chat site (Gemini first), then the free API models, never the paid one. If the chat page shows its own error (for example Gemini's *Something went wrong (1060)*), Yavar moves on at once and the final error quotes it. Your chosen chat is loaded back afterwards.
 
-**Build it yourself** — the best way to understand a codebase is to build a small version of it. From the start page on GitHub (or for the folder you last opened), one click sends the project's core files and the AI writes a plan of 5-10 small steps. For each step: the files to study (one click opens them in the reader and explains them), your task, how you know it works, a code editor for your version, **Hint** (not the solution), **Review my code** (compared against the original files), and a chat button for your own question about the step. Answers appear inside the step, with Copy and *Use in editor* on each code block. Progress and mentor notes are saved per project.
-
 **IELTS practice** (off by default) — five steps on the article in your tab, from its thesis to a Task 2 paragraph. You write each step first; the chat gives feedback after. Turn it on and edit its prompts under *Settings → Labs*.
 
 **Add to Morfia** (off by default: *Settings → Labs*) — adds the article in your tab to Morfia, a separate practice app running on your computer, in one click. Connect once with the code from Morfia's Settings. Morfia fetches and cleans the article itself, so select a passage first only if you want Morfia to open there.
 
 **Answers inside Yavar**: every answer streams into the conversation as the AI writes it. Code blocks get Copy, each answer has Copy, Ask again and Save, and the composer asks follow-ups in the same chat. *Open in chat* shows the real chat whenever you want it (API answers have no chat page, so they offer *Ask* the chat site instead).
 
-**Private chats for Yavar's work** (on by default): these requests and the rebuild hints and reviews run in a temporary chat, so they don't fill your chat history: `chatgpt.com/?temporary-chat=true`, Claude's incognito chat, or Gemini's *Temporary chat* button. Follow-ups continue in the same temporary chat. Save the answers you want to keep. Turn it off under *Settings → Asking the AI* to keep everything in your normal history.
+**Private chats for Yavar's work** (on by default): these requests, walks and reviews run in a temporary chat, so they don't fill your chat history: `chatgpt.com/?temporary-chat=true`, Claude's incognito chat, or Gemini's *Temporary chat* button. Follow-ups continue in the same temporary chat. Save the answers you want to keep. Turn it off under *Settings → Asking the AI* to keep everything in your normal history.
 
 **Model APIs**: choose **API** in the model menu to answer through model APIs instead of a chat site. Yavar tries a local OpenAI-compatible gateway first (OmniRoute, Ollama), then the OpenRouter free models you tick in *Settings → Model APIs*, then one paid model if you set one. A model that is busy, rate-limited or silent is skipped, and each answer names the model that wrote it. The paid model has a monthly limit ($3 by default): a paid answer shows what it cost, Settings shows this month's total, and at the limit Yavar uses only the free models until the next month. Keys stay on this device.
 
-**Sheets**: Build it yourself, notes and saved answers each fill the panel. ✕ or Esc goes back to the Yavar view.
+**Sheets**: reading, notes and saved answers each fill the panel. ✕ or Esc goes back to the Yavar view.
 
 **History & saved answers** — capture the AI's last answer and keep it in a searchable saved-answers panel. Answers saved while reading a repo are tagged with it (click the tag to see everything about that repo). The **+** in the panel's header saves the chat's latest answer. Expand, copy, send to Notes, or **export everything as Markdown**.
 
@@ -113,7 +111,7 @@ Yavar-Extension/
 │   ├── background.js     # Service worker (lifecycle, screenshot, routing)
 │   ├── sidepanel.js      # The sidebar: setup, start page, thread, menus
 │   ├── panel/            # Its features, one module each: chat, answers, repo,
-│   │                     #   context, walk, journey, review, rebuild, composer,
+│   │                     #   context, walk, journey, review, composer,
 │   │                     #   tab, capture, history, notes, labs, sheets
 │   ├── reader.js         # The reader tab: a file with its lines highlighted, editable when local
 │   ├── ai-bridge.js      # Auto-submit / auto-paste / answer capture on AI platforms
@@ -126,7 +124,7 @@ Yavar-Extension/
 │       ├── changes.js    # A commit or PR diff split into parts
 │       ├── git.js        # Review my changes: reading .git, and diffs against the files on disk
 │       ├── intents.js    # Every question Yavar asks, written once (explain, find bugs…)
-│       ├── rebuild.js    # Build it yourself: plans, hints, reviews
+│       ├── json.js       # Reading JSON out of an AI reply
 │       ├── coach.js      # IELTS practice: the five steps and their prompts
 │       ├── material.js   # Add to Morfia: the article, sent to Morfia's bridge
 │       ├── llm.js        # Model APIs: local gateway, OpenRouter, the monthly budget

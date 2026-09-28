@@ -39,7 +39,7 @@ export function turnsToMessages(turns, maxChars = HANDOFF_CHARS) {
 export const HANDOFF_NOTE = 'We started this conversation in another chat. The attached "conversation-so-far.md" ' +
   'has it; read it and continue from there as if you had been in it. My next message:';
 
-// The latest answers kept on a walkthrough block or a rebuild step, for a
+// The latest answers kept on a walkthrough block or a part of a change, for a
 // question asked about it: the question is self-contained, so a follow-up
 // ("what did you mean by…") still works after a model switch or in a new
 // chat. Notes are { label | title, text } or { label, quiz: [{ q, a }] }.

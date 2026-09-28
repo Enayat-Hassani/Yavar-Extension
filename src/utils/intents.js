@@ -11,7 +11,7 @@
 // default that improves still reaches the rest.
 //
 // Prompts whose replies Yavar reads as data (a walk's blocks, its quiz, the
-// reading map, a rebuild plan) keep their own shapes in their modules.
+// reading map) keep their own shapes in their modules.
 
 export const PROMPTS_KEY = 'review';
 

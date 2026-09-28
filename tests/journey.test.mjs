@@ -102,3 +102,20 @@ test('the project brief is the reading map, else the README opening, else nothin
   assert.equal(projectBrief(null, ''), '');
   assert.equal(projectBrief({ summary: 'x'.repeat(50) }, '', 40).length, 'About the project, for context: '.length + 40);
 });
+
+
+test('the core files for the reading map: docs and shallow source within budget, not tests or big files', async () => {
+  const { pickCoreFiles } = await import('../src/utils/journey.js');
+  const items = [
+    { path: 'README.md', type: 'blob', size: 2000 },
+    { path: 'package.json', type: 'blob', size: 500 },
+    { path: 'src/index.ts', type: 'blob', size: 3000 },
+    { path: 'src/core/engine.ts', type: 'blob', size: 8000 },
+    { path: 'src/huge.ts', type: 'blob', size: 90000 },
+    { path: 'tests/engine.test.ts', type: 'blob', size: 1000 },
+    { path: 'src/types.d.ts', type: 'blob', size: 100 },
+    { path: 'logo.png', type: 'blob', size: 10 },
+    { path: 'src', type: 'tree' }
+  ];
+  assert.deepEqual(pickCoreFiles(items, 20000), ['README.md', 'package.json', 'src/index.ts', 'src/core/engine.ts']);
+});

@@ -1,4 +1,4 @@
-// Code boxes (walkthrough practice, rebuild steps) are CodeMirror editors.
+// Code boxes (typing practice in a walk) are CodeMirror editors.
 // The bundled modes cover Python, JavaScript/TypeScript/JSON,
 // CSS and HTML; every other language gets a small mode that colours comments,
 // strings, numbers and keywords the same way the reader and answers do.
@@ -15,7 +15,7 @@ const BUNDLED = {
 };
 
 // The CodeMirror mode for a language name ("python", "TypeScript", "go"),
-// as langFromPath() or a rebuild plan gives it. Plain text when unknown.
+// as langFromPath() gives it. Plain text when unknown.
 export function cmModeFor(lang) {
   const l = String(lang || '').trim().toLowerCase();
   if (!l || /^(text|txt|plain|plaintext|markdown|md)$/.test(l)) return 'text/plain';

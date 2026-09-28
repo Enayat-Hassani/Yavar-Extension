@@ -272,11 +272,11 @@ export class WalkPart {
     const toMap = this.journey && !w?.change ? `<button type="button" class="wk-map" data-wk="map">‹ Map</button>` : '';
     if (!w?.blocks) {
       this.walkBody.innerHTML = (toMap ? `<div class="wk-bar">${toMap}</div>` : '') + (w?.error
-        ? `<div class="rebuild-intro"><p>⚠️ Could not make the walkthrough: ${esc(w.error)}.</p>` +
+        ? `<div class="sheet-intro"><p>⚠️ Could not make the walkthrough: ${esc(w.error)}.</p>` +
           `<button type="button" class="files-send jr-primary" data-wk="retry">Ask again</button></div>` +
           this.replyDisclosure(this._walkRaw)
-        : `<div class="rebuild-wait"><span class="files-spinner"></span>${w?.change ? `Reading the diff of ${esc(w.change.label.toLowerCase())}…`
-          : `The AI is splitting ${esc(w?.path?.split('/').pop())} into blocks…`}<div class="rebuild-live"></div></div>`);
+        : `<div class="sheet-wait"><span class="files-spinner"></span>${w?.change ? `Reading the diff of ${esc(w.change.label.toLowerCase())}…`
+          : `The AI is splitting ${esc(w?.path?.split('/').pop())} into blocks…`}<div class="sheet-live"></div></div>`);
       return;
     }
     const { blocks, current: i, typed = {}, range, total, change } = w;
@@ -591,7 +591,7 @@ export class WalkPart {
       }) +
       `<h3 class="wk-title">Review summary</h3>` +
       (w.summary ? `<p class="wk-summary">${esc(w.summary)}</p>` : '') +
-      `<div class="rebuild-label">Found with Find bugs</div>` +
+      `<div class="sheet-label">Found with Find bugs</div>` +
       (found.length
         ? `<ul class="wk-found">${found.map(({ b, k }) =>
             `<li><button type="button" class="files-link-btn" data-wk="goto" data-i="${k}">Part ${k + 1} · ${esc(b.title)}</button></li>`).join('')}</ul>`
@@ -706,7 +706,7 @@ export class WalkPart {
     btn.hidden = true;   // done: Up next takes its place
     const box = this.walkBody.querySelector('.walk-next');
     const esc = (t) => this.escapeHtml(t || '');
-    box.innerHTML = `<div class="rebuild-label">Up next</div><p class="rebuild-goal">Looking at what ${esc(path.split('/').pop())} uses…</p>`;
+    box.innerHTML = `<div class="sheet-label">Up next</div><p class="sheet-goal">Looking at what ${esc(path.split('/').pop())} uses…</p>`;
 
     const fileSet = this.repoTree.fileSet;
     const j = this.journey;
@@ -725,13 +725,13 @@ export class WalkPart {
     const draw = (pickedBy = '') => {
       if (!box.isConnected) return;
       const [first, ...rest] = candidates;
-      box.innerHTML = `<div class="rebuild-label">Up next</div>` + (first
+      box.innerHTML = `<div class="sheet-label">Up next</div>` + (first
         ? `<button type="button" class="jr-next" data-wk="walkfile" data-path="${esc(first.file)}">` +
             `<code>${esc(first.file)}</code><span>${esc(first.reason)}</span></button>` +
           (pickedBy ? `<p class="jr-picked">Picked by ${esc(pickedBy)}</p>` : '') +
           (rest.length ? `<div class="jr-also">Also related: ${rest.map(c =>
             `<button type="button" class="jr-file" data-wk="walkfile" data-path="${esc(c.file)}" title="${esc(c.reason)}">${esc(c.file.split('/').pop())}</button>`).join('')}</div>` : '')
-        : `<p class="rebuild-goal">${j ? 'You have read every file in the reading order.' : 'Nothing else found that this file uses.'}</p>`);
+        : `<p class="sheet-goal">${j ? 'You have read every file in the reading order.' : 'Nothing else found that this file uses.'}</p>`);
     };
     draw();
     box.scrollIntoView({ block: 'nearest', behavior: 'smooth' });

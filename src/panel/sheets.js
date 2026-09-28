@@ -1,5 +1,5 @@
-// Pieces shared by the walk and Build it yourself: the step bar, code boxes,
-// and the ask box in the dock.
+// Pieces of the reading sheet: the step bar, code boxes, and the ask box in
+// the dock.
 // Its methods join YavarSidePanel's (see the end of sidepanel.js), so `this` is the panel.
 
 import { cmModeFor, defineGenericMode, closeBracketKeys } from '../utils/codeEditor.js';
