@@ -30,7 +30,7 @@ async function startReview(page) {
   await wait(page, 300);
 }
 
-test('a change leads with judging it, with the rest under More', async () => {
+test('a change leads with judging it, with the rest in the ⋯ menu', async () => {
   const b = await launch();
   try {
     const page = await b.open('sidepanel.html');
@@ -44,8 +44,8 @@ test('a change leads with judging it, with the rest under More', async () => {
       return { dock, more: shown() };
     });
     // Each change is explained line by line as it opens, so Line by line waits under More
-    assert.deepEqual(r.dock, ['Find bugs', 'Better ways', 'Explain more', 'More']);
-    assert.deepEqual(r.more, ['Find bugs', 'Better ways', 'Explain more', 'Less', 'Line by line', 'How to test it', 'Quiz me', 'Write it yourself']);
+    assert.deepEqual(r.dock, ['Find bugs', 'Better ways', 'Explain more']);
+    assert.deepEqual(r.more, ['Find bugs', 'Better ways', 'Explain more', 'Line by line', 'How to test it', 'Quiz me', 'Write it yourself']);
     assert.deepEqual(b.errors, []);
   } finally { await b.close(); }
 });
@@ -129,7 +129,7 @@ test('a file walk offers the same help as a change, and typing practice compares
         score: document.querySelector('.walk-score')?.textContent || '', best: p.walk.typed?.[0]?.best };
     });
     // A block is already explained line by line, so learning it leads
-    assert.deepEqual(r.dock, ['Explain more', 'Practise typing', 'Quiz me', 'More']);
+    assert.deepEqual(r.dock, ['Explain more', 'Type it', 'Quiz me']);
     assert.deepEqual(r.asked, ['Find bugs']);
     // A one-line gap joins the block before it (walkthrough.js)
     assert.match(r.bugsPrompt, /^I'm reading lines 1-6 of `src\/cart\.js` from shop\. Review this code for bugs/);
@@ -294,7 +294,7 @@ test('the reading map gives the big picture and the README before the code, and 
   } finally { await b.close(); }
 });
 
-test('in a file walk, Explain more studies the block and Line by line waits under More', async () => {
+test('in a file walk, Explain more studies the block and Line by line waits in the ⋯ menu', async () => {
   const b = await launch();
   try {
     const page = await b.open('sidepanel.html');
@@ -320,6 +320,39 @@ test('in a file walk, Explain more studies the block and Line by line waits unde
     assert.match(asked.more.prompt, /Explain what this does and how it works, step by step/);
     assert.equal(asked.lines.label, 'Line by line');
     assert.match(asked.lines.prompt, /Go through it line by line/);
+    assert.deepEqual(b.errors, []);
+  } finally { await b.close(); }
+});
+
+test('the ⋯ menu keeps the bar one row, and closes on a choice, a click elsewhere or Escape', async () => {
+  const b = await launch();
+  try {
+    const page = await b.open('sidepanel.html', { width: 340, height: 700 });
+    await openFolder(page, 'shop', filesOf(makeRepo(BEFORE, AFTER)));
+    await stubChat(page, () => 'ok');
+    await page.evaluate(async () => {
+      const p = window.__panel;
+      const fence = '`'.repeat(3);
+      p.askForJson = async (prompt, o) => ({ value: o.parse(`${fence}json\n{"summary":"Cart totals.","blocks":[{"start":1,"end":5,"title":"total()","explain":"Adds up."},{"start":7,"end":9,"title":"count()","explain":"Counts."}]}\n${fence}`), text: '', tried: 1 });
+      await p.startWalk('src/cart.js');
+    });
+    const menuOpen = () => page.evaluate(() => !document.querySelector('.wk-extra').hidden);
+    // Every control of the bar sits on one row, even this narrow
+    const tops = await page.evaluate(() => [...document.querySelectorAll('.wk-acts > button')].map(x => Math.round(x.getBoundingClientRect().top + x.offsetHeight / 2)));
+    assert.equal(new Set(tops).size, 1);
+    await page.click('[data-wk="moreacts"]');
+    assert.equal(await menuOpen(), true);
+    await page.click('.wk-title');
+    assert.equal(await menuOpen(), false);
+    await page.click('[data-wk="moreacts"]');
+    await page.keyboard.press('Escape');
+    assert.equal(await menuOpen(), false);
+    assert.equal(await page.evaluate(() => document.getElementById('walk-panel').classList.contains('hidden')), false);
+    await page.click('[data-wk="moreacts"]');
+    await page.click('.wk-extra [data-wk="tests"]');
+    assert.equal(await menuOpen(), false);
+    await page.waitForFunction(() => window.__asks.length);
+    assert.equal(await page.evaluate(() => window.__asks.at(-1).label), 'How to test it');
     assert.deepEqual(b.errors, []);
   } finally { await b.close(); }
 });

@@ -197,7 +197,8 @@ class YavarSidePanel {
         }
       }
       if (e.key !== 'Escape') return;
-      if (!this.closeStepList(this.walkBody, true)) this.walkPanel.classList.add('hidden');
+      if (this.toggleMoreActs(false)) this.walkBody.querySelector('[data-wk="moreacts"]')?.focus();
+      else if (!this.closeStepList(this.walkBody, true)) this.walkPanel.classList.add('hidden');
     });
     this.walkBody?.addEventListener('click', (e) => this.onWalkClick(e));
     for (const body of [this.walkBody]) {
