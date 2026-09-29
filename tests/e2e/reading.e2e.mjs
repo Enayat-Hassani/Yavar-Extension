@@ -30,7 +30,7 @@ async function startReview(page) {
   await wait(page, 300);
 }
 
-test('a part shows three actions, with the rest under More', async () => {
+test('a change leads with judging it, with the rest under More', async () => {
   const b = await launch();
   try {
     const page = await b.open('sidepanel.html');
@@ -43,8 +43,9 @@ test('a part shows three actions, with the rest under More', async () => {
       document.querySelector('[data-wk="moreacts"]').click();
       return { dock, more: shown() };
     });
-    assert.deepEqual(r.dock, ['Line by line', 'Find bugs', 'Better ways', 'More']);
-    assert.deepEqual(r.more, ['Line by line', 'Find bugs', 'Better ways', 'Less', 'Explain more', 'How to test it', 'Quiz me', 'Write it yourself']);
+    // Each change is explained line by line as it opens, so Line by line waits under More
+    assert.deepEqual(r.dock, ['Find bugs', 'Better ways', 'Explain more', 'More']);
+    assert.deepEqual(r.more, ['Find bugs', 'Better ways', 'Explain more', 'Less', 'Line by line', 'How to test it', 'Quiz me', 'Write it yourself']);
     assert.deepEqual(b.errors, []);
   } finally { await b.close(); }
 });
@@ -127,7 +128,8 @@ test('a file walk offers the same help as a change, and typing practice compares
       return { dock, asked: window.__asks.map(a => a.label), bugsPrompt: window.__asks[0].prompt.slice(0, 80),
         score: document.querySelector('.walk-score')?.textContent || '', best: p.walk.typed?.[0]?.best };
     });
-    assert.deepEqual(r.dock, ['Line by line', 'Find bugs', 'Better ways', 'More']);
+    // A block is already explained line by line, so learning it leads
+    assert.deepEqual(r.dock, ['Explain more', 'Practise typing', 'Quiz me', 'More']);
     assert.deepEqual(r.asked, ['Find bugs']);
     // A one-line gap joins the block before it (walkthrough.js)
     assert.match(r.bugsPrompt, /^I'm reading lines 1-6 of `src\/cart\.js` from shop\. Review this code for bugs/);
@@ -288,6 +290,36 @@ test('the reading map gives the big picture and the README before the code, and 
     }, done);
     assert.deepEqual(await order([]), { sections: ['How it is organised', 'Reading order'], docs: ['README.md'], docsBeforeFiles: true });
     assert.deepEqual((await order(['src/cart.js'])).sections, ['Reading order', 'How it is organised']);
+    assert.deepEqual(b.errors, []);
+  } finally { await b.close(); }
+});
+
+test('in a file walk, Explain more studies the block and Line by line waits under More', async () => {
+  const b = await launch();
+  try {
+    const page = await b.open('sidepanel.html');
+    await openFolder(page, 'shop', filesOf(makeRepo(BEFORE, AFTER)));
+    await stubChat(page, () => 'ok');
+    const asked = await page.evaluate(async () => {
+      const p = window.__panel;
+      const fence = '`'.repeat(3);
+      p.askForJson = async (prompt, o) => ({ value: o.parse(`${fence}json\n{"summary":"Cart totals.","blocks":[{"start":1,"end":5,"title":"total()","explain":"Adds up the items."},{"start":7,"end":9,"title":"count()","explain":"Counts them."}]}\n${fence}`), text: '', tried: 1 });
+      await p.startWalk('src/cart.js');
+      const ask = async (act) => {
+        const n = window.__asks.length;
+        document.querySelector(`.wk-dock [data-wk="${act}"]`).click();
+        for (let t = 0; t < 50 && window.__asks.length === n; t++) await new Promise(x => setTimeout(x, 100));
+        const a = window.__asks.at(-1);
+        return { label: a.label, prompt: a.prompt.slice(0, 200) };
+      };
+      const more = await ask('more');
+      document.querySelector('[data-wk="moreacts"]').click();
+      return { more, lines: await ask('lines') };
+    });
+    assert.equal(asked.more.label, 'Explain more');
+    assert.match(asked.more.prompt, /Explain what this does and how it works, step by step/);
+    assert.equal(asked.lines.label, 'Line by line');
+    assert.match(asked.lines.prompt, /Go through it line by line/);
     assert.deepEqual(b.errors, []);
   } finally { await b.close(); }
 });

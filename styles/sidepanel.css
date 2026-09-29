@@ -38,6 +38,8 @@
   /* Held down: one step deeper than hover */
   --fill-press: color-mix(in srgb, var(--text-primary) 12%, transparent);
   --accent-press: color-mix(in srgb, var(--accent) 86%, black);
+  /* Blue for small text on a tint: 4.5:1 or better on --accent-soft */
+  --accent-ink: color-mix(in srgb, var(--accent) 80%, black);
   --warning: #b25e00;
   /* Model marks: whose chat it is */
   --brand-neutral: #6e6e73;
@@ -98,6 +100,7 @@
     --cm-builtin: #dabaff;
     --cm-property: #78c2b3;
     --warning: #ffb340;
+    --accent-ink: #4aa3ff;
     --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
     --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.35);
     --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.45), 0 2px 6px rgba(0, 0, 0, 0.25);
@@ -730,7 +733,7 @@ html, body {
   font: inherit;
   font-size: 12.5px;
   font-weight: 500;
-  color: var(--accent);
+  color: var(--accent-ink);
   background: none;
   border: none;
   border-radius: var(--r-pill);
@@ -2103,9 +2106,6 @@ button.lens-item:focus-visible {
 .walk-notes .line-ref { color: var(--accent); cursor: pointer; border-radius: 3px; }
 .walk-notes .line-ref:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); text-decoration: underline; }
 /* More actions under the three a part needs most */
-.wk-extra { display: contents; }
-.wk-extra[hidden] { display: none; }
-.wk-more-toggle { color: var(--text-secondary); }
 .wk-found { margin: 4px 0 8px; padding-left: 18px; font-size: 13px; }
 .wk-found li { margin: 2px 0; }
 .wk-counts ins { color: var(--success); text-decoration: none; font-weight: 600; }
@@ -2158,9 +2158,11 @@ button.lens-item:focus-visible {
   .wk-dot::before { transition: none; }
 }
 
-/* What to do with this block or step: quiet text actions pinned to the
-   bottom of the sheet. With little content they sit right under it; with a
-   long answer they stay at the bottom edge while the answer scrolls. */
+/* What to do with this block or step, pinned to the bottom of the sheet.
+   With little content it sits right under it; with a long answer it stays
+   at the bottom edge while the answer scrolls under its frosted backing.
+   The actions the walk needs most are tinted buttons; the rest wait under
+   More, on a row of their own. */
 .wk-dock {
   position: sticky;
   bottom: -24px;              /* cancels .sheet-body's bottom padding */
@@ -2170,28 +2172,80 @@ button.lens-item:focus-visible {
   align-items: center;
   gap: var(--sp-1);
   margin: auto -16px -24px;    /* auto: the bottom edge even when the content is short */
-  padding: 6px 12px calc(6px + env(safe-area-inset-bottom));
-  background: var(--bg-primary);
+  padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+  background: color-mix(in srgb, var(--bg-primary) 86%, transparent);
+  -webkit-backdrop-filter: saturate(1.6) blur(16px);
+  backdrop-filter: saturate(1.6) blur(16px);
   border-top: 1px solid var(--border);
 }
-.wk-dock .run-ask[aria-expanded="true"] { background: var(--accent-soft); }
 .wk-acts { flex: 1 0 100%; min-height: 36px; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1); }   /* as tall as the field, so swapping doesn't move the dock */
+
+/* The key actions: tinted capsules */
+.run-ask.is-key {
+  min-height: 32px;
+  padding: 0 12px;
+  font-weight: 600;
+  background: var(--accent-soft);
+}
+.run-ask.is-key:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.run-ask.is-key:active:not(:disabled) { background: color-mix(in srgb, var(--accent) 22%, transparent); opacity: 1; }
+/* Practice open: the button that opened it stays lit */
+.run-ask.is-key[aria-expanded="true"] { color: var(--on-accent); background: var(--accent); }
+.run-ask.is-key[aria-expanded="true"]:hover { background: var(--accent-hover); }
+/* Waiting for its answer */
+.run-ask.is-key:disabled { background: color-mix(in srgb, var(--text-primary) 5%, transparent); animation: askWait 1.2s var(--ease-std) infinite alternate; }
+@keyframes askWait { to { opacity: 0.55; } }
+
+/* More: plain, with a chevron that turns as the row opens */
+.wk-more-toggle { display: inline-flex; align-items: center; gap: 6px; padding: 0 8px; color: var(--text-secondary); }
+.wk-more-toggle:hover { color: var(--text-primary); background: var(--fill-hover); }
+.wk-more-chev {
+  width: 6px;
+  height: 6px;
+  margin-top: -3px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  rotate: 45deg;
+  transition: rotate var(--dur-base) var(--ease-out), margin var(--dur-base) var(--ease-out);
+}
+.wk-more-toggle[aria-expanded="true"] { color: var(--text-primary); }
+.wk-more-toggle[aria-expanded="true"] .wk-more-chev { margin-top: 3px; rotate: -135deg; }
+
+/* The chat button ends the first row; the rest of the actions open below */
+.wk-ask-open { order: 1; }
+.wk-extra {
+  order: 2;
+  flex: 1 0 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin: 2px -4px 0;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  transition: opacity var(--dur-base) var(--ease-std), translate var(--dur-base) var(--ease-out), display var(--dur-base) allow-discrete;
+}
+@starting-style { .wk-extra:not([hidden]) { opacity: 0; translate: 0 4px; } }
+.wk-extra[hidden] { display: none; }
+
 .wk-ask-open {
   margin-left: auto;
   width: 32px;
   height: 32px;
   display: grid;
   place-items: center;
-  color: var(--accent);        /* an action, like the text actions beside it */
+  color: var(--accent-ink);    /* an action, like the ones beside it */
   background: none;
   border: none;
   border-radius: 50%;
   cursor: pointer;
-  transition: background var(--dur-quick);
 }
 .wk-ask-open:hover { background: var(--accent-soft); }
 .wk-ask-open:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .wk-dock.is-asking .wk-acts { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .wk-more-chev, .wk-extra { transition: none; }
+  .run-ask.is-key:disabled { animation: none; }
+}
 /* Your own question: takes the actions' row, sliding in from the chat button */
 .wk-ask {
   flex: 1 0 100%;
