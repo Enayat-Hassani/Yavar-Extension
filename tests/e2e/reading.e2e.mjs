@@ -267,3 +267,27 @@ test('reaching the last block of a file marks it read on the reading map', async
     assert.deepEqual(b.errors, []);
   } finally { await b.close(); }
 });
+
+test('the reading map gives the big picture and the README before the code, and where you are once reading', async () => {
+  const b = await launch();
+  try {
+    const page = await b.open('sidepanel.html');
+    await openFolder(page, 'shop', filesOf(makeRepo({ ...BEFORE, 'README.md': '# Shop\n\nA cart.\n' }, AFTER)));
+    await stubChat(page, () => 'ok');
+    const order = (done) => page.evaluate(async (done) => {
+      const p = window.__panel;
+      await p.saveJourney({ summary: 'A cart.', path: [{ file: 'src/cart.js', why: '' }, { file: 'src/tax.js', why: '' }],
+        parts: [{ name: 'Cart', role: 'Adds things up.', files: ['src/cart.js'] }], done });
+      p.renderJourney();
+      const body = p.walkBody;
+      return {
+        sections: [...body.querySelectorAll('.sheet-label')].map(l => l.textContent),
+        docs: [...body.querySelectorAll('.jr-docs .jr-file')].map(d => d.dataset.path),
+        docsBeforeFiles: !!body.querySelector('.jr-docs + .jr-path')
+      };
+    }, done);
+    assert.deepEqual(await order([]), { sections: ['How it is organised', 'Reading order'], docs: ['README.md'], docsBeforeFiles: true });
+    assert.deepEqual((await order(['src/cart.js'])).sections, ['Reading order', 'How it is organised']);
+    assert.deepEqual(b.errors, []);
+  } finally { await b.close(); }
+});

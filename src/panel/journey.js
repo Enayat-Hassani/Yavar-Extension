@@ -179,10 +179,24 @@ export class JourneyPart {
     const next = j.path.find(p => !done.has(p.file));
     const read = j.path.filter(p => done.has(p.file)).length;
     const chip = (f) => `<button type="button" class="jr-file" data-wk="open" data-path="${esc(f)}" title="Open ${esc(f)} in the reader">${esc(f.split('/').pop())}</button>`;
+    // The project's own docs come before its code: the top-level README and
+    // an architecture or design note, when there is one
+    const files = [...this.repoTree.fileSet];
+    const docs = [
+      files.find(f => /^readme(\.\w+)?$/i.test(f)),
+      files.find(f => f.split('/').length <= 2 && /^(architecture|design)\.md$/i.test(f.split('/').pop()))
+    ].filter(Boolean);
+    const parts = j.parts?.length
+      ? `<div class="sheet-label">How it is organised</div><ul class="jr-parts">${j.parts.map(p =>
+          `<li><strong>${esc(p.name)}</strong> ${esc(p.role)}${p.files.length ? `<span class="jr-files">${p.files.map(chip).join('')}</span>` : ''}</li>`).join('')}</ul>`
+      : '';
+    // The big picture before the files, until reading has begun; then where you are comes first
     this.walkBody.innerHTML =
       (j.summary ? `<p class="jr-summary">${esc(j.summary)}</p>` : '') +
+      (read ? '' : parts) +
       `<div class="jr-head"><span class="sheet-label">Reading order</span>` +
         (read ? `<span class="jr-count">${read} of ${j.path.length} read</span>` : '') + `</div>` +
+      (docs.length ? `<p class="jr-docs">Before the code, read ${docs.map(chip).join(' and ')} for what the project is for and how it is meant to fit together.</p>` : '') +
       `<ol class="sheet-steps jr-path">${j.path.map((p, k) =>
         `<li class="${p === next ? 'current' : ''}${done.has(p.file) ? ' done' : ''}" data-wk="walkfile" data-path="${esc(p.file)}">` +
         `<span class="sheet-step-dot">${done.has(p.file) ? '✓' : k + 1}</span>` +
@@ -191,10 +205,7 @@ export class JourneyPart {
         ? `<div class="jr-actions"><button type="button" class="files-send jr-primary" data-wk="walkfile" data-path="${esc(next.file)}">` +
           `${read ? 'Continue with' : 'Start with'} ${esc(next.file.split('/').pop())} →</button></div>`
         : '') +
-      (j.parts?.length
-        ? `<div class="sheet-label">How it is organised</div><ul class="jr-parts">${j.parts.map(p =>
-            `<li><strong>${esc(p.name)}</strong> ${esc(p.role)}${p.files.length ? `<span class="jr-files">${p.files.map(chip).join('')}</span>` : ''}</li>`).join('')}</ul>`
-        : '') +
+      (read ? parts : '') +
       `<div class="jr-connections"></div>` +
       `<div class="jr-foot">${other}<button type="button" class="files-link-btn jr-link" data-wk="journey-reset">Start over with a new overview</button></div>`;
     this.renderConnections(j);
