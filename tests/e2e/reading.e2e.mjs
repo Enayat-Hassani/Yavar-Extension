@@ -90,7 +90,7 @@ test('the reader draws a part as a diff inside the file', async () => {
       text: document.getElementById('rd-text').textContent.split('\n').slice(0, 3)
     }));
     // The change starts on the function's own line, so nothing above names it: the file does
-    assert.equal(r.label, 'Part 1 of 2 · cart.js');
+    assert.equal(r.label, 'File 1 of 2 · cart.js');
     // Old line 1 in red above new line 1 in green; lines 3-4 likewise
     assert.deepEqual(r.gutter, ['−', '1', '2', '−', '−', '3', '4', '5', '6']);
     assert.deepEqual(r.marks, ['del 0-0', 'add 1-1', 'del 3-4', 'add 5-6']);
@@ -133,6 +133,137 @@ test('a file walk offers the same help as a change, and typing practice compares
     assert.match(r.bugsPrompt, /^I'm reading lines 1-6 of `src\/cart\.js` from shop\. Review this code for bugs/);
     assert.match(r.score, /^80% match/);
     assert.equal(r.best, 80);
+    assert.deepEqual(b.errors, []);
+  } finally { await b.close(); }
+});
+
+test('the reader brings back the walk its highlight belongs to, even after the panel moved on', async () => {
+  const b = await launch();
+  try {
+    const page = await b.open('sidepanel.html');
+    await openFolder(page, 'shop', filesOf(makeRepo(BEFORE, AFTER)));
+    await stubChat(page, () => 'ok');
+    await page.evaluate(async () => {
+      const p = window.__panel;
+      const fence = '`'.repeat(3);
+      p.askForJson = async (prompt, o) => ({ value: o.parse(`${fence}json\n{"summary":"Cart totals.","blocks":[{"start":1,"end":5,"title":"total()","explain":"Adds up the items."},{"start":7,"end":9,"title":"count()","explain":"Counts them."}]}\n${fence}`), text: '', tried: 1 });
+      await p.startWalk('src/cart.js');
+    });
+    await page.waitForFunction(() => window.__panel.walk?.blocks);
+    const reader = await b.open('reader.html', { width: 1000, height: 500 });
+    await wait(reader, 400);
+    assert.equal(await reader.evaluate(() => document.getElementById('rd-explain').hidden), false, 'the sign shows by the highlight');
+
+    // The panel moved on to another walk and closed the sheet: › in the reader
+    // reopens the file's walk and steps it, not the other one
+    await page.evaluate(() => {
+      const p = window.__panel;
+      p.walkPanel.classList.add('hidden');
+      p.walk = { key: 'walk:other', path: 'other.js', blocks: [{ start: 1, end: 1 }, { start: 2, end: 2 }], current: 0 };
+    });
+    await reader.keyboard.press('ArrowRight');
+    await page.waitForFunction(() => window.__panel.walk.path === 'src/cart.js' && window.__panel.walk.current === 1);
+    assert.equal(await page.evaluate(() => window.__panel.walkPanel.classList.contains('hidden')), false);
+    await wait(page, 300);
+
+    // Closed again, and forgotten in memory: the sign opens it at the block the reader shows
+    await page.evaluate(() => { const p = window.__panel; p.walkPanel.classList.add('hidden'); p.walk = null; });
+    await reader.evaluate(() => document.getElementById('rd-explain').click());
+    await page.waitForFunction(() => window.__panel.walk?.path === 'src/cart.js' && !window.__panel.walkPanel.classList.contains('hidden'));
+    const r = await page.evaluate(() => ({ current: window.__panel.walk.current, title: document.querySelector('.wk-title').textContent }));
+    assert.deepEqual(r, { current: 1, title: 'count()' });
+    assert.deepEqual(b.errors, []);
+  } finally { await b.close(); }
+});
+
+test('a file walk says so when its file changed since, and can be walked again', async () => {
+  const b = await launch();
+  try {
+    const page = await b.open('sidepanel.html');
+    await openFolder(page, 'shop', filesOf(makeRepo(BEFORE, AFTER)));
+    await stubChat(page, () => 'ok');
+    await page.evaluate(async () => {
+      const p = window.__panel;
+      const fence = '`'.repeat(3);
+      window.__walks = 0;
+      p.askForJson = async (prompt, o) => (window.__walks++, { value: o.parse(`${fence}json\n{"summary":"Cart totals.","blocks":[{"start":1,"end":5,"title":"total()","explain":"Adds up the items."},{"start":7,"end":9,"title":"count()","explain":"Counts them."}]}\n${fence}`), text: '', tried: 1 });
+      await p.startWalk('src/cart.js');
+    });
+    await page.waitForFunction(() => window.__panel.walk?.blocks);
+    // Opened again unchanged: no notice
+    await page.evaluate(() => window.__panel.startWalk('src/cart.js'));
+    await wait(page, 400);
+    assert.equal(await page.evaluate(() => !!document.querySelector('.wk-stale')), false);
+    // Edited in another editor: two lines added at the top
+    await page.evaluate(async () => {
+      const root = await (await navigator.storage.getDirectory()).getDirectoryHandle('shop');
+      const f = await (await root.getDirectoryHandle('src')).getFileHandle('cart.js');
+      const text = await (await f.getFile()).text();
+      const w = await f.createWritable();
+      await w.write(`// Cart\n\n${text}`);
+      await w.close();
+      const p = window.__panel;
+      p.clearFileCache('local:');
+      await p.startWalk('src/cart.js');
+    });
+    await page.waitForSelector('.wk-stale');
+    assert.match(await page.evaluate(() => document.querySelector('.wk-stale').textContent), /cart\.js changed since this walk/);
+    await page.evaluate(() => document.querySelector('[data-wk="rewalk"]').click());
+    await page.waitForFunction(() => window.__walks === 2 && window.__panel.walk?.blocks);
+    await wait(page, 300);
+    assert.equal(await page.evaluate(() => !!document.querySelector('.wk-stale')), false);
+    assert.deepEqual(b.errors, []);
+  } finally { await b.close(); }
+});
+
+test('saved walks make room for themselves: the ones unused longest go, and only when storage fills', async () => {
+  const b = await launch();
+  try {
+    const page = await b.open('sidepanel.html');
+    const r = await page.evaluate(async () => {
+      const p = window.__panel;
+      p.showNotification = (t) => { window.__note = t; };
+      const day = 24 * 60 * 60 * 1000;
+      const pad = 'x'.repeat(120 * 1024);
+      const walk = (ago) => ({ blocks: [{ start: 1, end: 2 }], pad, opened: Date.now() - ago * day });
+      // A few old walks and little else: nothing goes
+      await chrome.storage.local.set({ 'walk:o/r:a.js': walk(200), 'journey:o/r': { path: [], pad } });
+      await p.pruneWalks();
+      const light = Object.keys(await chrome.storage.local.get(null)).length;
+      // 20 walks unused for 200 days and 40 recent ones, about 7.2 MB
+      const many = {};
+      for (let k = 0; k < 20; k++) many[`walk:o/r:old${k}.js`] = walk(200 + k);
+      for (let k = 0; k < 40; k++) many[`walk:o/r:new${k}.js`] = walk(k);
+      await chrome.storage.local.set(many);
+      await p.pruneWalks();
+      const keys = Object.keys(await chrome.storage.local.get(null));
+      return { light, old: keys.filter(k => k.includes(':old') || k === 'walk:o/r:a.js').length,
+        recent: keys.filter(k => k.includes(':new')).length, journey: keys.includes('journey:o/r'), note: window.__note };
+    });
+    assert.equal(r.light, 2);
+    assert.deepEqual({ old: r.old, recent: r.recent, journey: r.journey }, { old: 0, recent: 40, journey: true });
+    assert.match(r.note, /^Made room: 21 saved walks/);
+    assert.deepEqual(b.errors, []);
+  } finally { await b.close(); }
+});
+
+test('reaching the last block of a file marks it read on the reading map', async () => {
+  const b = await launch();
+  try {
+    const page = await b.open('sidepanel.html');
+    await openFolder(page, 'shop', filesOf(makeRepo(BEFORE, AFTER)));
+    await stubChat(page, () => 'ok');
+    const done = await page.evaluate(async () => {
+      const p = window.__panel;
+      await p.saveJourney({ summary: 'A cart.', path: [{ file: 'src/cart.js', why: '' }, { file: 'src/tax.js', why: '' }], parts: [], done: [] });
+      const fence = '`'.repeat(3);
+      p.askForJson = async (prompt, o) => ({ value: o.parse(`${fence}json\n{"summary":"Cart totals.","blocks":[{"start":1,"end":5,"title":"total()","explain":"a"},{"start":7,"end":9,"title":"count()","explain":"b"}]}\n${fence}`), text: '', tried: 1 });
+      await p.startWalk('src/cart.js');
+      const before = [...(p.journey.done || [])];
+      await p.gotoWalk(1);
+      return { before, after: (await p.loadJourney()).done };
+    });
+    assert.deepEqual(done, { before: [], after: ['src/cart.js'] });
     assert.deepEqual(b.errors, []);
   } finally { await b.close(); }
 });

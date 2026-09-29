@@ -4,6 +4,13 @@
 
 import { jsonCandidates } from './json.js';
 import { keywordInfo } from './markdown.js';
+import { blobSha } from './git.js';
+
+// A short hash of a file's text or a diff, kept with its walk: a walk can
+// tell when what it explains has changed since
+export async function textSha(text) {
+  return (await blobSha(new TextEncoder().encode(String(text).replace(/\n$/, '')))).slice(0, 12);
+}
 
 // A gap the AI left between two blocks that is at most this many lines
 // (usually blank lines) joins the block before it instead of becoming its own

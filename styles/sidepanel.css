@@ -1960,6 +1960,7 @@ button.lens-item:focus-visible {
 .wk-ctx, .wk-pos { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .wk-ctx { flex-shrink: 4; min-width: 3em; font-weight: 400; color: var(--text-secondary); }   /* the name gives way before the position */
 .wk-ctx:empty { display: none; }
+.wk-pos { flex-shrink: 0; }   /* "File 3 of 12" is what the bar is for: it never gets cut */
 .wk-ctx + .wk-pos::before { content: '·'; margin-right: 6px; font-weight: 400; color: var(--text-secondary); }
 .wk-map + .wk-where { margin-left: 0; }
 .wk-where:hover { background: var(--fill-hover); }
@@ -2065,6 +2066,51 @@ button.lens-item:focus-visible {
 .wk-counts del { color: var(--danger); text-decoration: none; font-weight: 600; }
 .wk-skipped { display: block; margin-top: 4px; font-size: 12px; }
 .raw-reply.wk-removed pre { white-space: pre; }   /* code keeps its lines; the pre scrolls sideways */
+
+/* A file walk whose file changed since it was made */
+.wk-stale { margin: 0 0 12px; padding: 8px 10px; font-size: 12.5px; line-height: 1.5; color: var(--text-primary); background: var(--fill-hover); border-radius: var(--r-md); }
+.wk-stale .files-link-btn { margin: 0; font-size: 12.5px; }
+
+/* A change, file by file: the file's header and its sentence, the dots that
+   step its changes, then the change's own explanation */
+.wk-filehead { margin-bottom: 10px; }
+.wk-about { margin: 6px 0 0; font-size: 13.5px; line-height: 1.55; color: var(--text-primary); text-wrap: pretty; }
+/* The sheet takes focus after a step redraws the control that had it (it isn't a control) */
+.walk-body:focus { outline: none; }
+.wk-changes { display: flex; align-items: center; gap: 10px; margin: 0 0 8px; font-size: 11.5px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.wk-dots { display: flex; align-items: center; gap: 2px; margin-left: -5px; }
+/* The hit area is the button; the dot is drawn inside it, so a wider current dot moves nothing */
+.wk-dot { position: relative; width: 16px; height: 20px; padding: 0; background: none; border: none; border-radius: var(--r-sm); cursor: pointer; }
+.wk-dot::before {
+  content: '';
+  position: absolute;
+  top: 7px;
+  left: 5px;
+  width: 6px;
+  height: 6px;
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1.5px var(--text-secondary);
+  transition: background-color var(--dur-quick) var(--ease-std), box-shadow var(--dur-quick) var(--ease-std), transform var(--dur-base) var(--ease-out);
+}
+.wk-dot.is-read::before { background: var(--text-secondary); box-shadow: none; }
+.wk-dot.is-current::before { background: var(--accent); box-shadow: none; transform: scaleX(1.7); }
+.wk-dot:hover::before { box-shadow: inset 0 0 0 1.5px var(--accent); }
+.wk-dot:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
+.wk-change-pos { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wk-file-notes:not(:empty) { margin-top: 10px; }
+
+/* Stepping: the next change comes in from the right, the one before from
+   the left; a new file's header settles in with it */
+.wk-change[data-enter="next"] { animation: wk-from-right var(--dur-base) var(--ease-out); }
+.wk-change[data-enter="prev"] { animation: wk-from-left var(--dur-base) var(--ease-out); }
+.wk-filehead[data-enter] { animation: wk-settle var(--dur-slow) var(--ease-out); }
+@keyframes wk-from-right { from { opacity: 0; transform: translateX(14px); } }
+@keyframes wk-from-left { from { opacity: 0; transform: translateX(-14px); } }
+@keyframes wk-settle { from { opacity: 0; transform: translateY(-4px); } }
+@media (prefers-reduced-motion: reduce) {
+  .wk-change[data-enter], .wk-filehead[data-enter] { animation: none; }
+  .wk-dot::before { transition: none; }
+}
 
 /* What to do with this block or step: quiet text actions pinned to the
    bottom of the sheet. With little content they sit right under it; with a
@@ -2282,6 +2328,11 @@ button.lens-item:focus-visible {
 .jr-folder-name { font-weight: 600; }
 .jr-folder-status { grid-column: 1; font-size: 12px; color: var(--text-secondary); }
 .jr-folder .home-chev { grid-column: 2; grid-row: 1 / span 2; }
+/* Your own changes: a walk begun earlier can be begun again, from inside its row */
+.rv-option { position: relative; }
+.rv-option:has(.rv-restart) .jr-folder { column-gap: 96px; }   /* room for Start over, left of the chevron */
+.rv-restart { position: absolute; top: 50%; right: 30px; margin: 0; font-size: 12px; transform: translateY(-50%); }
+.rv-restart:hover { color: var(--text-primary); }
 
 /* How the files connect: an indented tree, lines drawn on the left */
 .jr-connections:empty { display: none; }

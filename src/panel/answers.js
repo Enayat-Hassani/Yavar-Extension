@@ -137,7 +137,7 @@ export class AnswersPart {
   // Ask in the background and stream the answer into a card in `container`
   // via: 'chat' or 'api' to force a route; otherwise the model menu's choice
   async showAnswerIn(container, title, prompt, opts = {}) {
-    const { attachments = [], onUseCode = null, onDone = null, saveAs = null, collapsible = true, via = null, inline = false } = opts;
+    const { attachments = [], onUseCode = null, onDone = null, saveAs = null, collapsible = true, via = null, inline = false, topic = undefined } = opts;
     const api = (via || this.answerWith) === 'api';
     const inThread = container === this.threadBody;
     // Retry and "Ask <chat>" in the thread show as busy there, like any question
@@ -163,6 +163,7 @@ export class AnswersPart {
     });
     // The conversation so far goes with the question after a model switch,
     // and with a second opinion (minus the answer it's a second opinion on)
+    this.claimChat(topic);   // back to the conversation from other work: it's handed over
     let askPrompt = prompt;
     let askAttachments = attachments;
     const prior = inThread ? this.threadTurns().filter(t => t.el !== opts.handoff) : [];
@@ -178,7 +179,7 @@ export class AnswersPart {
       // Bring the answer's top into view once it starts arriving
       let shown = false;
       const text = await this.askInPanel(askPrompt, {
-        attachments: askAttachments, via,
+        attachments: askAttachments, via, topic,
         onModel: (label) => card.setModel(label),
         onProgress: (t) => {
           card.update(t);

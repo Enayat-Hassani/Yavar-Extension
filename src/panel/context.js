@@ -63,13 +63,11 @@ export class ContextPart {
 
   // The files a walk question needs from the start: for a change, the whole
   // file its part is in; for both, the project files that file imports. Each
-  // goes once per walk, within a budget. { attachment, note } or null.
-  async walkContextFiles(container, w, b, project) {
+  // goes once per chat (`chat`, from claimChat), within a budget.
+  // { attachment, note } or null.
+  async walkContextFiles(container, w, b, project, chat) {
     if (!project || !this.treeFor(project) || (w.change && !b.start)) return null;
-    // A change walk is known by its key, a file walk by its path
-    const id = w.key || w.path;
-    if (this._sentFiles?.id !== id) this._sentFiles = { id, paths: new Set(w.change ? [] : [w.path]) };
-    const sent = this._sentFiles.paths;
+    const sent = chat.files;
     const path = w.change ? b.path : w.path;
     const name = path.split('/').pop();
     const status = this.workStatus(container, `Finding the files ${name} needs…`);
@@ -103,11 +101,12 @@ export class ContextPart {
   }
 
   // An answer that ends with NEED lines gets those files, once, in the same
-  // chat, and gives its full answer; that answer is the one kept. Files sent
-  // already (`sent`) aren't sent again.
-  async answerWithFiles(container, label, text, project, sent = null) {
+  // chat, and gives its full answer; that answer is the one kept. Files the
+  // chat has already (`chat`, from claimChat) aren't sent again.
+  async answerWithFiles(container, label, text, project, chat) {
+    const sent = chat.files;
     const t = text && project && this.treeFor(project);
-    const paths = t ? neededFiles(text, t.fileSet).filter(p => !sent?.has(p)) : [];
+    const paths = t ? neededFiles(text, t.fileSet).filter(p => !sent.has(p)) : [];
     if (!paths.length) return text;
     const status = this.workStatus(container, `The AI asked for ${paths.map(p => p.split('/').pop()).join(', ')}: reading ${paths.length === 1 ? 'it' : 'them'}…`);
     let files;
@@ -117,13 +116,13 @@ export class ContextPart {
       status.done();
     }
     if (!files.length) return text;
-    files.forEach(f => sent?.add(f.path));
+    files.forEach(f => sent.add(f.path));
     const one = files.length === 1 && files[0].path.split('/').pop();
     const fname = one ? (one.endsWith('.md') ? one : `${one}.md`) : 'requested-files.md';
     const more = await this.showAnswerIn(container, `${label} · with ${files.map(f => f.path.split('/').pop()).join(', ')}`,
       `Here ${files.length === 1 ? 'is the file' : 'are the files'} you asked for, attached as "${fname}". ` +
       `Now give your full answer to my last question, in the same shape as before, without asking for more files.`,
-      { via: 'chat', inline: true, attachments: [{ filename: fname, content: this.packFor(files) }] });
+      { via: 'chat', inline: true, topic: chat.topic, attachments: [{ filename: fname, content: this.packFor(files) }] });
     return more || text;
   }
 

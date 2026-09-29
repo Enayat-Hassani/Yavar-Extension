@@ -4,7 +4,7 @@
 // Its methods join YavarSidePanel's (see the end of sidepanel.js), so `this` is the panel.
 
 import { renderMarkdown } from '../utils/markdown.js';
-import { walkPrompt, parseWalkthrough, compareTyped, quizPrompt, parseQuiz } from '../utils/walkthrough.js';
+import { walkPrompt, parseWalkthrough, compareTyped, quizPrompt, parseQuiz, textSha } from '../utils/walkthrough.js';
 import { nextCandidates, nextPrompt, parseNext } from '../utils/journey.js';
 import {
   parseDiff,
@@ -15,7 +15,11 @@ import {
   orderParts,
   linesBatch,
   linesPrompt,
-  splitParts
+  splitParts,
+  carryNotes,
+  fileGroups,
+  fileContext,
+  isProse
 } from '../utils/changes.js';
 import { intentText } from '../utils/intents.js';
 import { earlierAnswers } from '../utils/conversation.js';
@@ -32,6 +36,11 @@ import {
   langFromPath
 } from '../utils/github.js';
 
+// Of the 10 MB Chrome gives an extension's storage (see pruneWalks)
+const STORE_FULL = 7 * 1024 * 1024;
+const STORE_AFTER = 5 * 1024 * 1024;
+const UNUSED = 90 * 24 * 60 * 60 * 1000;
+
 export class WalkPart {
   // The AI splits a file into blocks of related lines; the sheet shows one
   // block at a time with its explanation, and the reader tab highlights the
@@ -42,10 +51,45 @@ export class WalkPart {
     return k ? `${k.replace(/^readMarks:/, 'walk:')}:${path}` : null;
   }
 
+  // Saved with when it was last used, which decides what pruneWalks lets go
+  // first. Storage full: room is made, and the save tried once more.
   async saveWalk(state) {
     this.walk = state;
     const key = state.key || this.walkKey(state.path);
-    if (key) try { await chrome.storage.local.set({ [key]: state }); } catch (e) { /* ignore */ }
+    if (!key) return;
+    const value = { ...state, opened: Date.now() };
+    try {
+      await chrome.storage.local.set({ [key]: value });
+    } catch (e) {
+      await this.pruneWalks({ force: true });
+      try { await chrome.storage.local.set({ [key]: value }); } catch (e2) {
+        this.showNotification(`⚠️ Your place in this walk wasn't saved: ${e2.message}`);
+      }
+    }
+  }
+
+  // Saved walks (every file, commit, pull request and review read) only grow,
+  // and an extension's storage holds 10 MB. Past STORE_FULL (or `force`, when
+  // a save failed), walks not used for 90 days go, then the oldest, until it
+  // is under STORE_AFTER. The open walk stays; reading maps are not walks.
+  async pruneWalks({ force = false } = {}) {
+    let used;
+    try { used = await chrome.storage.local.getBytesInUse(null); } catch (e) { return; }
+    if (!force && used < STORE_FULL) return;
+    const all = await chrome.storage.local.get(null);
+    const open = this.walk?.blocks ? this.walk.key || this.walkKey(this.walk.path) : null;
+    const walks = Object.entries(all).filter(([k]) => k.startsWith('walk:') && k !== open)
+      .map(([k, v]) => ({ k, at: v?.opened || v?.created || 0, size: k.length + JSON.stringify(v).length }))
+      .sort((a, b) => a.at - b.at);
+    const drop = [];
+    for (const w of walks) {
+      if (w.at > Date.now() - UNUSED && used <= STORE_AFTER) break;
+      drop.push(w.k);
+      used -= w.size;
+    }
+    if (!drop.length) return;
+    await chrome.storage.local.remove(drop);
+    this.showNotification(`Made room: ${drop.length} saved walk${drop.length === 1 ? '' : 's'} you hadn't opened for the longest were removed`);
   }
 
   // "Walk through <file>" on a GitHub file page (honours a #L10-L40 selection)
@@ -80,6 +124,7 @@ export class WalkPart {
       await this.saveWalk({ ...saved, current: Math.max(0, at) });
       this.renderWalk();
       this.followWalk();
+      this.checkWalkFile();
       return;
     }
     await this.createWalk(path, lines);
@@ -107,14 +152,15 @@ export class WalkPart {
         ? `${walkPrompt({ path, repo, range, source: 'Below is' })}\n\n${LINE_NUMBER_NOTE}\n\n${fencedFile(file)}`
         : walkPrompt({ path, repo, range, source: `The attached "${fname}" is` });
       const { value: parsed, text, tried } = await this.askForJson(prompt, {
-        attachments: inline ? [] : [{ filename: fname, content: this.packFor([file]) }], live: this.walkBody, list: 'title',
+        attachments: inline ? [] : [{ filename: fname, content: this.packFor([file]) }], live: this.walkBody, list: 'title', topic: this.readTopic(),
         parse: (t) => parseWalkthrough(t, range)
       });
       if (!parsed) {
         this._walkRaw = text;
         throw new Error(`couldn't find the blocks in the replies (asked ${tried})`);
       }
-      await this.saveWalk({ path, range, total, summary: parsed.summary, blocks: parsed.blocks, current: 0, typed: {}, created: Date.now() });
+      await this.saveWalk({ path, range, total, summary: parsed.summary, blocks: parsed.blocks, current: 0, typed: {}, created: Date.now(),
+        sha: await textSha(content) });
       await this.markRead([path]);
       this._readingContext = { label: repo, ts: Date.now() };
       this.followWalk();
@@ -139,11 +185,22 @@ export class WalkPart {
       key: `walk:${owner}/${repo}:@${kind === 'pull' ? `pr-${number}` : sha}` };
     let saved = null;
     try { saved = (await chrome.storage.local.get(change.key))[change.key]; } catch (e) { /* none */ }
+    // A pull request gains commits: its diff is fetched again and compared
+    if (kind === 'pull' && saved?.blocks) {
+      try {
+        const text = await this.fetchDiff({ owner, repo, kind, number });
+        change.diffHash = await textSha(text);
+        this._fetchedDiff = { key: change.key, text };
+      } catch (e) {
+        change.diffHash = saved.change?.diffHash;   // offline: the saved walk stands
+      }
+    }
     this.walkView = 'file';
     document.getElementById('walk-title').textContent = 'Read the change';
     document.getElementById('walk-sub').textContent = change.label + (change.title ? ` · ${change.title}` : '');
     this.walkPanel.classList.remove('hidden');
-    if (saved?.blocks?.length) {
+    // Your own changes, or a pull request, that moved on since are read again
+    if (saved?.blocks?.length && saved.change?.diffHash === change.diffHash) {
       this.walk = saved;
       this.renderWalk();
       this.followWalk();
@@ -152,18 +209,26 @@ export class WalkPart {
     // Opened on the repository's own page: its file tree lets the AI ask for files
     const tab = this._tabCtx?.gh;
     if (!change.local && tab && tab.owner === owner && tab.repo === repo) await this.ensureRepoTree().catch(() => {});
-    await this.createChangeWalk(change);
+    await this.createChangeWalk(change, saved?.blocks ? saved : null);
   }
 
-  async createChangeWalk(change) {
+  // `before`: an earlier walk of the same changes, whose notes carry over to
+  // the parts whose diff is the same
+  async createChangeWalk(change, before = null) {
     if (this._walkPending) return;
     const { owner, repo, kind, sha, number, key } = change;
     this._walkPending = true;
     this._walkRaw = '';
+    this.retireChat(key);
     this.walk = { key, change, pending: true };
     this.renderWalk();
     try {
-      const files = parseDiff(change.local ? await this.localDiff(change) : await this.fetchDiff({ owner, repo, kind, sha, number }));
+      const fetched = this._fetchedDiff?.key === key ? this._fetchedDiff.text : null;
+      this._fetchedDiff = null;
+      const text = change.local ? await this.localDiff(change) : fetched ?? await this.fetchDiff({ owner, repo, kind, sha, number });
+      // The walk is of the diff as it is now (read again by Ask again, Start over)
+      if (change.local || kind === 'pull') change = { ...change, diffHash: await textSha(text) };
+      const files = parseDiff(text);
       const { blocks, skipped } = changeBlocks(files);
       if (!blocks.length) throw new Error(files.length ? 'only lockfiles, generated or binary files changed' : 'the diff is empty');
       // The parts are ready at once, in reading order and named after their
@@ -171,7 +236,8 @@ export class WalkPart {
       const what = change.local ? change.what : kind === 'pull' ? `pull request #${number}` : `commit ${sha.slice(0, 7)}`;
       const fname = `${repo}-${change.local ? change.base : kind === 'pull' ? `pr-${number}` : sha.slice(0, 7)}-changes.md`.replace(/[^\w.-]+/g, '-');
       const parts = orderParts(blocks).map(b => ({ ...b, title: partTitle(b), explain: '' }));
-      await this.saveWalk({ key, change, what, fname, summary: '', blocks: parts, skipped, current: 0, typed: {}, created: Date.now() });
+      const notes = carryNotes(before, parts);
+      await this.saveWalk({ key, change, what, fname, summary: '', blocks: parts, skipped, notes, current: 0, typed: {}, created: Date.now() });
       this._readingContext = { label: owner ? `${owner}/${repo}` : repo, ts: Date.now() };
       this.followWalk();
     } catch (e) {
@@ -182,11 +248,26 @@ export class WalkPart {
     }
   }
 
+  // A file walk opened again: has the file changed since (edited elsewhere,
+  // or new commits)? Then its blocks may sit on the wrong lines, and the walk
+  // says so. A walk saved before walks kept the hash takes today's as its own.
+  async checkWalkFile() {
+    const w = this.walk;
+    if (!w?.blocks || w.change) return;
+    let sha;
+    try { sha = await textSha(await this.readRepoFile(w.path)); } catch (e) { return; }
+    if (this.walk !== w) return;
+    if (!w.sha) return this.saveWalk({ ...w, sha });
+    if (w.sha === sha) return;
+    this._walkStale = this.walkKey(w.path);
+    this.renderWalk();
+  }
+
   async resetWalk() {
     const w = this.walk;
     if (!w?.blocks || this._walkPending) return;
     if (!this.confirmTwice('walk', 'Click again to ask for a new walkthrough')) return;
-    if (w.change) return this.createChangeWalk(w.change);
+    if (w.change) return this.createChangeWalk(w.change, w);
     const partial = w.range.start > 1 || w.range.end < w.total;
     await this.createWalk(w.path, partial ? w.range : null);
   }
@@ -204,17 +285,74 @@ export class WalkPart {
     }
     if (!this.repoTree) return;
     this.openRepoFile({ ...this.fileRefFor(w.path, { start: b.start, end: b.end }),
-      label: `Block ${w.current + 1} of ${w.blocks.length} · ${b.title}`, nav: this.walkNav() });
+      label: `Block ${w.current + 1} of ${w.blocks.length} · ${b.title}`, nav: this.walkNav(), walk: this.walkRef() });
   }
 
   // What the reader shows for a part of a change: the file after the change
   // with the part's diff in it, and `lines` highlighted (a line an
   // explanation names, with focus)
+  // The whole file's diff is drawn, so moving between its changes only
+  // moves the marked part (`diff.part`)
   partRef(b, lines, focus = false) {
     const w = this.walk;
     const { owner, repo, ref, local } = w.change;
-    return { source: local ? 'local' : 'github', owner, repo, ref, path: b.path, lines, focus,
-      label: `Part ${w.current + 1} of ${w.blocks.length} · ${b.title}`, diff: b.add ? { add: b.add, del: b.del } : null, nav: this.walkNav() };
+    const files = fileGroups(w.blocks);
+    const fi = files.findIndex(g => w.current >= g.first && w.current <= g.last);
+    const f = files[fi];
+    const parts = w.blocks.slice(f.first, f.last + 1);
+    const count = f.last - f.first + 1;
+    return { source: local ? 'local' : 'github', owner, repo, ref, path: b.path, lines, focus, nav: this.walkNav(), walk: this.walkRef(),
+      label: `File ${fi + 1} of ${files.length}${count > 1 ? ` · Change ${w.current - f.first + 1} of ${count}` : ''} · ${partTitle(b)}`,
+      diff: b.add ? { add: parts.flatMap(x => x.add || []), del: parts.flatMap(x => x.del || []), part: { add: b.add, del: b.del } } : null };
+  }
+
+  // What the reader's highlight belongs to: the walk (by its storage key) and block
+  walkRef() {
+    const w = this.walk;
+    return { id: w.key || this.walkKey(w.path), block: w.current };
+  }
+
+  // The reader asked: step the walk (`dir`), or show its highlighted block
+  // (dir 0). Its walk is reopened when the panel shows something else, or
+  // was closed, so the reader never steps a walk it isn't showing.
+  async followReader({ dir = 0, walk: ref, repo }) {
+    if (!ref?.id) return;
+    const w = this.walk;
+    const showing = !this.walkPanel.classList.contains('hidden') && this.walkView === 'file' && w?.blocks;
+    if (!showing || (w.key || this.walkKey(w.path)) !== ref.id) {
+      if (!(await this.reopenWalk(ref, repo))) return;
+    }
+    if (dir) this.stepWalk(dir);
+    else if (this.walk.current !== ref.block) await this.gotoWalk(ref.block);
+    this.walkBody.focus({ preventScroll: true });
+  }
+
+  // A saved walk, open again at `ref.block`, with the repository or folder it
+  // reads from loaded when it can be
+  async reopenWalk(ref, repo) {
+    let saved = null;
+    try { saved = (await chrome.storage.local.get(ref.id))[ref.id]; } catch (e) { /* none */ }
+    if (!saved?.blocks?.length) {
+      this.showNotification('That walk is no longer saved; start it again from the file or the change');
+      return false;
+    }
+    const c = saved.change;
+    if (repo && (!c || c.local)) {
+      try {
+        if (!(await this.restoreSource(repo))) this.showNotification(`Open the ${repo.repo} folder again for the reader to follow`);
+      } catch (e) {
+        this.showNotification(`⚠️ Could not load ${repo.name}: ${e.message}`);
+      }
+    }
+    this.walkView = 'file';
+    this.walk = { ...saved, current: Math.min(ref.block, saved.blocks.length - 1), summaryOpen: false };
+    this.journey = c ? null : await this.loadJourney();
+    document.getElementById('walk-title').textContent = c ? 'Read the change' : 'Walk through';
+    document.getElementById('walk-sub').textContent = c ? c.label + (c.title ? ` · ${c.title}` : '') : saved.path.split('/').pop();
+    this.walkPanel.classList.remove('hidden');
+    await this.renderWalk();
+    this.checkWalkFile();
+    return true;
   }
 
   // Whether the reader's ‹ › can step from here
@@ -223,11 +361,45 @@ export class WalkPart {
     return { prev: w.current > 0, next: w.current < w.blocks.length - 1 || !!w.change };
   }
 
+  // Open part `k` of the walk. In a change, the new part slides in from the
+  // side you're going to, and a new file's header with it.
+  async gotoWalk(k) {
+    const w = this.walk;
+    if (!w?.blocks?.[k]) return;
+    if (w.change) {
+      this._walkEnter = w.summaryOpen || k === w.current ? null : k > w.current ? 'next' : 'prev';
+      this._walkFileChanged = w.summaryOpen || w.blocks[k].path !== w.blocks[w.current].path;
+    }
+    const had = this.walkPanel.contains(document.activeElement);
+    await this.saveWalk({ ...w, current: k, summaryOpen: false });
+    // The last block of the whole file reached: it counts as read on the map
+    // (Finish file still suggests what to read next)
+    const j = this.journey;
+    if (!w.change && j && k === w.blocks.length - 1 && w.range.end >= w.total && !j.done?.includes(w.path)) {
+      await this.saveJourney({ ...j, done: [...(j.done || []), w.path] });
+    }
+    await this.renderWalk();
+    this.walkBody.scrollTop = 0;
+    // The control that had focus was redrawn: keep it in the sheet, so the keys go on stepping
+    if (had && !this.walkPanel.contains(document.activeElement)) this.walkBody.focus({ preventScroll: true });
+    this.followWalk();
+  }
+
   // One step through the open walk (the arrow keys, the reader's buttons).
   // False when there is no walk on screen to step.
-  stepWalk(dir) {
+  // With `file`, a change walk goes to the next file, or back to the start of
+  // this one (or the one before, from its start).
+  stepWalk(dir, { file = false } = {}) {
     if (this.walkPanel.classList.contains('hidden') || this.walkView !== 'file' || !this.walk?.blocks) return false;
     const w = this.walk;
+    if (file && w.change && !w.summaryOpen) {
+      const files = fileGroups(w.blocks);
+      const fi = files.findIndex(g => w.current >= g.first && w.current <= g.last);
+      const to = dir > 0 ? files[fi + 1]?.first : w.current > files[fi].first ? files[fi].first : files[fi - 1]?.first;
+      if (to == null) return false;
+      this.gotoWalk(to);
+      return true;
+    }
     const btn = dir < 0 ? this.walkBody.querySelector('.wk-steps [data-wk="prev"]:not(:disabled)')
       : this.walkBody.querySelector('.wk-steps [data-wk="next"], .wk-steps [data-wk="summary"], .wk-steps [data-wk="continue"]');
     if (!btn || (dir > 0 && w.summaryOpen)) return false;
@@ -246,7 +418,7 @@ export class WalkPart {
     }
     if (!this.repoTree) return;
     this.openRepoFile({ ...this.fileRefFor(w.path, { start, end }),
-      label: `Block ${w.current + 1} of ${w.blocks.length} · ${b.title}`, nav: this.walkNav() });
+      label: `Block ${w.current + 1} of ${w.blocks.length} · ${b.title}`, nav: this.walkNav(), walk: this.walkRef() });
   }
 
   // The current block's code, from the cached file. In a change: its new
@@ -269,7 +441,9 @@ export class WalkPart {
     if (this.walkView !== 'file') return;   // the map or the folder choice is showing; the walk renders when you return
     const w = this.walk;
     const esc = (t) => this.escapeHtml(t || '');
-    const toMap = this.journey && !w?.change ? `<button type="button" class="wk-map" data-wk="map">‹ Map</button>` : '';
+    // The way back: to the reading map, or to the choice of your own changes
+    const toMap = w?.change?.local ? `<button type="button" class="wk-map" data-wk="review-back" aria-label="Back to the choice of changes">‹</button>`
+      : this.journey && !w?.change ? `<button type="button" class="wk-map" data-wk="map">‹ Map</button>` : '';
     if (!w?.blocks) {
       this.walkBody.innerHTML = (toMap ? `<div class="wk-bar">${toMap}</div>` : '') + (w?.error
         ? `<div class="sheet-intro"><p>⚠️ Could not make the walkthrough: ${esc(w.error)}.</p>` +
@@ -279,51 +453,60 @@ export class WalkPart {
           : `The AI is splitting ${esc(w?.path?.split('/').pop())} into blocks…`}<div class="sheet-live"></div></div>`);
       return;
     }
-    const { blocks, current: i, typed = {}, range, total, change } = w;
-    if (change && w.summaryOpen) return this.renderReviewSummary();
+    if (w.change) return w.summaryOpen ? this.renderReviewSummary() : this.renderChangeWalk(toMap);
+    const { blocks, current: i, typed = {}, range, total } = w;
     const b = blocks[i];
     const n = blocks.length;
     const last = i === n - 1;
-    const more = !change && last && range.end < total;
+    const more = last && range.end < total;
     const best = typed[i]?.best;
     const practised = (k) => typed[k]?.best >= 90;
-    const lines = (x) => !x.start ? '' : x.end > x.start ? `lines ${x.start}-${x.end}` : `line ${x.start}`;
-    // A change's parts each have their own file; a file's blocks share one
-    const where = change
-      ? `<span><code>${esc(b.path)}</code>${b.start ? ` · ${lines(b)}` : ` · ${b.status}`}` +
-        `<span class="wk-counts">${b.added ? ` <ins>+${b.added}</ins>` : ''}${b.removed ? ` <del>−${b.removed}</del>` : ''}</span></span>`
-      : `<span>Lines ${b.start}-${b.end}${b.edited ? ' · edited after this was explained' : ''}</span>`;
-    const skippedNote = change && i === 0 && w.skipped?.length
-      ? ` <span class="wk-skipped" title="${esc(w.skipped.join('\n'))}">Left out: ${w.skipped.length} lockfile, generated or binary file${w.skipped.length === 1 ? '' : 's'}.</span>` : '';
 
     this.walkBody.innerHTML =
       this.stepBar({
-        act: 'wk', back: toMap, context: change ? change.label : w.path.split('/').pop(),
-        where: change ? `Part ${i + 1} of ${n}`
-          : `Block ${i + 1} of ${n}${range.start > 1 || range.end < total ? ` · lines ${range.start}-${range.end} of ${total}` : ''}`,
+        act: 'wk', back: toMap, context: w.path.split('/').pop(),
+        where: `Block ${i + 1} of ${n}${range.start > 1 || range.end < total ? ` · lines ${range.start}-${range.end} of ${total}` : ''}`,
         first: i === 0, pct: Math.round(((i + 1) / n) * 100),
         next: !last ? `<button type="button" class="wk-step" data-wk="next" aria-label="Next">›</button>`
           : more ? `<button type="button" class="wk-step wk-step-text" data-wk="continue">Next lines ›</button>`
-            : change ? `<button type="button" class="wk-step wk-step-text" data-wk="summary">Summary ›</button>`
-              : `<button type="button" class="wk-step wk-step-text" data-wk="finish">Finish file</button>`,
-        items: blocks.map((x, k) => ({ i: k, current: k === i, mark: practised(k) ? '✓' : k + 1, title: esc(x.title),
-          meta: change ? esc(x.path.split('/').pop()) : `${x.start}-${x.end}` })),
-        extra: change
-          ? (change.local ? '' : `<button type="button" class="files-link-btn wk-redo" data-wk="explain-change">Explain the whole change in the chat</button>`) +
-            `<button type="button" class="files-link-btn wk-redo" data-wk="redo">Ask for a new walkthrough of this change</button>`
-          : `<button type="button" class="files-link-btn wk-redo" data-wk="redo">Ask for a new walkthrough of this file</button>`
+            : `<button type="button" class="wk-step wk-step-text" data-wk="finish">Finish file</button>`,
+        items: blocks.map((x, k) => ({ i: k, current: k === i, mark: practised(k) ? '✓' : k + 1, title: esc(x.title), meta: `${x.start}-${x.end}` })),
+        extra: `<button type="button" class="files-link-btn wk-redo" data-wk="redo">Ask for a new walkthrough of this file</button>`
       }) +
-      (i === 0 && (w.summary || skippedNote) ? `<p class="wk-summary">${esc(w.summary)}${skippedNote}</p>` : '') +
-      `<div class="wk-meta">${where}` +
-        (b.start ? `<button type="button" class="files-link-btn wk-show" data-wk="show">Show in reader</button>` : '') + `</div>` +
+      (this._walkStale && this._walkStale === this.walkKey(w.path)
+        ? `<p class="wk-stale" role="status">${esc(w.path.split('/').pop())} changed since this walk, so its blocks may sit on the wrong lines. ` +
+          `<button type="button" class="files-link-btn" data-wk="rewalk">Walk it again</button></p>` : '') +
+      (i === 0 && w.summary ? `<p class="wk-summary">${esc(w.summary)}</p>` : '') +
+      `<div class="wk-meta"><span>Lines ${b.start}-${b.end}${b.edited ? ' · edited after this was explained' : ''}</span>` +
+        `<button type="button" class="files-link-btn wk-show" data-wk="show">Show in reader</button></div>` +
       `<h3 class="wk-title">${esc(b.title)}</h3>` +
-      (b.explain ? `<p class="wk-explain">${esc(b.explain)}</p>`
-        : change ? '' : `<p class="wk-explain is-empty">The AI didn't explain these lines. Ask with Explain more.</p>`) +
-      // The reader shows what was taken out, in place; a deleted file (or a
-      // walk saved before parts kept their lines) shows it here
-      (change && b.removed && (!b.start || !b.add) ? `<details class="raw-reply wk-removed"${b.start ? '' : ' open'}><summary>${b.start ? 'What was removed' : 'The deleted lines'} (${b.removed} line${b.removed === 1 ? '' : 's'})</summary>` +
-        `<pre>${esc(b.removedText)}</pre></details>` : '') +
-      `<div class="walk-type" hidden>` +
+      (b.explain ? `<p class="wk-explain">${esc(b.explain)}</p>` : `<p class="wk-explain is-empty">The AI didn't explain these lines. Ask with Explain more.</p>`) +
+      this.typeBox(b) +
+      `<div class="walk-notes"></div>` +
+      `<div class="walk-next" aria-live="polite"></div>` +
+      // Pinned to the bottom of the sheet, so answers never push them away
+      `<div class="wk-dock">` + this.askBox('data-wk', 'Ask about these lines…',
+        `<button type="button" class="run-ask" data-wk="more">Line by line</button>` +
+        `<button type="button" class="run-ask" data-wk="bugs">Find bugs</button>` +
+        `<button type="button" class="run-ask" data-wk="better">Better ways</button>` +
+        `<button type="button" class="run-ask wk-more-toggle" data-wk="moreacts" aria-expanded="false">More</button>` +
+        `<span class="wk-extra" hidden>` +
+          `<button type="button" class="run-ask" data-wk="quiz">Quiz me</button>` +
+          `<button type="button" class="run-ask" data-wk="type" aria-expanded="false">Practise typing${best != null ? ` · best ${best}%` : ''}</button>` +
+          `<button type="button" class="run-ask" data-wk="tests">How to test it</button>` +
+        `</span>`) +
+      `</div>`;
+
+    // Earlier answers for this block, folded except the latest
+    const notesEl = this.walkBody.querySelector('.walk-notes');
+    const notes = w.notes?.[i] || [];
+    notes.forEach((note, k) => this.renderWalkNote(notesEl, note, k < notes.length - 1));
+    this._walkCode = null;   // the practice editor is made when practice opens
+  }
+
+  // Typing a block (or a change's new lines) yourself, hidden until asked for
+  typeBox(b) {
+    return `<div class="walk-type" hidden>` +
         `<div class="code-box" aria-label="Type lines ${b.start} to ${b.end}"></div>` +
         `<div class="wk-type-actions">` +
           `<button type="button" class="wk-compare" data-wk="compare">Compare</button>` +
@@ -331,39 +514,100 @@ export class WalkPart {
           `<span class="wk-hint">Ctrl+Enter compares · comments don't count</span>` +
         `</div>` +
         `<div class="walk-result" aria-live="polite"></div>` +
+      `</div>`;
+  }
+
+  // A change, file by file and in each file change by change. The file owns
+  // its header (path, counts, a sentence on what changed in it), Find bugs,
+  // Better ways and questions; a change owns its explanation. The dots step
+  // the file's changes; › goes on to the next file after its last one.
+  renderChangeWalk(back) {
+    const w = this.walk;
+    const esc = (t) => this.escapeHtml(t || '');
+    const { blocks, current: i, typed = {}, change } = w;
+    const b = blocks[i];
+    const files = fileGroups(blocks);
+    const fi = files.findIndex(g => i >= g.first && i <= g.last);
+    const f = files[fi];
+    const count = f.last - f.first + 1;
+    const explained = (k) => !!w.notes?.[k]?.length;
+    const prose = isProse(b);
+    const best = typed[i]?.best;
+    const lines = (x) => !x.start ? x.status : x.end > x.start ? `lines ${x.start}-${x.end}` : `line ${x.start}`;
+    const name = (p) => p.split('/').pop();
+    // Where you came from sets the way the new change slides in
+    const enter = this._walkEnter ? ` data-enter="${this._walkEnter}"` : '';
+    const fileEnter = this._walkEnter && this._walkFileChanged ? ` data-enter="${this._walkEnter}"` : '';
+    this._walkEnter = null;
+    const skippedNote = fi === 0 && w.skipped?.length
+      ? ` <span class="wk-skipped" title="${esc(w.skipped.join('\n'))}">Left out: ${w.skipped.length} lockfile, generated, binary or over-the-limit file${w.skipped.length === 1 ? '' : 's'}.</span>` : '';
+    const about = w.fileAbout?.[f.path];
+    const pending = this._linesPending?.key === w.key && this._linesPending.nums.includes(i + 1) && !explained(i);
+    const title = partTitle(b);
+
+    this.walkBody.innerHTML =
+      this.stepBar({
+        act: 'wk', back, context: change.label, where: `File ${fi + 1} of ${files.length}`,
+        first: i === 0, pct: Math.round(((i + 1) / blocks.length) * 100),
+        next: i < blocks.length - 1 ? `<button type="button" class="wk-step" data-wk="next" aria-label="Next change">›</button>`
+          : `<button type="button" class="wk-step wk-step-text" data-wk="summary">Summary ›</button>`,
+        items: files.map((g, k) => {
+          const all = Array.from({ length: g.last - g.first + 1 }, (_, j) => g.first + j).every(explained);
+          const n = g.last - g.first + 1;
+          return { i: g.first, current: k === fi, mark: all ? '✓' : k + 1, title: esc(name(g.path)),
+            meta: n > 1 ? `${n} changes` : g.status === 'modified' ? '' : g.status };
+        }),
+        extra: (change.local ? '' : `<button type="button" class="files-link-btn wk-redo" data-wk="explain-change">Explain the whole change in the chat</button>`) +
+          `<button type="button" class="files-link-btn wk-redo" data-wk="redo">Ask for a new walkthrough of this change</button>`
+      }) +
+      (fi === 0 && (w.summary || skippedNote) ? `<p class="wk-summary">${esc(w.summary)}${skippedNote}</p>` : '') +
+      `<div class="wk-filehead"${fileEnter}>` +
+        `<div class="wk-meta"><span><code>${esc(f.path)}</code>` +
+          `<span class="wk-counts">${f.added ? ` <ins>+${f.added}</ins>` : ''}${f.removed ? ` <del>−${f.removed}</del>` : ''}</span>` +
+          `${f.status === 'modified' ? '' : ` · ${f.status}`}</span>` +
+          (b.start ? `<button type="button" class="files-link-btn wk-show" data-wk="show">Show in reader</button>` : '') + `</div>` +
+        (about ? `<p class="wk-about">${esc(about)}</p>` : '') +
       `</div>` +
-      `<div class="walk-notes"></div>` +
-      `<div class="walk-next" aria-live="polite"></div>` +
+      (count > 1
+        ? `<div class="wk-changes"><span class="wk-dots" role="group" aria-label="Changes in ${esc(name(f.path))}">` +
+            Array.from({ length: count }, (_, j) => {
+              const k = f.first + j;
+              return `<button type="button" class="wk-dot${k === i ? ' is-current' : ''}${explained(k) ? ' is-read' : ''}" data-wk="goto" data-i="${k}"` +
+                ` aria-label="Change ${j + 1}: ${esc(partTitle(blocks[k]))}"${k === i ? ' aria-current="step"' : ''}></button>`;
+            }).join('') + `</span>` +
+            `<span class="wk-change-pos">Change ${i - f.first + 1} of ${count} · ${lines(b)}</span></div>`
+        : '') +
+      `<div class="wk-change"${enter}>` +
+        (title !== name(b.path) ? `<h3 class="wk-title">${esc(title)}</h3>` : '') +
+        // The reader shows what was taken out, in place; a deleted file shows it here
+        (b.removed && !b.start ? `<details class="raw-reply wk-removed" open><summary>The deleted lines (${b.removed} line${b.removed === 1 ? '' : 's'})</summary>` +
+          `<pre>${esc(b.removedText)}</pre></details>` : '') +
+        this.typeBox(b) +
+        `<div class="walk-notes"></div>` +
+        (pending ? `<div class="work-status wk-pending" role="status"><span class="files-spinner" aria-hidden="true"></span><span>Explaining with the rest of ${esc(name(f.path))}…</span></div>` : '') +
+      `</div>` +
+      `<div class="walk-notes wk-file-notes"></div>` +
       // Pinned to the bottom of the sheet, so answers never push them away
-      `<div class="wk-dock">` + this.askBox('data-wk', 'Ask about these lines…',
-        (change
-          ? `<button type="button" class="run-ask" data-wk="lines">Line by line</button>` +
-            `<button type="button" class="run-ask" data-wk="bugs">Find bugs</button>` +
-            `<button type="button" class="run-ask" data-wk="better">Better ways</button>` +
-            `<button type="button" class="run-ask wk-more-toggle" data-wk="moreacts" aria-expanded="false">More</button>` +
-            `<span class="wk-extra" hidden>` +
-              `<button type="button" class="run-ask" data-wk="more">Explain more</button>` +
-              `<button type="button" class="run-ask" data-wk="tests">How to test it</button>` +
-              `<button type="button" class="run-ask" data-wk="quiz">Quiz me</button>` +
-              (b.added ? `<button type="button" class="run-ask" data-wk="type" aria-expanded="false">Write it yourself${best != null ? ` · best ${best}%` : ''}</button>` : '') +
-            `</span>`
-          : `<button type="button" class="run-ask" data-wk="more">Line by line</button>` +
-            `<button type="button" class="run-ask" data-wk="bugs">Find bugs</button>` +
-            `<button type="button" class="run-ask" data-wk="better">Better ways</button>` +
-            `<button type="button" class="run-ask wk-more-toggle" data-wk="moreacts" aria-expanded="false">More</button>` +
-            `<span class="wk-extra" hidden>` +
-              `<button type="button" class="run-ask" data-wk="quiz">Quiz me</button>` +
-              `<button type="button" class="run-ask" data-wk="type" aria-expanded="false">Practise typing${best != null ? ` · best ${best}%` : ''}</button>` +
-              `<button type="button" class="run-ask" data-wk="tests">How to test it</button>` +
-            `</span>`)) +
+      `<div class="wk-dock">` + this.askBox('data-wk', `Ask about ${esc(name(f.path))}…`,
+        `<button type="button" class="run-ask" data-wk="lines">${prose ? 'In brief' : 'Line by line'}</button>` +
+        `<button type="button" class="run-ask" data-wk="bugs">Find bugs</button>` +
+        `<button type="button" class="run-ask" data-wk="better">Better ways</button>` +
+        `<button type="button" class="run-ask wk-more-toggle" data-wk="moreacts" aria-expanded="false">More</button>` +
+        `<span class="wk-extra" hidden>` +
+          `<button type="button" class="run-ask" data-wk="more">Explain more</button>` +
+          `<button type="button" class="run-ask" data-wk="tests">How to test it</button>` +
+          `<button type="button" class="run-ask" data-wk="quiz">Quiz me</button>` +
+          (b.added ? `<button type="button" class="run-ask" data-wk="type" aria-expanded="false">Write it yourself${best != null ? ` · best ${best}%` : ''}</button>` : '') +
+        `</span>`) +
       `</div>`;
 
-    // Earlier answers for this block, folded except the latest
-    const notesEl = this.walkBody.querySelector('.walk-notes');
+    // This change's answers, then the file's (Find bugs, questions), folded except the latest
+    const [notesEl, fileEl] = this.walkBody.querySelectorAll('.walk-notes');
     const notes = w.notes?.[i] || [];
     notes.forEach((note, k) => this.renderWalkNote(notesEl, note, k < notes.length - 1));
-
-    this._walkCode = null;   // the practice editor is made when practice opens
+    const fileNotes = w.fileNotes?.[f.path] || [];
+    fileNotes.forEach((note, k) => this.renderWalkNote(fileEl, note, k < fileNotes.length - 1 || notes.length > 0));
+    this._walkCode = null;
     this.autoLines();
   }
 
@@ -389,6 +633,7 @@ export class WalkPart {
     if (act === 'folder') return this.openFolderJourney(el.dataset.i);
     if (act === 'review') return this.reviewLocal(el.dataset.base);
     if (act === 'review-back') return this.showReviewChoice();
+    if (act === 'review-restart') return this.restartReview(el.dataset.base);
     if (act === 'folder-new') return this.openFolderJourney(null);
     if (act === 'folders') return this.showFolderChoice();
     if (act === 'map') return this.showJourneyMap();
@@ -407,12 +652,7 @@ export class WalkPart {
     if (!w?.blocks) return;
     const i = w.current;
     const b = w.blocks[i];
-    const go = async (k) => {
-      await this.saveWalk({ ...w, current: k, summaryOpen: false });
-      await this.renderWalk();
-      this.walkBody.scrollTop = 0;
-      this.followWalk();
-    };
+    const go = (k) => this.gotoWalk(k);
     if (act === 'list') return this.toggleStepList(this.walkBody, el);
     if (act === 'moreacts') {
       const extra = el.nextElementSibling;
@@ -433,6 +673,10 @@ export class WalkPart {
     if (act === 'next') return go(Math.min(w.blocks.length - 1, i + 1));
     if (act === 'show') return this.followWalk();
     if (act === 'redo') return this.resetWalk();
+    if (act === 'rewalk') {
+      this._walkStale = null;
+      return this.createWalk(w.path, w.range.start > 1 || w.range.end < w.total ? w.range : null);
+    }
     if (act === 'explain-change') return this.explainDiff(w.change);
     if (act === 'continue') return this.createWalk(w.path, null, w.range.end + 1);
     if (act === 'finish') return this.finishWalkFile(el);
@@ -452,15 +696,27 @@ export class WalkPart {
       return;
     }
 
-    const code = await this.walkBlockCode();
     const c = w.change;
+    // A change's questions carry its diff; its code is fetched only to compare
+    // with what you typed, so a file that can't be fetched stops nothing else
+    const code = !c || ['compare', 'feedback'].includes(act) ? await this.walkBlockCode() : '';
+    // A change has a chat of its own; a file's walk shares its project's
+    const topic = c ? w.key : this.readTopic();
+    const chat = this.claimChat(topic);
     const repo = c ? (c.owner ? `${c.owner}/${c.repo}` : c.repo) : this.repoDisplayName();
-    // What the question is about: a file's numbered lines, or a change's part and its diff
-    const where = c ? `part ${i + 1} of ${w.blocks.length} of ${c.label.toLowerCase()} in ${repo}${c.title ? ` ("${c.title}")` : ''}`
-      : `lines ${b.start}-${b.end} of \`${w.path}\`${repo ? ` from ${repo}` : ''}`;
-    const block = c ? partContext(b) : `${LINE_NUMBER_NOTE}\n\n${fencedFile({ path: w.path, content: code, lines: b })}`;
+    // In a change, Find bugs, Better ways, tests and questions are about the
+    // whole file (bugs sit between its changes); the rest about one change
+    const f = c ? fileGroups(w.blocks).find(g => i >= g.first && i <= g.last) : null;
+    const fileLevel = !!c && ['bugs', 'better', 'tests', 'ask'].includes(act);
+    const inChange = c ? `${c.label.toLowerCase()} in ${repo}${c.title ? ` ("${c.title}")` : ''}` : '';
+    // What the question is about: a file's numbered lines, or a change's file or part and its diff
+    const where = !c ? `lines ${b.start}-${b.end} of \`${w.path}\`${repo ? ` from ${repo}` : ''}`
+      : fileLevel ? `the changes to \`${b.path}\` in ${inChange}`
+        : `change ${i - f.first + 1} of ${f.last - f.first + 1} to \`${b.path}\` in ${inChange}`;
+    const block = !c ? `${LINE_NUMBER_NOTE}\n\n${fencedFile({ path: w.path, content: code, lines: b })}`
+      : fileLevel ? fileContext(w.blocks.slice(f.first, f.last + 1)) : partContext(b);
     const project = this.walkProject();
-    const listed = this._filesListedFor === (w.key || w.path);
+    const listed = chat.sent.has('file-list');
     const files = project ? this.projectFiles(project, [b.path || w.path], { list: !listed }) : '';
     const brief = [project ? await this.projectBriefFor(project) : '', files].filter(Boolean).join('\n\n');
     const whole = [w.summary ? `(The ${c ? 'change' : 'file'} as a whole: ${w.summary})` : '', brief].filter(Boolean).join('\n\n');
@@ -479,7 +735,7 @@ export class WalkPart {
         (accuracy < 100 ? `<pre class="walk-diff">${ops.map(o =>
           `<span class="is-${o.type}">${this.escapeHtml(o.text)}</span>`).join('')}</pre>` : '');
       this.walkBody.querySelector('[data-wk="type"]').textContent = `${w.change ? 'Write it yourself' : 'Practise typing'} · best ${bestSoFar}%`;
-      if (bestSoFar >= 90) {
+      if (bestSoFar >= 90 && !w.change) {
         const n = this.walkBody.querySelector(`.wk-blocks [data-i="${i}"] .wk-n`);
         if (n) n.textContent = '✓';
       }
@@ -487,39 +743,44 @@ export class WalkPart {
     }
     if (!['more', 'lines', 'bugs', 'better', 'tests', 'quiz', 'feedback', 'ask'].includes(act)) return;
 
-    const notesEl = this.walkBody.querySelector('.walk-notes');
+    const notesEl = this.walkBody.querySelector(fileLevel ? '.wk-file-notes' : '.walk-notes');
     let prompt;
     let label;
     let attachments = [];
     let lineNums = null;
+    let about = [];
     if (act === 'lines') {
       label = 'Line by line';
       // The next small parts not explained yet come along in the same message.
-      // The first message of a walk also carries the whole diff, and opens
-      // with what the change does as a whole.
+      // The first message in a chat also carries the whole diff, and until
+      // the walk has one, asks what the change does as a whole.
       lineNums = linesBatch(w.blocks, i, k => !!w.notes?.[k]?.length).map(k => k + 1);
-      const first = !!w.fname && !w.summary && !Object.keys(w.notes || {}).length;
+      const first = !!w.fname && !chat.sent.has('diff');
+      // A file of several changes gets a sentence on what changed in it, once
+      const groups = fileGroups(w.blocks);
+      about = [...new Set(lineNums.map(n => w.blocks[n - 1].path))]
+        .filter(p => !w.fileAbout?.[p] && groups.some(g => g.path === p && g.last > g.first));
       prompt = linesPrompt({ blocks: w.blocks, nums: lineNums, what: w.what || c.label.toLowerCase(), repo, title: c.title,
-        fname: first ? w.fname : '', skipped: w.skipped || [], edits: this._promptEdits, brief });
+        fname: first ? w.fname : '', intro: !w.summary, skipped: w.skipped || [], edits: this._promptEdits, brief, about });
       if (first) attachments = [{ filename: w.fname, content: changePack(w.blocks, w.what) }];
     } else if (['bugs', 'better', 'tests'].includes(act)) {
       label = { bugs: 'Find bugs', better: 'Better ways', tests: 'How to test it' }[act];
       // In a change, the question is about what it adds or changes
-      prompt = `I'm reading ${where}${c ? '; look at the code it adds or changes' : ''}. ${intentText(this._promptEdits, act)} ${whole}\n\n${block}${cite}`;
+      prompt = `I'm reading ${where}${c ? '; look at the code they add or change' : ''}. ${intentText(this._promptEdits, act)} ${whole}\n\n${block}${cite}`;
     } else if (act === 'more') {
       // A file's block is explained up front, so here it goes line by line
       label = c ? 'Explain more' : 'Line by line';
       prompt = c
-        ? `I'm reading ${where}, part by part. Explain this part in more depth: the idea behind it, how it fits ` +
+        ? `I'm reading ${where}, change by change. Explain this change in more depth: the idea behind it, how it fits ` +
           `with the rest of the change, and anything a reader could easily miss. ${whole}\n\n${block}${cite}`
         : `I'm walking through ${where}, block by block. ${intentText(this._promptEdits, 'lines')} ${whole}\n\n${block}${cite}`;
     } else if (act === 'ask') {
       const q = this.takeQuestion(this.walkBody);
       if (!q) return;
       label = q.length > 80 ? q.slice(0, 79) + '…' : q;
-      const earlier = earlierAnswers(w.notes?.[i]);
-      prompt = `I'm ${c ? 'reading' : 'walking through'} ${where}, ${c ? 'part by part' : 'block by block'}. ` +
-        `My question about this ${c ? 'part' : 'block'}: ${q}${whole ? `\n\n${whole}` : ''}\n\n${block}` +
+      const earlier = earlierAnswers(c ? w.fileNotes?.[b.path] : w.notes?.[i]);
+      prompt = `I'm ${c ? 'reading' : 'walking through'} ${where}${c ? '' : ', block by block'}. ` +
+        `My question about ${c ? 'them' : 'this block'}: ${q}${whole ? `\n\n${whole}` : ''}\n\n${block}` +
         `${earlier ? `\n\n${earlier}` : ''}${cite}`;
     } else if (act === 'quiz') {
       label = 'Quiz';
@@ -544,30 +805,36 @@ export class WalkPart {
         notesEl.appendChild(wait);
         wait.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
         let reply = null;
-        try { reply = await this.askInPanel(prompt, { via: 'chat' }); } catch (err) { wait.querySelector('.answer-status').textContent = '⚠️ ' + err.message; return; }
+        try { reply = await this.askInPanel(prompt, { via: 'chat', topic }); } catch (err) { wait.querySelector('.answer-status').textContent = '⚠️ ' + err.message; return; }
         wait.remove();
         const quiz = parseQuiz(reply);
         const note = quiz ? { label, quiz } : { label, text: reply };
         this.renderWalkNote(notesEl, note, false);
         await this.addWalkNote(w.key || w.path, i, note);
       } else if (lineNums) {
-        if (files && !listed) this._filesListedFor = w.key || w.path;
-        const up = await this.walkContextFiles(notesEl, w, b, project);
+        this._linesPending = { key: w.key, nums: lineNums };
+        const up = await this.walkContextFiles(notesEl, w, b, project, chat);
         let text = await this.showAnswerIn(notesEl, label, up ? `${prompt}\n\n${up.note}` : prompt,
-          { via: 'chat', inline: true, attachments: up ? [...attachments, up.attachment] : attachments });
-        text = await this.answerWithFiles(notesEl, label, text, project, this._sentFiles?.paths);
+          { via: 'chat', inline: true, topic, attachments: up ? [...attachments, up.attachment] : attachments });
+        if (text) {
+          if (files) chat.sent.add('file-list');
+          if (attachments.length) chat.sent.add('diff');
+        }
+        text = await this.answerWithFiles(notesEl, label, text, project, chat);
         this.markLineRefs(notesEl);
+        this._linesPending = null;
         if (text) await this.saveLines(w.key, lineNums, label, text);
       } else {
-        if (files && !listed) this._filesListedFor = w.key || w.path;
-        const up = await this.walkContextFiles(notesEl, w, b, project);
+        const up = await this.walkContextFiles(notesEl, w, b, project, chat);
         let text = await this.showAnswerIn(notesEl, label, up ? `${prompt}\n\n${up.note}` : prompt,
-          { via: 'chat', inline: true, attachments: up ? [up.attachment] : [] });
-        text = await this.answerWithFiles(notesEl, label, text, project, this._sentFiles?.paths);
+          { via: 'chat', inline: true, topic, attachments: up ? [up.attachment] : [] });
+        if (text && files) chat.sent.add('file-list');
+        text = await this.answerWithFiles(notesEl, label, text, project, chat);
         this.markLineRefs(notesEl);
-        if (text) await this.addWalkNote(w.key || w.path, i, { label, text });
+        if (text) await (fileLevel ? this.addFileNote(w.key, b.path, { label, text }) : this.addWalkNote(w.key || w.path, i, { label, text }));
       }
     } finally {
+      if (lineNums) this._linesPending = null;
       el.disabled = false;
       // Moved on while this was answered: the part now open gets its turn
       if (c && this.walk?.key === w.key && this.walk.current !== i) this.autoLines();
@@ -580,24 +847,26 @@ export class WalkPart {
   renderReviewSummary() {
     const w = this.walk;
     const c = w.change;
-    const n = w.blocks.length;
     const esc = (t) => this.escapeHtml(t || '');
-    const found = w.blocks.map((b, k) => ({ b, k, notes: (w.notes?.[k] || []).filter(x => x.label === 'Find bugs') })).filter(x => x.notes.length);
-    const unchecked = n - w.blocks.filter((_, k) => (w.notes?.[k] || []).some(x => x.label === 'Find bugs')).length;
+    const files = fileGroups(w.blocks);
+    const n = files.length;
+    const found = files.filter(g => this.bugNotes(g).length);
+    const unchecked = n - found.length;
+    const back = c.local ? `<button type="button" class="wk-map" data-wk="review-back" aria-label="Back to the choice of changes">‹</button>` : '';
     this.walkBody.innerHTML =
       this.stepBar({
-        act: 'wk', context: c.label, where: 'Summary', first: false, pct: 100, next: '',
-        items: w.blocks.map((x, k) => ({ i: k, current: false, mark: k + 1, title: esc(x.title), meta: esc(x.path.split('/').pop()) }))
+        act: 'wk', back, context: c.label, where: 'Summary', first: false, pct: 100, next: '',
+        items: files.map((g, k) => ({ i: g.first, current: false, mark: k + 1, title: esc(g.path.split('/').pop()), meta: '' }))
       }) +
       `<h3 class="wk-title">Review summary</h3>` +
       (w.summary ? `<p class="wk-summary">${esc(w.summary)}</p>` : '') +
       `<div class="sheet-label">Found with Find bugs</div>` +
       (found.length
-        ? `<ul class="wk-found">${found.map(({ b, k }) =>
-            `<li><button type="button" class="files-link-btn" data-wk="goto" data-i="${k}">Part ${k + 1} · ${esc(b.title)}</button></li>`).join('')}</ul>`
+        ? `<ul class="wk-found">${found.map(g =>
+            `<li><button type="button" class="files-link-btn" data-wk="goto" data-i="${g.first}">${esc(g.path)}</button></li>`).join('')}</ul>`
         : '') +
-      `<p class="wk-explain is-empty">${found.length ? '' : 'No part has been checked with Find bugs yet. '}` +
-        `${unchecked ? `${unchecked} of ${n} part${n === 1 ? '' : 's'} not checked; the summary still reviews the whole diff.` : 'Every part was checked.'}</p>` +
+      `<p class="wk-explain is-empty">${found.length ? '' : 'No file has been checked with Find bugs yet. '}` +
+        `${unchecked ? `${unchecked} of ${n} file${n === 1 ? '' : 's'} not checked; the summary still reviews the whole diff.` : 'Every file was checked.'}</p>` +
       `<div class="walk-notes"></div>` +
       `<div class="wk-dock"><div class="wk-acts"><button type="button" class="run-ask" data-wk="wrapup">${w.review ? 'Write it again' : 'Write the summary'}</button></div></div>`;
     const notesEl = this.walkBody.querySelector('.walk-notes');
@@ -605,12 +874,19 @@ export class WalkPart {
     else if (!this._panelAsk) this.walkBody.querySelector('[data-wk="wrapup"]').click();
   }
 
+  // What Find bugs said about a file of the change: on the file, or (a walk
+  // saved before files had notes) on its parts
+  bugNotes(g) {
+    const w = this.walk;
+    const onParts = Array.from({ length: g.last - g.first + 1 }, (_, j) => w.notes?.[g.first + j] || []).flat();
+    return [...(w.fileNotes?.[g.path] || []), ...onParts].filter(x => x.label === 'Find bugs');
+  }
+
   async writeReviewSummary(el) {
     const w = this.walk;
     const c = w.change;
     const repo = c.owner ? `${c.owner}/${c.repo}` : c.repo;
-    const found = w.blocks.flatMap((b, k) => (w.notes?.[k] || []).filter(x => x.label === 'Find bugs')
-      .map(x => `### Part ${k + 1} · ${b.title}\n${x.text.slice(0, 1500)}`));
+    const found = fileGroups(w.blocks).flatMap(g => this.bugNotes(g).map(x => `### \`${g.path}\`\n${x.text.slice(0, 1500)}`));
     const [before, words] = c.local
       ? c.base === 'uncommitted'
         ? ['commit', 'Commit message: In a code block, a title line under 60 characters saying what the change does, in the imperative, then a blank line and a short body on what changed and why']
@@ -630,7 +906,7 @@ export class WalkPart {
     el.disabled = true;
     try {
       const text = await this.showAnswerIn(notesEl, 'Review summary', prompt, {
-        via: 'chat', inline: true, attachments: [{ filename: w.fname || 'changes.md', content: changePack(w.blocks, w.what || c.label) }]
+        via: 'chat', inline: true, topic: w.key, attachments: [{ filename: w.fname || 'changes.md', content: changePack(w.blocks, w.what || c.label) }]
       });
       if (text && this.walk?.key === w.key) {
         await this.saveWalk({ ...this.walk, review: text });
@@ -644,13 +920,20 @@ export class WalkPart {
   // A line-by-line reply for several parts: each part keeps its own section,
   // and the opening words about the whole change become the walk's summary
   async saveLines(key, nums, label, text) {
-    const { intro, parts } = splitParts(text, nums);
+    const { intro, parts, files } = splitParts(text, nums);
     for (const [n, body] of parts) await this.addWalkNote(key, n - 1, { label, text: body });
     const w = this.walk;
     if (w?.key !== key) return;
-    if (intro && !w.summary) await this.saveWalk({ ...w, summary: intro });
+    // A file's sentence is kept for a file in the walk (the model may name it loosely)
+    const paths = new Set(w.blocks.map(b => b.path));
+    const fileAbout = { ...(w.fileAbout || {}) };
+    for (const [p, sentence] of files) {
+      const path = paths.has(p) ? p : [...paths].find(x => x.endsWith(`/${p}`) || x.split('/').pop() === p);
+      if (path && !fileAbout[path]) fileAbout[path] = sentence;
+    }
+    await this.saveWalk({ ...w, fileAbout, summary: w.summary || intro });
     // The part on screen showed the whole reply while it streamed
-    if (nums.length > 1 || intro) {
+    if (nums.length > 1 || intro || files.size) {
       const top = this.walkBody.scrollTop;
       await this.renderWalk();
       this.walkBody.scrollTop = top;
@@ -688,6 +971,14 @@ export class WalkPart {
     card.done(note.text);
     this.markLineRefs(card.el);
     if (folded) card.el.classList.add('collapsed');
+  }
+
+  // A note on a whole file of a change (Find bugs, a question), kept by its path
+  async addFileNote(key, path, note) {
+    const w = this.walk;
+    if (w?.key !== key || !w.blocks) return;
+    const fileNotes = { ...(w.fileNotes || {}), [path]: [...(w.fileNotes?.[path] || []), note].slice(-4) };
+    await this.saveWalk({ ...w, fileNotes });
   }
 
   // id: the walk's key (a change) or path (a file)

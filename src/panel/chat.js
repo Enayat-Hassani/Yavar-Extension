@@ -4,6 +4,10 @@
 
 import { loadApiConfig, buildRoute, askRoute, askWithBudget } from '../utils/llm.js';
 
+// Characters sent to and read from one chat before Yavar goes on in a new
+// one: long chats get slow, forget their start, and hit free-plan limits
+const CHAT_BUDGET = 150000;
+
 export class ChatPart {
   // The bridge inside the chat announces BRIDGE_READY once it is listening.
   // Until then messages wait in a queue, so each is delivered exactly once
@@ -32,6 +36,38 @@ export class ChatPart {
       (this._bridgeWaiters = this._bridgeWaiters || []).push(resolve);
       setTimeout(() => resolve(false), timeoutMs);
     });
+  }
+
+  // Which chat an ask belongs to. A chat holds one thing: the conversation
+  // (`thread:<n>`), a change being walked (its walk key), a project being
+  // read (`read:<project>`). Asking about another thing, or in a chat that
+  // has grown past CHAT_BUDGET characters, starts a new chat; coming back to
+  // the conversation hands it over (see showAnswerIn). Returns the session,
+  // whose `sent` holds what this chat has been given already (a diff, a file
+  // list, files), so a new chat is given it again. Call it before writing a
+  // prompt that depends on that; askInPanel asks in the same session.
+  claimChat(topic = this.threadTopic()) {
+    const s = this._chatSession;
+    const full = s?.asks > 0 && s.chars > CHAT_BUDGET;
+    if (s && s.topic === topic && !full) return s;
+    if (s) {
+      this._freshChatNext = true;
+      this._apiHistory = [];
+      if (full) this.showNotification('This chat got long · Yavar goes on in a new one, with what it needs');
+      if (topic.startsWith('thread:') && this.threadTurns().length) this._handoff = true;
+    }
+    return (this._chatSession = { topic, asks: 0, chars: 0, sent: new Set(), files: new Set() });
+  }
+
+  // A thing begun again (a change walk made afresh) gets a new chat too
+  retireChat(topic) {
+    if (this._chatSession?.topic !== topic) return;
+    this._chatSession = null;
+    this._freshChatNext = true;
+  }
+
+  threadTopic() {
+    return `thread:${this._threadId || 0}`;
   }
 
   // Yavar's own work (in-panel answers, reader explanations) goes to
@@ -173,19 +209,27 @@ export class ChatPart {
   // Ask the chat something and get the answer back *inside Yavar*, streamed
   // as it's written, while the conversation carries on in the chat itself.
   // attachments: [{ filename, content, mime }] are uploaded first.
-  async askInPanel(prompt, { attachments = [], onProgress = null, onModel = null, via = null } = {}) {
+  // `topic`: the chat it belongs to (claimChat), the conversation by default.
+  async askInPanel(prompt, { attachments = [], onProgress = null, onModel = null, via = null, topic = undefined } = {}) {
     if (this._panelAsk) throw new Error('still waiting for the previous answer');
     this._panelAsk = true;
+    const session = this.claimChat(topic);
     try {
-      if ((via || this.answerWith) === 'api') return await this.askViaApi(prompt, { attachments, onProgress, onModel });
-      await this.ensureTaskChat();
-      const reply = this.chatRequest('WATCH_FOR_ANSWER', { timeoutMs: 120000, onProgress });
-      attachments.forEach(a => (a.image
-        ? this.forwardScreenshotToIframe(a.image)
-        : this.forwardAttachToIframe(a.filename, a.content, a.mime || 'text/markdown')));
-      if (attachments.length) await new Promise(r => setTimeout(r, 1500 + attachments.length * 400));
-      this.forwardToIframe({ prompt, autoSubmit: true });
-      return await reply;
+      let answer;
+      if ((via || this.answerWith) === 'api') answer = await this.askViaApi(prompt, { attachments, onProgress, onModel });
+      else {
+        await this.ensureTaskChat();
+        const reply = this.chatRequest('WATCH_FOR_ANSWER', { timeoutMs: 120000, onProgress });
+        attachments.forEach(a => (a.image
+          ? this.forwardScreenshotToIframe(a.image)
+          : this.forwardAttachToIframe(a.filename, a.content, a.mime || 'text/markdown')));
+        if (attachments.length) await new Promise(r => setTimeout(r, 1500 + attachments.length * 400));
+        this.forwardToIframe({ prompt, autoSubmit: true });
+        answer = await reply;
+      }
+      session.asks++;
+      session.chars += prompt.length + String(answer || '').length + attachments.reduce((n, a) => n + (a.content?.length || 0), 0);
+      return answer;
     } finally {
       this._panelAsk = false;
     }
@@ -296,7 +340,7 @@ export class ChatPart {
   // Returns { value, text, tried }: value null when replies came but none
   // could be read (text: the fullest one, to show; tried: who was asked,
   // "ChatGPT twice, Gemini"). Throws when no attempt got an answer at all.
-  async askForJson(prompt, { attachments = [], parse, live = null, list = 'title', hint = 'Reading the code…' }) {
+  async askForJson(prompt, { attachments = [], parse, live = null, list = 'title', hint = 'Reading the code…', topic = undefined }) {
     const say = (msg) => {
       const box = live?.querySelector('.sheet-live');
       if (box) box.innerHTML = `<span class="sheet-live-hint">${this.escapeHtml(msg)}</span>`;
@@ -339,7 +383,7 @@ export class ChatPart {
             const { text } = await askRoute(free, [{ role: 'user', content: [...files, prompt].join('\n\n') }], { onDelta: onProgress });
             result = { value: parse(text), text };
           } else {
-            result = await this.parseChatReply(await this.askInPanel(prompt, { attachments, onProgress, via: 'chat' }), parse);
+            result = await this.parseChatReply(await this.askInPanel(prompt, { attachments, onProgress, via: 'chat', topic }), parse);
           }
         } catch (e) {
           console.warn(`[Yavar] ${a.name} gave no answer:`, e.message);

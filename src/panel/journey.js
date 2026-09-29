@@ -140,7 +140,7 @@ export class JourneyPart {
       const fname = `${this.repoTree.repo}-overview.md`.replace(/[^\w.-]+/g, '-');
       // Show the reading order as the AI writes it
       const { value: parsed, text, tried } = await this.askForJson(journeyPrompt(this.repoDisplayName(), fname), {
-        attachments: [{ filename: fname, content: this.packFor(files) }], live: this.walkBody, list: 'file',
+        attachments: [{ filename: fname, content: this.packFor(files) }], live: this.walkBody, list: 'file', topic: this.readTopic(),
         parse: (t) => parseJourney(t, this.repoTree.fileSet, this.repoTree.repo)
       });
       if (!parsed) {
