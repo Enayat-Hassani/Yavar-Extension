@@ -180,6 +180,11 @@ export class RepoPart {
     return !ref || ref === 'HEAD' ? 'default branch' : (/^[0-9a-f]{40}$/i.test(ref) ? ref.slice(0, 7) : ref);
   }
 
+  // The chat a project's reading goes to (claimChat): the map and its files' walks
+  readTopic() {
+    return (this.readMarksKey() || 'readMarks:').replace(/^readMarks:/, 'read:');
+  }
+
   readMarksKey() {
     if (!this.repoTree) return null;
     return this.repoTree.source === 'local'

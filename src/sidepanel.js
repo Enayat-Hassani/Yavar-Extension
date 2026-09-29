@@ -266,7 +266,9 @@ class YavarSidePanel {
     });
   }
 
+  // A new chat page: nothing has been said in it yet (see claimChat)
   loadCurrentAI() {
+    this._chatSession = null;
     const model = this.getCurrentModel();
     if (model) {
       this.loadingState.classList.remove('hidden');
@@ -706,6 +708,8 @@ class YavarSidePanel {
     this._coach = null;
     this.renderComposer();
     this._freshChatNext = true;
+    this._threadId = (this._threadId || 0) + 1;
+    this._chatSession = null;
     this._apiHistory = [];
     this._turns = [];
     this._handoff = false;

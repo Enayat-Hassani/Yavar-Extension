@@ -214,3 +214,42 @@ test('changes that moved on are read again, keeping what was said about the part
     assert.deepEqual(b.errors, []);
   } finally { await b.close(); }
 });
+
+test('a chat holds one thing: another thing, or a long chat, goes on in a new one', async () => {
+  const b = await launch();
+  try {
+    const page = await b.open('sidepanel.html');
+    const r = await page.evaluate(() => {
+      const p = window.__panel;
+      p.showNotification = () => {};
+      const out = [];
+      const fresh = () => { const f = !!p._freshChatNext; p._freshChatNext = false; return f; };
+      const thread = p.claimChat();
+      p._turns = [{ q: 'q', a: 'a', el: document.body }];   // the conversation has a turn
+      out.push(['thread', fresh()]);
+      const walk = p.claimChat('walk:local/shop:@uncommitted');
+      out.push(['to a walk', fresh(), walk !== thread]);
+      walk.sent.add('diff');
+      out.push(['same walk', fresh(), p.claimChat('walk:local/shop:@uncommitted') === walk]);
+      walk.asks = 3;
+      walk.chars = 200000;
+      const next = p.claimChat('walk:local/shop:@uncommitted');
+      out.push(['too long', fresh(), next !== walk && !next.sent.has('diff')]);
+      p._handoff = false;
+      p.claimChat();
+      out.push(['back to the thread', fresh(), p._handoff]);
+      p.newConversation();
+      out.push(['new conversation', p.threadTopic(), p._chatSession]);
+      return out;
+    });
+    assert.deepEqual(r, [
+      ['thread', false],
+      ['to a walk', true, true],
+      ['same walk', false, true],
+      ['too long', true, true],
+      ['back to the thread', true, true],
+      ['new conversation', 'thread:1', null]
+    ]);
+    assert.deepEqual(b.errors, []);
+  } finally { await b.close(); }
+});

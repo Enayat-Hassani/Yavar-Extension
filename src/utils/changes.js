@@ -211,13 +211,15 @@ export function isProse(b) {
 const PROSE = 'For a part marked (prose), write only two to four plain sentences on what changed and why it matters, with no line numbers and no list.';
 
 // Line by line, for the parts `nums` (1-based) of the walk. The first
-// message also carries the whole diff and opens with what the change does.
-export function linesPrompt({ blocks, nums, what, repo, title = '', fname = '', skipped = [], edits = {}, brief = '' }) {
+// message in a chat also carries the whole diff (`fname`); with `intro` it
+// opens with what the change does.
+export function linesPrompt({ blocks, nums, what, repo, title = '', fname = '', intro = !!fname, skipped = [], edits = {}, brief = '' }) {
+  const opening = intro ? 'Begin with two or three sentences on what the change does as a whole and why. Then go' : 'Go';
   const head = fname
     ? `The attached "${fname}" is the whole diff of ${what} in ${repo}${title ? ` ("${title}")` : ''}, in ${blocks.length} numbered parts` +
       `${skipped.length ? ` (left out: ${skipped.length} lockfile, generated or binary file${skipped.length === 1 ? '' : 's'})` : ''}. ` +
-      `I'm reading it part by part. Begin with two or three sentences on what the change does as a whole and why. Then go through the parts below.`
-    : `I'm reading ${what} in ${repo}${title ? ` ("${title}")` : ''} part by part. Go through the parts below.`;
+      `I'm reading it part by part. ${opening} through the parts below.`
+    : `I'm reading ${what} in ${repo}${title ? ` ("${title}")` : ''} part by part. ${opening} through the parts below.`;
   const prose = nums.filter(n => isProse(blocks[n - 1]));
   const code = prose.length < nums.length;
   return `${brief ? `${brief}\n\n` : ''}${head}\n\n` +

@@ -109,7 +109,7 @@ export class WalkPart {
         ? `${walkPrompt({ path, repo, range, source: 'Below is' })}\n\n${LINE_NUMBER_NOTE}\n\n${fencedFile(file)}`
         : walkPrompt({ path, repo, range, source: `The attached "${fname}" is` });
       const { value: parsed, text, tried } = await this.askForJson(prompt, {
-        attachments: inline ? [] : [{ filename: fname, content: this.packFor([file]) }], live: this.walkBody, list: 'title',
+        attachments: inline ? [] : [{ filename: fname, content: this.packFor([file]) }], live: this.walkBody, list: 'title', topic: this.readTopic(),
         parse: (t) => parseWalkthrough(t, range)
       });
       if (!parsed) {
@@ -165,6 +165,7 @@ export class WalkPart {
     const { owner, repo, kind, sha, number, key } = change;
     this._walkPending = true;
     this._walkRaw = '';
+    this.retireChat(key);
     this.walk = { key, change, pending: true };
     this.renderWalk();
     try {
@@ -466,13 +467,16 @@ export class WalkPart {
 
     const code = await this.walkBlockCode();
     const c = w.change;
+    // A change has a chat of its own; a file's walk shares its project's
+    const topic = c ? w.key : this.readTopic();
+    const chat = this.claimChat(topic);
     const repo = c ? (c.owner ? `${c.owner}/${c.repo}` : c.repo) : this.repoDisplayName();
     // What the question is about: a file's numbered lines, or a change's part and its diff
     const where = c ? `part ${i + 1} of ${w.blocks.length} of ${c.label.toLowerCase()} in ${repo}${c.title ? ` ("${c.title}")` : ''}`
       : `lines ${b.start}-${b.end} of \`${w.path}\`${repo ? ` from ${repo}` : ''}`;
     const block = c ? partContext(b) : `${LINE_NUMBER_NOTE}\n\n${fencedFile({ path: w.path, content: code, lines: b })}`;
     const project = this.walkProject();
-    const listed = this._filesListedFor === (w.key || w.path);
+    const listed = chat.sent.has('file-list');
     const files = project ? this.projectFiles(project, [b.path || w.path], { list: !listed }) : '';
     const brief = [project ? await this.projectBriefFor(project) : '', files].filter(Boolean).join('\n\n');
     const whole = [w.summary ? `(The ${c ? 'change' : 'file'} as a whole: ${w.summary})` : '', brief].filter(Boolean).join('\n\n');
@@ -507,12 +511,12 @@ export class WalkPart {
     if (act === 'lines') {
       label = 'Line by line';
       // The next small parts not explained yet come along in the same message.
-      // The first message of a walk also carries the whole diff, and opens
-      // with what the change does as a whole.
+      // The first message in a chat also carries the whole diff, and until
+      // the walk has one, asks what the change does as a whole.
       lineNums = linesBatch(w.blocks, i, k => !!w.notes?.[k]?.length).map(k => k + 1);
-      const first = !!w.fname && !w.summary && !Object.keys(w.notes || {}).length;
+      const first = !!w.fname && !chat.sent.has('diff');
       prompt = linesPrompt({ blocks: w.blocks, nums: lineNums, what: w.what || c.label.toLowerCase(), repo, title: c.title,
-        fname: first ? w.fname : '', skipped: w.skipped || [], edits: this._promptEdits, brief });
+        fname: first ? w.fname : '', intro: !w.summary, skipped: w.skipped || [], edits: this._promptEdits, brief });
       if (first) attachments = [{ filename: w.fname, content: changePack(w.blocks, w.what) }];
     } else if (['bugs', 'better', 'tests'].includes(act)) {
       label = { bugs: 'Find bugs', better: 'Better ways', tests: 'How to test it' }[act];
@@ -556,26 +560,29 @@ export class WalkPart {
         notesEl.appendChild(wait);
         wait.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
         let reply = null;
-        try { reply = await this.askInPanel(prompt, { via: 'chat' }); } catch (err) { wait.querySelector('.answer-status').textContent = '⚠️ ' + err.message; return; }
+        try { reply = await this.askInPanel(prompt, { via: 'chat', topic }); } catch (err) { wait.querySelector('.answer-status').textContent = '⚠️ ' + err.message; return; }
         wait.remove();
         const quiz = parseQuiz(reply);
         const note = quiz ? { label, quiz } : { label, text: reply };
         this.renderWalkNote(notesEl, note, false);
         await this.addWalkNote(w.key || w.path, i, note);
       } else if (lineNums) {
-        if (files && !listed) this._filesListedFor = w.key || w.path;
-        const up = await this.walkContextFiles(notesEl, w, b, project);
+        const up = await this.walkContextFiles(notesEl, w, b, project, chat);
         let text = await this.showAnswerIn(notesEl, label, up ? `${prompt}\n\n${up.note}` : prompt,
-          { via: 'chat', inline: true, attachments: up ? [...attachments, up.attachment] : attachments });
-        text = await this.answerWithFiles(notesEl, label, text, project, this._sentFiles?.paths);
+          { via: 'chat', inline: true, topic, attachments: up ? [...attachments, up.attachment] : attachments });
+        if (text) {
+          if (files) chat.sent.add('file-list');
+          if (attachments.length) chat.sent.add('diff');
+        }
+        text = await this.answerWithFiles(notesEl, label, text, project, chat);
         this.markLineRefs(notesEl);
         if (text) await this.saveLines(w.key, lineNums, label, text);
       } else {
-        if (files && !listed) this._filesListedFor = w.key || w.path;
-        const up = await this.walkContextFiles(notesEl, w, b, project);
+        const up = await this.walkContextFiles(notesEl, w, b, project, chat);
         let text = await this.showAnswerIn(notesEl, label, up ? `${prompt}\n\n${up.note}` : prompt,
-          { via: 'chat', inline: true, attachments: up ? [up.attachment] : [] });
-        text = await this.answerWithFiles(notesEl, label, text, project, this._sentFiles?.paths);
+          { via: 'chat', inline: true, topic, attachments: up ? [up.attachment] : [] });
+        if (text && files) chat.sent.add('file-list');
+        text = await this.answerWithFiles(notesEl, label, text, project, chat);
         this.markLineRefs(notesEl);
         if (text) await this.addWalkNote(w.key || w.path, i, { label, text });
       }
@@ -642,7 +649,7 @@ export class WalkPart {
     el.disabled = true;
     try {
       const text = await this.showAnswerIn(notesEl, 'Review summary', prompt, {
-        via: 'chat', inline: true, attachments: [{ filename: w.fname || 'changes.md', content: changePack(w.blocks, w.what || c.label) }]
+        via: 'chat', inline: true, topic: w.key, attachments: [{ filename: w.fname || 'changes.md', content: changePack(w.blocks, w.what || c.label) }]
       });
       if (text && this.walk?.key === w.key) {
         await this.saveWalk({ ...this.walk, review: text });
