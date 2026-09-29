@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseDiff, changeBlocks, changePack, diffRows, partTitle, orderParts, linesBatch, linesPrompt, splitParts } from '../src/utils/changes.js';
+import { parseDiff, changeBlocks, changePack, diffRows, partTitle, orderParts, linesBatch, linesPrompt, splitParts, carryNotes } from '../src/utils/changes.js';
 
 const DIFF = `diff --git a/src/app.js b/src/app.js
 index 111..222 100644
@@ -170,4 +170,16 @@ test('the reader rows put removed lines back where they were', () => {
   assert.deepEqual(rows.map(r => r.kind === 'del' ? `-${r.old} ${r.text}` : `${r.kind === 'add' ? '+' : ' '}${r.n}`), [
     ' 1', '-2 old two', '+2', ' 3', ' 4', '-7 old end'
   ]);
+});
+
+test('notes carry over to parts whose diff is the same, even when their lines moved', () => {
+  const part = (path, diff) => ({ path, diff });
+  const before = {
+    blocks: [part('a.js', '@@ -3 +3 @@\n-   3 | old\n+   3 | new'), part('b.js', '@@ -1 +1 @@\n+   1 | x')],
+    notes: { 0: [{ label: 'Line by line', text: 'a' }], 1: [{ label: 'Line by line', text: 'b' }] }
+  };
+  // a.js moved down two lines (same change); b.js changed what it adds
+  const after = [part('b.js', '@@ -1 +1 @@\n+   1 | y'), part('a.js', '@@ -5 +5 @@\n-   5 | old\n+   5 | new')];
+  assert.deepEqual(carryNotes(before, after), { 1: [{ label: 'Line by line', text: 'a' }] });
+  assert.deepEqual(carryNotes(null, after), {});
 });

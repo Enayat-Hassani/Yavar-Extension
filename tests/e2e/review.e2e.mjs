@@ -125,12 +125,12 @@ test('the walk ends with a review summary and a commit message', async () => {
   } finally { await b.close(); }
 });
 
-test('the project reviewed last is one click away on the start page', async () => {
+test('the project reviewed last opens at its choice, which says how far each walk got', async () => {
   const b = await launch();
   try {
     const page = await b.open('sidepanel.html');
     await openFolder(page, 'shop', filesOf(makeRepo(BEFORE, AFTER)));
-    await stubChat(page, () => 'ok');
+    await stubChat(page, (label, prompt) => [...prompt.matchAll(/^### Part (\d+)/gm)].map(m => `### Part ${m[1]}\n- ok`).join('\n'));
     await reviewUncommitted(page);
     const rows = await page.evaluate(async () => {
       const p = window.__panel;
@@ -141,7 +141,76 @@ test('the project reviewed last is one click away on the start page', async () =
       return names;
     });
     assert.ok(rows.includes('Review my changes · shop'), rows.join(', '));
+    // The choice, not straight into the walk
+    await page.waitForSelector('[data-wk="review"][data-base="head"]');
+    const choice = await page.evaluate(() => ({
+      status: document.querySelector('[data-base="head"] .jr-folder-status').textContent,
+      restart: !!document.querySelector('[data-wk="review-restart"][data-base="head"]'),
+      walk: !!window.__panel.walk
+    }));
+    assert.deepEqual(choice, { status: '3 of 3 parts read · Continue', restart: true, walk: false });
+    // Continue reopens the walk as it was, without asking again
+    const asked = await page.evaluate(() => window.__asks.length);
+    await page.evaluate(() => document.querySelector('[data-wk="review"][data-base="head"]').click());
     await page.waitForFunction(() => window.__panel.walk?.blocks?.length === 3);
+    await wait(page, 300);
+    assert.equal(await page.evaluate(() => window.__asks.length), asked);
+    // ‹ goes back to the choice; Start over (clicked twice) forgets the walk and reads again
+    await page.evaluate(() => document.querySelector('[data-wk="review-back"]').click());
+    await page.waitForSelector('[data-wk="review-restart"]');
+    await page.evaluate(() => {
+      document.querySelector('[data-wk="review-restart"]').click();
+      document.querySelector('[data-wk="review-restart"]').click();
+    });
+    await page.waitForFunction((n) => window.__panel.walk?.blocks && window.__asks.length > n, asked);
+    const fresh = await page.evaluate(() => ({ notes: Object.keys(window.__panel.walk.notes || {}).length, first: window.__asks.at(-1).attached }));
+    assert.ok(fresh.first.includes('shop-uncommitted-changes.md'), 'the first message of a new walk carries the whole diff');
+    assert.deepEqual(b.errors, []);
+  } finally { await b.close(); }
+});
+
+test('changes that moved on are read again, keeping what was said about the parts that did not', async () => {
+  const b = await launch();
+  try {
+    const page = await b.open('sidepanel.html');
+    await openFolder(page, 'shop', filesOf(makeRepo(BEFORE, AFTER)));
+    await stubChat(page, (label, prompt) => [...prompt.matchAll(/^### Part (\d+) · `([^`]+)`/gm)].map(m => `### Part ${m[1]}\n- about ${m[2]}`).join('\n'));
+    await reviewUncommitted(page);
+    const oldKey = await page.evaluate(() => window.__panel.walk.key);
+    // Edit the test file on disk, then choose Not committed yet again
+    await page.evaluate(async () => {
+      const root = await (await navigator.storage.getDirectory()).getDirectoryHandle('shop');
+      const f = await (await root.getDirectoryHandle('tests')).getFileHandle('cart.test.js');
+      const w = await f.createWritable();
+      await w.write('test("total", () => expect(total([], 0.25)).toBe(0));\n');
+      await w.close();
+      const p = window.__panel;
+      p.walk = null;
+      p._asksBefore = window.__asks.length;
+      await p.showReviewChoice();
+      document.querySelector('[data-wk="review"][data-base="head"]').click();
+    });
+    await page.waitForFunction(() => window.__panel.walk?.blocks);
+    await wait(page, 300);
+    // Part 1 kept its notes, so nothing is asked until the edited part opens
+    assert.equal(await page.evaluate(() => window.__asks.length - window.__panel._asksBefore), 0);
+    await page.evaluate(() => document.querySelector('[data-wk="next"]').click());
+    await page.waitForFunction(() => window.__asks.length > window.__panel._asksBefore);
+    await wait(page, 300);
+    const r = await page.evaluate(() => {
+      const w = window.__panel.walk;
+      return { key: w.key, notes: w.blocks.map((x, k) => [x.path, (w.notes?.[k] || []).map(n => n.text).join()]) };
+    });
+    assert.equal(r.key, oldKey, 'one walk per kind of change');
+    // cart.js and README kept their notes; the edited test was asked again
+    assert.deepEqual(r.notes, [
+      ['src/cart.js', '- about src/cart.js'],
+      ['tests/cart.test.js', '- about tests/cart.test.js'],
+      ['README.md', '- about README.md']
+    ]);
+    const last = await page.evaluate(() => window.__asks.at(-1).prompt);
+    assert.match(last, /### Part 2 · `tests\/cart\.test\.js`/);
+    assert.doesNotMatch(last, /### Part 1 ·/);
     assert.deepEqual(b.errors, []);
   } finally { await b.close(); }
 });

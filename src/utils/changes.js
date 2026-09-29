@@ -231,6 +231,19 @@ export function splitParts(text, nums) {
   return { intro: text.slice(0, heads[0].index).trim(), parts };
 }
 
+// The notes of an earlier walk of the same changes, on the parts of the new
+// one whose diff is the same, line numbers aside (an edit above a part moves
+// its numbers, not what it says). Keyed by the new parts' positions.
+export function carryNotes(before, parts) {
+  if (!before?.blocks || !before.notes) return {};
+  const sig = (b) => `${b.path}\n${b.diff.replace(/^([+\- ])\s*\d+ \| /gm, '$1').replace(/^@@.*$/gm, '')}`;
+  const old = new Map();
+  before.blocks.forEach((b, k) => { if (before.notes[k]?.length) old.set(sig(b), before.notes[k]); });
+  const notes = {};
+  parts.forEach((b, k) => { const n = old.get(sig(b)); if (n) notes[k] = n; });
+  return notes;
+}
+
 // What a part is, for a question about it: where it is and its diff
 // (A walk saved before diffs were numbered has no numbers to explain.)
 export function partContext(b) {

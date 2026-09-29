@@ -2282,6 +2282,10 @@ button.lens-item:focus-visible {
 .jr-folder-name { font-weight: 600; }
 .jr-folder-status { grid-column: 1; font-size: 12px; color: var(--text-secondary); }
 .jr-folder .home-chev { grid-column: 2; grid-row: 1 / span 2; }
+/* Your own changes: a walk begun earlier can be begun again beside it */
+.rv-option { display: flex; align-items: center; gap: 4px; }
+.rv-option .jr-folder { flex: 1; min-width: 0; }
+.rv-restart { flex: none; margin: 0 4px 0 0; font-size: 12px; }
 
 /* How the files connect: an indented tree, lines drawn on the left */
 .jr-connections:empty { display: none; }

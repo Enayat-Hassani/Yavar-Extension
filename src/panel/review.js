@@ -20,7 +20,7 @@ export class ReviewPart {
   }
 
   // "Review my changes · <folder>" on the start page: the folder reviewed
-  // last, its uncommitted changes, or what isn't pushed when all is committed
+  // last, at its choice, where each kind of change says how far you read it
   async reviewLast() {
     const handle = this._reviewFolder || await idbGet('reviewFolder');
     if (!handle) return this.startReview();
@@ -28,10 +28,11 @@ export class ReviewPart {
     this._folderReview = true;
     if (!(await this.openLocalFolder({ handle }))) return;
     await this.showReviewChoice();
-    if (!this._review) return;   // not a repository any more: the choice says why
-    if (!(await this.reviewLocal('head')) && this._review.upstream && this._review.upstream.sha !== this._review.sha) {
-      await this.reviewLocal('upstream');
-    }
+  }
+
+  // One walk per folder and kind of change: `head` (not committed) or `upstream` (not pushed)
+  reviewKey(base) {
+    return `walk:local/${this.repoTree?.repo}:@${base === 'upstream' ? 'unpushed' : 'uncommitted'}`;
   }
 
   // .git and the folder's files, in the shape utils/git.js reads
@@ -81,21 +82,41 @@ export class ReviewPart {
       return;
     }
     this._review = st;
-    const option = (base, title, desc) => `<li><button type="button" class="jr-folder" data-wk="review" data-base="${base}">` +
-      `<span class="jr-folder-name">${esc(title)}</span><span class="jr-folder-status">${esc(desc)}</span>` +
-      `<span class="home-chev" aria-hidden="true">›</span></button></li>`;
+    const bases = ['head', ...(st.upstream && st.upstream.sha !== st.sha ? ['upstream'] : [])];
+    let saved = {};
+    try { saved = await chrome.storage.local.get(bases.map(b => this.reviewKey(b))); } catch (e) { /* none */ }
+    // A walk begun earlier shows how far it got, and can be begun again
+    const option = (base, title, desc) => {
+      const w = saved[this.reviewKey(base)];
+      const n = w?.blocks?.length;
+      const read = n ? Object.keys(w.notes || {}).length : 0;
+      return `<li class="rv-option"><button type="button" class="jr-folder" data-wk="review" data-base="${base}">` +
+        `<span class="jr-folder-name">${esc(title)}</span>` +
+        `<span class="jr-folder-status">${n ? `${read} of ${n} part${n === 1 ? '' : 's'} read · Continue` : esc(desc)}</span>` +
+        `<span class="home-chev" aria-hidden="true">›</span></button>` +
+        (n ? `<button type="button" class="files-link-btn rv-restart" data-wk="review-restart" data-base="${base}">Start over</button>` : '') +
+        `</li>`;
+    };
     this.walkBody.innerHTML =
       `<p class="wk-summary">${st.branch ? `On <code>${esc(st.branch)}</code>. ` : ''}Which changes should Yavar walk you through?</p>` +
       `<ul class="jr-folders">` +
         option('head', 'Not committed yet', `What changed since your last commit (${st.sha.slice(0, 7)})`) +
-        (st.upstream && st.upstream.sha !== st.sha
-          ? option('upstream', 'Not pushed yet', `Your commits and changes since ${st.upstream.name}`) : '') +
+        (bases.includes('upstream') ? option('upstream', 'Not pushed yet', `Your commits and changes since ${st.upstream.name}`) : '') +
       `</ul>` +
       `<div class="jr-actions"><button type="button" class="files-link-btn jr-link" data-wk="folders">Another folder</button></div>`;
   }
 
-  // Walk the changes against the last commit or the pushed branch. The walk's
-  // key is made from the diff, so the same changes reopen their walk.
+  // Start over: forget the saved walk of these changes, then read them afresh
+  async restartReview(base) {
+    if (!this.confirmTwice(`review:${base}`, 'Click Start over again to forget this walk')) return;
+    try { await chrome.storage.local.remove(this.reviewKey(base)); } catch (e) { /* ignore */ }
+    await this.reviewLocal(base);
+  }
+
+  // Walk the changes against the last commit or the pushed branch. There is
+  // one walk per kind of change; it keeps the diff's hash, so changes that
+  // moved on since are read again (keeping what was said about parts that
+  // didn't change).
   async reviewLocal(base) {
     const st = this._review;
     const name = this.repoTree?.repo;
@@ -114,9 +135,14 @@ export class ReviewPart {
           `<button type="button" class="files-link-btn jr-link" data-wk="review-back">Back</button></div>`;
         return false;
       }
-      const hash = (await blobSha(new TextEncoder().encode(diff))).slice(0, 12);
-      change.key = `walk:local/${name}:@${change.base}-${hash}`;
+      change.diffHash = (await blobSha(new TextEncoder().encode(diff))).slice(0, 12);
+      change.key = this.reviewKey(base);
       this._localDiffs = { [change.key]: diff };
+      // Walks from before there was one per kind of change (their keys ended in the diff's hash)
+      try {
+        const old = Object.keys(await chrome.storage.local.get(null)).filter(k => k.startsWith(`${change.key}-`));
+        if (old.length) await chrome.storage.local.remove(old);
+      } catch (e) { /* ignore */ }
       // The start page offers this folder next time, one click away
       if (this.localRoot && this._reviewFolder !== this.localRoot) {
         this._reviewFolder = this.localRoot;

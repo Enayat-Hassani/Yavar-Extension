@@ -15,9 +15,11 @@ import {
   orderParts,
   linesBatch,
   linesPrompt,
-  splitParts
+  splitParts,
+  carryNotes
 } from '../utils/changes.js';
 import { intentText } from '../utils/intents.js';
+import { blobSha } from '../utils/git.js';
 import { earlierAnswers } from '../utils/conversation.js';
 import { loadApiConfig, buildRoute, askRoute } from '../utils/llm.js';
 import {
@@ -143,7 +145,8 @@ export class WalkPart {
     document.getElementById('walk-title').textContent = 'Read the change';
     document.getElementById('walk-sub').textContent = change.label + (change.title ? ` · ${change.title}` : '');
     this.walkPanel.classList.remove('hidden');
-    if (saved?.blocks?.length) {
+    // Your own changes that moved on since are read again
+    if (saved?.blocks?.length && (!change.local || saved.change?.diffHash === change.diffHash)) {
       this.walk = saved;
       this.renderWalk();
       this.followWalk();
@@ -152,10 +155,12 @@ export class WalkPart {
     // Opened on the repository's own page: its file tree lets the AI ask for files
     const tab = this._tabCtx?.gh;
     if (!change.local && tab && tab.owner === owner && tab.repo === repo) await this.ensureRepoTree().catch(() => {});
-    await this.createChangeWalk(change);
+    await this.createChangeWalk(change, saved?.blocks ? saved : null);
   }
 
-  async createChangeWalk(change) {
+  // `before`: an earlier walk of the same changes, whose notes carry over to
+  // the parts whose diff is the same
+  async createChangeWalk(change, before = null) {
     if (this._walkPending) return;
     const { owner, repo, kind, sha, number, key } = change;
     this._walkPending = true;
@@ -163,7 +168,10 @@ export class WalkPart {
     this.walk = { key, change, pending: true };
     this.renderWalk();
     try {
-      const files = parseDiff(change.local ? await this.localDiff(change) : await this.fetchDiff({ owner, repo, kind, sha, number }));
+      const text = change.local ? await this.localDiff(change) : await this.fetchDiff({ owner, repo, kind, sha, number });
+      // Read again (Ask again, Start over): the walk is of the diff as it is now
+      if (change.local) change = { ...change, diffHash: (await blobSha(new TextEncoder().encode(text))).slice(0, 12) };
+      const files = parseDiff(text);
       const { blocks, skipped } = changeBlocks(files);
       if (!blocks.length) throw new Error(files.length ? 'only lockfiles, generated or binary files changed' : 'the diff is empty');
       // The parts are ready at once, in reading order and named after their
@@ -171,7 +179,8 @@ export class WalkPart {
       const what = change.local ? change.what : kind === 'pull' ? `pull request #${number}` : `commit ${sha.slice(0, 7)}`;
       const fname = `${repo}-${change.local ? change.base : kind === 'pull' ? `pr-${number}` : sha.slice(0, 7)}-changes.md`.replace(/[^\w.-]+/g, '-');
       const parts = orderParts(blocks).map(b => ({ ...b, title: partTitle(b), explain: '' }));
-      await this.saveWalk({ key, change, what, fname, summary: '', blocks: parts, skipped, current: 0, typed: {}, created: Date.now() });
+      const notes = carryNotes(before, parts);
+      await this.saveWalk({ key, change, what, fname, summary: '', blocks: parts, skipped, notes, current: 0, typed: {}, created: Date.now() });
       this._readingContext = { label: owner ? `${owner}/${repo}` : repo, ts: Date.now() };
       this.followWalk();
     } catch (e) {
@@ -186,7 +195,7 @@ export class WalkPart {
     const w = this.walk;
     if (!w?.blocks || this._walkPending) return;
     if (!this.confirmTwice('walk', 'Click again to ask for a new walkthrough')) return;
-    if (w.change) return this.createChangeWalk(w.change);
+    if (w.change) return this.createChangeWalk(w.change, w);
     const partial = w.range.start > 1 || w.range.end < w.total;
     await this.createWalk(w.path, partial ? w.range : null);
   }
@@ -269,7 +278,9 @@ export class WalkPart {
     if (this.walkView !== 'file') return;   // the map or the folder choice is showing; the walk renders when you return
     const w = this.walk;
     const esc = (t) => this.escapeHtml(t || '');
-    const toMap = this.journey && !w?.change ? `<button type="button" class="wk-map" data-wk="map">‹ Map</button>` : '';
+    // The way back: to the reading map, or to the choice of your own changes
+    const toMap = w?.change?.local ? `<button type="button" class="wk-map" data-wk="review-back" aria-label="Back to the choice of changes">‹</button>`
+      : this.journey && !w?.change ? `<button type="button" class="wk-map" data-wk="map">‹ Map</button>` : '';
     if (!w?.blocks) {
       this.walkBody.innerHTML = (toMap ? `<div class="wk-bar">${toMap}</div>` : '') + (w?.error
         ? `<div class="sheet-intro"><p>⚠️ Could not make the walkthrough: ${esc(w.error)}.</p>` +
@@ -389,6 +400,7 @@ export class WalkPart {
     if (act === 'folder') return this.openFolderJourney(el.dataset.i);
     if (act === 'review') return this.reviewLocal(el.dataset.base);
     if (act === 'review-back') return this.showReviewChoice();
+    if (act === 'review-restart') return this.restartReview(el.dataset.base);
     if (act === 'folder-new') return this.openFolderJourney(null);
     if (act === 'folders') return this.showFolderChoice();
     if (act === 'map') return this.showJourneyMap();
