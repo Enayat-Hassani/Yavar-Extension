@@ -54,6 +54,10 @@
 
 * { box-sizing: border-box; }
 
+/* As in the panel: colours ease, and a press dims a control while held */
+:where(button, a) { transition: background-color 140ms var(--ease-std), color 140ms var(--ease-std), opacity 140ms var(--ease-std); }
+:where(button):not(:disabled):active { opacity: 0.7; transition-duration: 0ms; }
+
 html, body {
   height: 100%;
   margin: 0;
@@ -116,8 +120,8 @@ body {
 .rd-nav .rd-label { max-width: none; min-width: 0; }
 .rd-step {
   flex: none;
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   font: 600 16px/1 inherit;
   color: var(--accent);
   background: var(--band);
@@ -150,7 +154,8 @@ body {
 .rd-status.is-error { flex: 0 1 auto; min-width: 0; color: var(--danger); }
 .rd-btn {
   flex: none;
-  padding: 4px 12px;
+  min-height: 28px;
+  padding: 0 12px;
   font: inherit;
   font-size: 12px;
   font-weight: 600;
@@ -159,7 +164,6 @@ body {
   border: none;
   border-radius: 999px;
   cursor: pointer;
-  transition: background var(--dur-base) var(--ease-std), color var(--dur-base) var(--ease-std);
 }
 .rd-btn:hover { background: var(--band); }
 .rd-btn-primary { color: var(--on-accent); background: var(--accent); }

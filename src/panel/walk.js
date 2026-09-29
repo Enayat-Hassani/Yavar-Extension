@@ -486,13 +486,15 @@ export class WalkPart {
       `<div class="walk-next" aria-live="polite"></div>` +
       // Pinned to the bottom of the sheet, so answers never push them away
       `<div class="wk-dock">` + this.askBox('data-wk', 'Ask about these lines…',
-        `<button type="button" class="run-ask" data-wk="more">Line by line</button>` +
-        `<button type="button" class="run-ask" data-wk="bugs">Find bugs</button>` +
-        `<button type="button" class="run-ask" data-wk="better">Better ways</button>` +
-        `<button type="button" class="run-ask wk-more-toggle" data-wk="moreacts" aria-expanded="false">More</button>` +
+        // The block is already explained line by line, so learning it comes first
+        `<button type="button" class="run-ask is-key" data-wk="more">Explain more</button>` +
+        `<button type="button" class="run-ask is-key" data-wk="type" aria-expanded="false">Practise typing${best != null ? ` · best ${best}%` : ''}</button>` +
+        `<button type="button" class="run-ask is-key" data-wk="quiz">Quiz me</button>` +
+        `<button type="button" class="run-ask wk-more-toggle" data-wk="moreacts" aria-expanded="false"><span>More</span><i class="wk-more-chev" aria-hidden="true"></i></button>` +
         `<span class="wk-extra" hidden>` +
-          `<button type="button" class="run-ask" data-wk="quiz">Quiz me</button>` +
-          `<button type="button" class="run-ask" data-wk="type" aria-expanded="false">Practise typing${best != null ? ` · best ${best}%` : ''}</button>` +
+          `<button type="button" class="run-ask" data-wk="lines">Line by line</button>` +
+          `<button type="button" class="run-ask" data-wk="bugs">Find bugs</button>` +
+          `<button type="button" class="run-ask" data-wk="better">Better ways</button>` +
           `<button type="button" class="run-ask" data-wk="tests">How to test it</button>` +
         `</span>`) +
       `</div>`;
@@ -589,12 +591,13 @@ export class WalkPart {
       `<div class="walk-notes wk-file-notes"></div>` +
       // Pinned to the bottom of the sheet, so answers never push them away
       `<div class="wk-dock">` + this.askBox('data-wk', `Ask about ${esc(name(f.path))}…`,
-        `<button type="button" class="run-ask" data-wk="lines">${prose ? 'In brief' : 'Line by line'}</button>` +
-        `<button type="button" class="run-ask" data-wk="bugs">Find bugs</button>` +
-        `<button type="button" class="run-ask" data-wk="better">Better ways</button>` +
-        `<button type="button" class="run-ask wk-more-toggle" data-wk="moreacts" aria-expanded="false">More</button>` +
+        // Each change is explained line by line as it opens, so judging it comes first
+        `<button type="button" class="run-ask is-key" data-wk="bugs">Find bugs</button>` +
+        `<button type="button" class="run-ask is-key" data-wk="better">Better ways</button>` +
+        `<button type="button" class="run-ask is-key" data-wk="more">Explain more</button>` +
+        `<button type="button" class="run-ask wk-more-toggle" data-wk="moreacts" aria-expanded="false"><span>More</span><i class="wk-more-chev" aria-hidden="true"></i></button>` +
         `<span class="wk-extra" hidden>` +
-          `<button type="button" class="run-ask" data-wk="more">Explain more</button>` +
+          `<button type="button" class="run-ask" data-wk="lines">${prose ? 'In brief' : 'Line by line'}</button>` +
           `<button type="button" class="run-ask" data-wk="tests">How to test it</button>` +
           `<button type="button" class="run-ask" data-wk="quiz">Quiz me</button>` +
           (b.added ? `<button type="button" class="run-ask" data-wk="type" aria-expanded="false">Write it yourself${best != null ? ` · best ${best}%` : ''}</button>` : '') +
@@ -658,7 +661,7 @@ export class WalkPart {
       const extra = el.nextElementSibling;
       extra.hidden = !extra.hidden;
       el.setAttribute('aria-expanded', String(!extra.hidden));
-      el.textContent = extra.hidden ? 'More' : 'Less';
+      el.firstElementChild.textContent = extra.hidden ? 'More' : 'Less';
       return;
     }
     if (act === 'goto') return go(Number(el.dataset.i));
@@ -749,7 +752,10 @@ export class WalkPart {
     let attachments = [];
     let lineNums = null;
     let about = [];
-    if (act === 'lines') {
+    if (act === 'lines' && !c) {
+      label = 'Line by line';
+      prompt = `I'm walking through ${where}, block by block. ${intentText(this._promptEdits, 'lines')} ${whole}\n\n${block}${cite}`;
+    } else if (act === 'lines') {
       label = 'Line by line';
       // The next small parts not explained yet come along in the same message.
       // The first message in a chat also carries the whole diff, and until
@@ -768,12 +774,13 @@ export class WalkPart {
       // In a change, the question is about what it adds or changes
       prompt = `I'm reading ${where}${c ? '; look at the code they add or change' : ''}. ${intentText(this._promptEdits, act)} ${whole}\n\n${block}${cite}`;
     } else if (act === 'more') {
-      // A file's block is explained up front, so here it goes line by line
-      label = c ? 'Explain more' : 'Line by line';
+      // A file's block gets the study explanation: step by step, terms defined, a question to check
+      label = 'Explain more';
       prompt = c
         ? `I'm reading ${where}, change by change. Explain this change in more depth: the idea behind it, how it fits ` +
           `with the rest of the change, and anything a reader could easily miss. ${whole}\n\n${block}${cite}`
-        : `I'm walking through ${where}, block by block. ${intentText(this._promptEdits, 'lines')} ${whole}\n\n${block}${cite}`;
+        : `I'm walking through ${where}, block by block, and its short explanation wasn't enough. ` +
+          `${intentText(this._promptEdits, 'explain')} ${whole}\n\n${block}${cite}`;
     } else if (act === 'ask') {
       const q = this.takeQuestion(this.walkBody);
       if (!q) return;

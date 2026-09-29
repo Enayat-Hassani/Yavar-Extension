@@ -265,6 +265,14 @@ class YavarSidePanel {
     // Iframe load handling
     this.aiFrame.addEventListener('load', () => this.handleFrameLoad());
 
+    // While anything scrolls, rows passing under the pointer don't take hover (see .is-scrolling)
+    let scrolling;
+    document.addEventListener('scroll', () => {
+      document.documentElement.classList.add('is-scrolling');
+      clearTimeout(scrolling);
+      scrolling = setTimeout(() => document.documentElement.classList.remove('is-scrolling'), 150);
+    }, { capture: true, passive: true });
+
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
       // Ctrl+Shift+S — capture the AI's last answer to history
