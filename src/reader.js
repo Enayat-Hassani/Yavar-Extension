@@ -29,6 +29,15 @@ let shown = '';        // which file the code area holds, so a new range doesn't
 let shownBand = null;  // in a diff: the rows the part covers
 let shownRows = [];    // in a diff: the rows, to find a line's row
 
+// The rows of the part being read: its added lines and its removed ones (1-based)
+function partRows(part) {
+  if (!part) return null;
+  const add = new Set(part.add);
+  const del = new Set(part.del.map(d => d[1]));
+  const at = shownRows.map((r, k) => (r.kind === 'add' && add.has(r.n)) || (r.kind === 'del' && del.has(r.old)) ? k : -1).filter(k => k >= 0);
+  return at.length ? { start: at[0] + 1, end: at.at(-1) + 1 } : null;
+}
+
 // Lines of the file after the change as rows of the diff (1-based)
 function rowsOf({ start, end }) {
   const a = shownRows.findIndex(r => r.n === start);
@@ -64,7 +73,8 @@ function render(view, { top = null } = {}) {
   if (!gh.hidden) gh.href = blobUrl(repo.owner, repo.repo, repo.ref, path, lines);
 
   const { diff } = view;
-  const key = `${repo.source}:${repo.name}@${repo.ref}:${path}:${content.length}:${diff ? JSON.stringify(diff) : ''}`;
+  // The part marked is left out: moving between a file's changes only moves the band
+  const key = `${repo.source}:${repo.name}@${repo.ref}:${path}:${content.length}:${diff ? JSON.stringify([diff.add, diff.del]) : ''}`;
   let band = lines;
   if (key !== shown) {
     shown = key;
@@ -96,7 +106,7 @@ function render(view, { top = null } = {}) {
     drawMarks();
   }
   // In a diff the band is in rows, which the removed lines have moved
-  if (diff) band = view.focus && lines ? rowsOf(lines) : shownBand || null;
+  if (diff) band = view.focus && lines ? rowsOf(lines) : partRows(diff.part) || shownBand || null;
   $('rd-band').classList.toggle('is-diff', !!diff);
   place(band, top == null);
   if (top != null) $('rd-main').scrollTop = lineTop(top);

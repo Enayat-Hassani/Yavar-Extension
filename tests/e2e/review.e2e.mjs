@@ -116,7 +116,7 @@ test('the walk ends with a review summary and a commit message', async () => {
       found: [...document.querySelectorAll('.wk-found li')].map(l => l.textContent),
       prompt: window.__asks.at(-1).prompt, attached: window.__asks.at(-1).attached
     }));
-    assert.deepEqual(r.found, ['Part 1 · total(items)']);
+    assert.deepEqual(r.found, ['src/cart.js']);
     assert.match(r.prompt, /## Before you commit/);
     assert.match(r.prompt, /## Commit message\nIn a code block/);
     assert.match(r.prompt, /qty may be undefined on old items/);
@@ -148,7 +148,7 @@ test('the project reviewed last opens at its choice, which says how far each wal
       restart: !!document.querySelector('[data-wk="review-restart"][data-base="head"]'),
       walk: !!window.__panel.walk
     }));
-    assert.deepEqual(choice, { status: '3 of 3 parts read · Continue', restart: true, walk: false });
+    assert.deepEqual(choice, { status: '3 of 3 files read · Continue', restart: true, walk: false });
     // Continue reopens the walk as it was, without asking again
     const asked = await page.evaluate(() => window.__asks.length);
     await page.evaluate(() => document.querySelector('[data-wk="review"][data-base="head"]').click());
@@ -250,6 +250,87 @@ test('a chat holds one thing: another thing, or a long chat, goes on in a new on
       ['back to the thread', true, true],
       ['new conversation', 'thread:1', null]
     ]);
+    assert.deepEqual(b.errors, []);
+  } finally { await b.close(); }
+});
+
+// A file changed in three places, a small file and a doc
+const SPREAD_BEFORE = {
+  'src/shop.js': Array.from({ length: 40 }, (_, k) => `line${k + 1}();`).join('\n') + '\n',
+  'src/tax.js': 'export const RATE = 0.2;\n',
+  'NOTES.md': '# Notes\n\nOld words.\n'
+};
+const SPREAD_AFTER = {
+  'src/shop.js': SPREAD_BEFORE['src/shop.js'].replace('line2();', 'first();').replace('line20();', 'middle();').replace('line38();', 'last();'),
+  'src/tax.js': 'export const RATE = 0.25;\n',
+  'NOTES.md': '# Notes\n\nNew words.\n'
+};
+
+test('a change is read file by file, and in a file change by change', async () => {
+  const b = await launch();
+  try {
+    const page = await b.open('sidepanel.html');
+    await openFolder(page, 'shop', filesOf(makeRepo(SPREAD_BEFORE, SPREAD_AFTER)));
+    await stubChat(page, (label, prompt) => label === 'Line by line'
+      ? [...prompt.matchAll(/^### (?:File `([^`]+)`|Part (\d+))/gm)]
+        .map(m => m[1] ? `### File \`${m[1]}\`\nRenames three calls.` : `### Part ${m[2]}\n- change ${m[2]}`).join('\n\n')
+      : label === 'Find bugs' ? 'middle() is never defined.' : 'ok');
+    await reviewUncommitted(page);
+    const see = () => page.evaluate(() => ({
+      where: document.querySelector('.wk-pos').textContent,
+      dots: document.querySelectorAll('.wk-dot').length,
+      current: [...document.querySelectorAll('.wk-dot')].findIndex(d => d.classList.contains('is-current')),
+      pos: document.querySelector('.wk-change-pos')?.textContent || '',
+      about: document.querySelector('.wk-about')?.textContent || '',
+      note: document.querySelector('.wk-change .walk-notes')?.textContent || '',
+      files: document.querySelector('.wk-file-notes')?.textContent || '',
+      enter: document.querySelector('.wk-change')?.dataset.enter || '',
+      asks: window.__asks.length
+    }));
+    let s = await see();
+    // One message for all of shop.js and the small files after it; the doc is summed up
+    const first = await page.evaluate(() => window.__asks[0].prompt);
+    assert.match(first, /^### File `src\/shop\.js`$/m);
+    assert.deepEqual([...first.matchAll(/^### Part (\d+)/gm)].map(m => m[1]), ['1', '2', '3', '4', '5']);
+    assert.match(first, /^### Part 5 · `NOTES\.md`[^\n]*\(prose\)$/m);
+    assert.deepEqual({ where: s.where, dots: s.dots, current: s.current, about: s.about, asks: s.asks },
+      { where: 'File 1 of 3', dots: 3, current: 0, about: 'Renames three calls.', asks: 1 });
+    assert.match(s.note, /change 1/);
+    assert.match(s.pos, /^Change 1 of 3 · line 2$/);
+    // → goes to the next change, sliding in from the right, without asking again
+    await page.evaluate(() => document.querySelector('.wk-dot').focus());
+    await page.keyboard.press('ArrowRight');
+    await wait(page, 200);
+    s = await see();
+    assert.deepEqual([s.current, s.enter, s.asks], [1, 'next', 1]);
+    assert.match(s.note, /change 2/);
+    // The reader keeps the whole file's diff and marks this change
+    const view = await page.evaluate(async () => (await chrome.storage.session.get('readerView')).readerView);
+    assert.deepEqual(view.diff.part.add, [20]);
+    assert.deepEqual(view.diff.add, [2, 20, 38]);
+    assert.match(view.label, /^File 1 of 3 · Change 2 of 3 · /);
+    // Find bugs is about the whole file, and stays with it from change to change
+    await page.evaluate(() => document.querySelector('[data-wk="bugs"]').click());
+    await page.waitForFunction(() => window.__asks.length === 2);
+    const bugs = await page.evaluate(() => window.__asks[1].prompt);
+    assert.match(bugs, /The changes to `src\/shop\.js` \(modified\), in 3 parts/);
+    await page.keyboard.press('ArrowLeft');
+    await wait(page, 200);
+    s = await see();
+    assert.deepEqual([s.current, s.enter], [0, 'prev']);
+    assert.match(s.files, /middle\(\) is never defined/);
+    // ] jumps to the next file, then the doc, which is summed up in brief
+    await page.keyboard.press(']');
+    await wait(page, 200);
+    s = await see();
+    assert.deepEqual([s.where, s.dots], ['File 2 of 3', 0]);
+    assert.match(s.note, /change 4/);
+    await page.keyboard.press(']');
+    await wait(page, 200);
+    s = await see();
+    assert.deepEqual([s.where, s.asks], ['File 3 of 3', 2]);
+    assert.match(s.note, /change 5/);
+    assert.equal(await page.evaluate(() => document.querySelector('[data-wk="lines"]').textContent), 'In brief');
     assert.deepEqual(b.errors, []);
   } finally { await b.close(); }
 });

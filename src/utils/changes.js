@@ -1,8 +1,9 @@
 // Walking through a change (a commit, a pull request, or your own changes)
-// the way a file is walked: the diff is split here into parts (a hunk, or a
-// slice of a big one) and put in reading order, the chat explains them line
-// by line, a few small parts to a message, and the reader shows each part as
-// a diff inside the file as it is after the change. Pure functions (tested).
+// file by file, and in each file change by change: the diff is split here
+// into parts (a hunk, or a slice of a big one; a doc file is one part) and
+// put in reading order, the chat explains a file's parts in one message
+// (small files together), and the reader shows the file as it is after the
+// change with its diff drawn in, the current part marked. Pure functions (tested).
 
 import { intentText } from './intents.js';
 
@@ -64,6 +65,7 @@ const isNoise = (file) => file.binary || !file.hunks.length || NOISE.test(file.p
 
 const DIFF_CHARS = 8000;   // per part, kept with the walkthrough for follow-up questions
 const PART_CHANGES = 20;   // changed lines in a part before a big hunk is split
+const DOCS = /\.(md|mdx|rst|txt|adoc)$|(^|\/)docs?\//i;
 
 // A big hunk as slices of about PART_CHANGES changed lines, cut at unchanged
 // lines, so no part is too long to explain line by line. A slice never holds
@@ -89,27 +91,23 @@ function splitHunk(h) {
 const numbered = (l) => `${l.type}${String(l.type === '-' ? l.old : l.new).padStart(4)} | ${l.text}`;
 export const NUMBERS_NOTE = 'Each diff line shows its line number after the change; a removed (-) line shows its number before the change.';
 
-// The parts to read: one per hunk (a big hunk in slices), in diff order.
-// Over `max`, the file with the most parts has them joined into one, until
-// it fits. Returns { blocks, skipped }: skipped names the files left out as
-// noise or over the cap. A part is { id, path, oldPath, status, start, end,
+// The parts to read: one per hunk (a big hunk in slices; a doc file's hunks
+// joined, since it's summed up, not read line by line), in diff order. Past
+// `max` parts, the files that don't fit are left out whole. Returns
+// { blocks, skipped }: skipped names the files left out as noise or over the
+// cap. A part is { id, path, oldPath, status, start, end,
 // added, removed, removedText, diff, add, del }: start-end are the new lines
 // it spans (null for a deleted file), `add` the added lines' numbers and
 // `del` the removed lines as [line they now sit above, old number, text],
 // which the reader draws inside the file.
-export function changeBlocks(files, { max = 40 } = {}) {
+export function changeBlocks(files, { max = 150 } = {}) {
   const skipped = files.filter(isNoise).map(f => f.path);
-  const groups = files.filter(f => !isNoise(f)).map(f => ({ f, parts: f.hunks.flatMap(x => splitHunk(x).map(y => [y])) }));
-  const count = () => groups.reduce((n, g) => n + g.parts.length, 0);
-  while (count() > max) {
-    const g = groups.reduce((a, b) => (b.parts.length > a.parts.length ? b : a));
-    if (g.parts.length === 1) break;
-    g.parts = [g.parts.flat()];
-  }
+  const groups = files.filter(f => !isNoise(f)).map(f => ({ f,
+    parts: DOCS.test(f.path) ? [f.hunks] : f.hunks.flatMap(x => splitHunk(x).map(y => [y])) }));
   const blocks = [];
   for (const { f, parts } of groups) {
+    if (blocks.length + parts.length > max) { skipped.push(f.path); continue; }
     for (const hunks of parts) {
-      if (blocks.length >= max) { skipped.push(f.path); break; }
       const lines = hunks.flatMap(x => x.lines);
       const added = lines.filter(l => l.type === '+');
       const removed = lines.filter(l => l.type === '-');
@@ -172,24 +170,47 @@ export function partTitle(b) {
 // Reading order: the code first, then its tests, then config and build
 // files, then docs; diff order within each
 const TESTS = /(^|\/)(tests?|spec|__tests__)\/|[._-](test|spec)\.[a-z]+$/i;
-const DOCS = /\.(md|mdx|rst|txt|adoc)$|(^|\/)docs?\//i;
 const CONFIG = /\.(json|ya?ml|toml|ini|cfg|lock|env\.example)$|(^|\/)\.github\/|(^|\/)(Dockerfile|Makefile|\.[\w-]+rc)$/i;
 const rank = (p) => (DOCS.test(p) ? 3 : CONFIG.test(p) ? 2 : TESTS.test(p) ? 1 : 0);
 export function orderParts(blocks) {
   return blocks.map((b, k) => [b, k]).sort((x, y) => rank(x[0].path) - rank(y[0].path) || x[1] - y[1]).map(([b]) => b);
 }
 
-// The parts one line-by-line message covers, from part `i`: the next small
-// ones too, while they add up to at most `maxLines` changed lines. Parts
-// that `done(k)` already explained end the run.
-export function linesBatch(blocks, i, done = () => false, { maxLines = 30, maxParts = 4 } = {}) {
+// The files of a walk, in its order: { path, status, first, last, added,
+// removed } where first-last are the file's parts (a file's parts are
+// together, in reading order)
+export function fileGroups(blocks) {
+  const out = [];
+  blocks.forEach((b, k) => {
+    const g = out.at(-1);
+    if (g?.path === b.path) { g.last = k; g.added += b.added; g.removed += b.removed; return; }
+    out.push({ path: b.path, status: b.status, first: k, last: k, added: b.added, removed: b.removed });
+  });
+  return out;
+}
+
+// The parts one line-by-line message covers, from part `i`: the rest of its
+// file while they add up to at most `fileLines` changed lines, then, once
+// the file is done, whole small files after it while all of it stays within
+// `maxLines`. Parts that `done(k)` already explained end the run.
+export function linesBatch(blocks, i, done = () => false, { fileLines = 80, maxLines = 30, maxParts = 8 } = {}) {
+  const size = (k) => blocks[k].added + blocks[k].removed;
   const out = [i];
-  let total = blocks[i].added + blocks[i].removed;
-  for (let k = i + 1; k < blocks.length && out.length < maxParts && !done(k); k++) {
-    const n = blocks[k].added + blocks[k].removed;
-    if (total + n > maxLines) break;
+  let total = size(i);
+  let k = i + 1;
+  for (; k < blocks.length && blocks[k].path === blocks[i].path; k++) {
+    if (done(k) || total + size(k) > fileLines) return out;
     out.push(k);
+    total += size(k);
+  }
+  while (k < blocks.length) {
+    const file = [];
+    for (let j = k; j < blocks.length && blocks[j].path === blocks[k].path; j++) file.push(j);
+    const n = file.reduce((t, j) => t + size(j), 0);
+    if (file.some(done) || total + n > maxLines || out.length + file.length > maxParts) break;
+    out.push(...file);
     total += n;
+    k = file.at(-1) + 1;
   }
   return out;
 }
@@ -212,8 +233,9 @@ const PROSE = 'For a part marked (prose), write only two to four plain sentences
 
 // Line by line, for the parts `nums` (1-based) of the walk. The first
 // message in a chat also carries the whole diff (`fname`); with `intro` it
-// opens with what the change does.
-export function linesPrompt({ blocks, nums, what, repo, title = '', fname = '', intro = !!fname, skipped = [], edits = {}, brief = '' }) {
+// opens with what the change does. The files in `about` (paths) get a
+// sentence on what changed in them, under "### File `path`".
+export function linesPrompt({ blocks, nums, what, repo, title = '', fname = '', intro = !!fname, skipped = [], edits = {}, brief = '', about = [] }) {
   const opening = intro ? 'Begin with two or three sentences on what the change does as a whole and why. Then go' : 'Go';
   const head = fname
     ? `The attached "${fname}" is the whole diff of ${what} in ${repo}${title ? ` ("${title}")` : ''}, in ${blocks.length} numbered parts` +
@@ -222,28 +244,38 @@ export function linesPrompt({ blocks, nums, what, repo, title = '', fname = '', 
     : `I'm reading ${what} in ${repo}${title ? ` ("${title}")` : ''} part by part. ${opening} through the parts below.`;
   const prose = nums.filter(n => isProse(blocks[n - 1]));
   const code = prose.length < nums.length;
+  const asked = new Set();
   return `${brief ? `${brief}\n\n` : ''}${head}\n\n` +
+    (about.length ? `Where a "### File \`path\`" heading comes below, repeat it, and under it write one plain sentence on what changed in that file as a whole and why. ` : '') +
     `Put each part under a heading "### Part N". Under it: ` +
     (code ? `${intentText(edits, 'lines')} ${CHANGED} ${NUMBERS_NOTE}${prose.length ? ` ${PROSE}` : ''}` : PROSE.replace('For a part marked (prose), write', 'Write')) + `\n\n` +
-    nums.map(n => `### Part ${n} · ${where(blocks[n - 1])}${code && prose.includes(n) ? ' (prose)' : ''}\n\n\`\`\`diff\n${blocks[n - 1].diff}\n\`\`\``).join('\n\n');
+    nums.map(n => {
+      const b = blocks[n - 1];
+      const file = about.includes(b.path) && !asked.has(b.path) ? (asked.add(b.path), `### File \`${b.path}\`\n\n`) : '';
+      return `${file}### Part ${n} · ${where(b)}${code && prose.includes(n) ? ' (prose)' : ''}\n\n\`\`\`diff\n${b.diff}\n\`\`\``;
+    }).join('\n\n');
 }
 
-// A line-by-line reply cut at its "### Part N" headings: { intro, parts }
-// where parts maps each asked number to its text. Without headings, the
-// whole reply belongs to the first part asked.
+// A line-by-line reply cut at its "### Part N" and "### File `path`"
+// headings: { intro, parts, files } where parts maps each asked number to
+// its text and files each file's path to its sentence. Without headings,
+// the whole reply belongs to the first part asked.
 export function splitParts(text, nums) {
-  const heads = [...String(text || '').matchAll(/^#{1,4}\s*\**\s*Part\s+(\d+)\b[^\n]*$/gim)];
+  const heads = [...String(text || '').matchAll(/^#{1,4}\s*\**\s*(?:Part\s+(\d+)\b|File\b[\s:·-]*`?([^`\n*]+?)`?\s*\**\s*$)[^\n]*$/gim)];
   const parts = new Map();
+  const files = new Map();
   if (!heads.length) {
     if (nums.length) parts.set(nums[0], String(text || '').trim());
-    return { intro: '', parts };
+    return { intro: '', parts, files };
   }
   heads.forEach((h, k) => {
-    const n = Number(h[1]);
     const body = text.slice(h.index + h[0].length, heads[k + 1]?.index ?? text.length).trim();
-    if (nums.includes(n) && body) parts.set(n, parts.has(n) ? `${parts.get(n)}\n\n${body}` : body);
+    if (!body) return;
+    if (h[2]) { files.set(h[2].trim(), body); return; }
+    const n = Number(h[1]);
+    if (nums.includes(n)) parts.set(n, parts.has(n) ? `${parts.get(n)}\n\n${body}` : body);
   });
-  return { intro: text.slice(0, heads[0].index).trim(), parts };
+  return { intro: text.slice(0, heads[0].index).trim(), parts, files };
 }
 
 // The notes of an earlier walk of the same changes, on the parts of the new
@@ -257,6 +289,16 @@ export function carryNotes(before, parts) {
   const notes = {};
   parts.forEach((b, k) => { const n = old.get(sig(b)); if (n) notes[k] = n; });
   return notes;
+}
+
+// A file's parts, for a question about the file (Find bugs, Better ways,
+// a question): where it is and each part's diff
+export function fileContext(parts) {
+  const b = parts[0];
+  const note = parts.some(x => /^[+\- ] *\d+ \| /m.test(x.diff)) ? ` ${NUMBERS_NOTE}` : '';
+  return `The changes to \`${b.path}\` (${b.status}${b.status === 'renamed' ? ` from \`${b.oldPath}\`` : ''}), ` +
+    `in ${parts.length} part${parts.length === 1 ? '' : 's'}.${note}\n\n` +
+    parts.map(x => `\`\`\`diff\n${x.diff}\n\`\`\``).join('\n\n');
 }
 
 // What a part is, for a question about it: where it is and its diff

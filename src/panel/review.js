@@ -5,6 +5,7 @@
 import { gitRepo, workingDiff, ignoreRules, blobSha } from '../utils/git.js';
 import { idbGet, idbSet } from '../utils/idb.js';
 import { isSecretPath } from '../utils/github.js';
+import { fileGroups } from '../utils/changes.js';
 
 export class ReviewPart {
   // Chrome can't run git, so .git is read directly (utils/git.js): the files
@@ -88,11 +89,12 @@ export class ReviewPart {
     // A walk begun earlier shows how far it got, and can be begun again
     const option = (base, title, desc) => {
       const w = saved[this.reviewKey(base)];
-      const n = w?.blocks?.length;
-      const read = n ? Object.keys(w.notes || {}).length : 0;
+      const files = w?.blocks?.length ? fileGroups(w.blocks) : [];
+      const n = files.length;
+      const read = files.filter(g => Array.from({ length: g.last - g.first + 1 }, (_, j) => w.notes?.[g.first + j]?.length).every(Boolean)).length;
       return `<li class="rv-option"><button type="button" class="jr-folder" data-wk="review" data-base="${base}">` +
         `<span class="jr-folder-name">${esc(title)}</span>` +
-        `<span class="jr-folder-status">${n ? `${read} of ${n} part${n === 1 ? '' : 's'} read · Continue` : esc(desc)}</span>` +
+        `<span class="jr-folder-status">${n ? `${read} of ${n} file${n === 1 ? '' : 's'} read · Continue` : esc(desc)}</span>` +
         `<span class="home-chev" aria-hidden="true">›</span></button>` +
         (n ? `<button type="button" class="files-link-btn rv-restart" data-wk="review-restart" data-base="${base}">Start over</button>` : '') +
         `</li>`;

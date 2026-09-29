@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseDiff, changeBlocks, changePack, diffRows, partTitle, orderParts, linesBatch, linesPrompt, splitParts, carryNotes, isProse } from '../src/utils/changes.js';
+import { parseDiff, changeBlocks, changePack, diffRows, partTitle, orderParts, linesBatch, linesPrompt, splitParts, carryNotes, isProse, fileGroups, fileContext } from '../src/utils/changes.js';
 
 const DIFF = `diff --git a/src/app.js b/src/app.js
 index 111..222 100644
@@ -112,9 +112,35 @@ test('a split never leaves a part with only unchanged lines', () => {
   assert.deepEqual(blocks.map(b => [b.start, b.end, b.added]), [[1, 20, 20]]);
 });
 
-test('over the cap, the busiest file is joined into one part', () => {
-  const { blocks } = changeBlocks(parseDiff(DIFF), { max: 3 });
-  assert.deepEqual(blocks.map(b => [b.path, b.start, b.end]), [['src/app.js', 11, 42], ['src/new.js', 1, 2], ['old.txt', null, null]]);
+test('over the cap, the files that do not fit are left out whole', () => {
+  const { blocks, skipped } = changeBlocks(parseDiff(DIFF), { max: 3 });
+  assert.deepEqual(blocks.map(b => [b.path, b.start, b.end]), [['src/app.js', 11, 12], ['src/app.js', 42, 42], ['src/new.js', 1, 2]]);
+  assert.ok(skipped.includes('old.txt'));
+});
+
+test('a doc file is one part, its hunks together', () => {
+  const doc = `diff --git a/AGENTS.md b/AGENTS.md
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -2,1 +2,1 @@
+-one
++One
+@@ -30,1 +30,1 @@
+-two
++Two
+`;
+  const { blocks } = changeBlocks(parseDiff(doc));
+  assert.deepEqual(blocks.map(b => [b.path, b.start, b.end, b.added, b.removed]), [['AGENTS.md', 2, 30, 2, 2]]);
+});
+
+test('files group their parts, in the walk order', () => {
+  const blocks = orderParts(changeBlocks(parseDiff(DIFF)).blocks);
+  assert.deepEqual(fileGroups(blocks).map(g => [g.path, g.first, g.last, g.added, g.removed]), [
+    ['src/app.js', 0, 1, 2, 2], ['src/new.js', 2, 2, 2, 0], ['old.txt', 3, 3, 0, 2]
+  ]);
+  const ctx = fileContext(blocks.slice(0, 2));
+  assert.match(ctx, /^The changes to `src\/app\.js` \(modified\), in 2 parts\. Each diff line shows/);
+  assert.equal((ctx.match(/```diff/g) || []).length, 2);
 });
 
 test('a part is named after its function, else what happened to the file', () => {
@@ -135,12 +161,16 @@ test('reading order: code, then tests, then config, then docs', () => {
     ['src/app.js', 'src/cart.py', 'src/app.test.js', 'tests/cart.py', 'package.json', '.github/ci.yml', 'README.md', 'docs/guide.txt']);
 });
 
-test('one message covers the next small parts, up to 30 changed lines', () => {
-  const parts = [[3, 1], [2, 2], [20, 0], [1, 1], [1, 0]].map(([added, removed]) => ({ added, removed }));
-  assert.deepEqual(linesBatch(parts, 0), [0, 1, 2, 3]);         // 4 + 4 + 20 + 2 = 30, the most
-  assert.deepEqual(linesBatch(parts, 2), [2, 3, 4]);
+test('one message covers the rest of a file, then whole small files after it', () => {
+  const p = (path, added, removed = 0) => ({ path, added, removed });
+  const parts = [p('a', 3, 1), p('a', 2, 2), p('a', 20), p('b', 1, 1), p('c', 1), p('c', 30)];
+  assert.deepEqual(linesBatch(parts, 0), [0, 1, 2, 3]);         // all of a (28), then b (2): 30
+  assert.deepEqual(linesBatch(parts, 3), [3]);                  // c (31) would pass 30: not half of it
   assert.deepEqual(linesBatch(parts, 0, k => k === 1), [0]);    // an explained part ends the run
-  assert.deepEqual(linesBatch([{ added: 90, removed: 0 }, { added: 1, removed: 0 }], 0), [0]);   // a big one goes alone
+  // A big file goes in pieces of up to 80 changed lines, and alone
+  const big = [p('a', 50), p('a', 25), p('a', 10), p('b', 1)];
+  assert.deepEqual(linesBatch(big, 0), [0, 1]);
+  assert.deepEqual(linesBatch(big, 2), [2, 3]);
 });
 
 test('the first message carries the whole diff; each part is asked by its number', () => {
@@ -154,6 +184,18 @@ test('the first message carries the whole diff; each part is asked by its number
   assert.doesNotMatch(later, /attached/);
   const pack = changePack(blocks, 'commit abc1234');
   assert.match(pack, /## Part 4 · `old\.txt` \(deleted\)\n/);
+});
+
+test('a file heading asks for a sentence on the file, and is cut out of the reply', () => {
+  const { blocks } = changeBlocks(parseDiff(DIFF));
+  const prompt = linesPrompt({ blocks, nums: [1, 2, 3], what: 'a commit', repo: 'o/r', about: ['src/app.js'] });
+  assert.match(prompt, /### File `src\/app\.js`\n\n### Part 1 ·/);
+  assert.equal((prompt.match(/^### File/gm) || []).length, 1);
+  assert.match(prompt, /one plain sentence on what changed in that file/);
+  assert.doesNotMatch(linesPrompt({ blocks, nums: [1], what: 'a commit', repo: 'o/r' }), /### File/);
+  const { parts, files } = splitParts('### File `src/app.js`\nStarts with b at 3.\n\n### Part 1\n- **11** now 3.\n\n### Part 2\n- **41** gone.', [1, 2]);
+  assert.deepEqual([...files], [['src/app.js', 'Starts with b at 3.']]);
+  assert.deepEqual([...parts.keys()], [1, 2]);
 });
 
 test('a reply is cut at its part headings', () => {

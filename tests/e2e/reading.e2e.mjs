@@ -90,7 +90,7 @@ test('the reader draws a part as a diff inside the file', async () => {
       text: document.getElementById('rd-text').textContent.split('\n').slice(0, 3)
     }));
     // The change starts on the function's own line, so nothing above names it: the file does
-    assert.equal(r.label, 'Part 1 of 2 · cart.js');
+    assert.equal(r.label, 'File 1 of 2 · cart.js');
     // Old line 1 in red above new line 1 in green; lines 3-4 likewise
     assert.deepEqual(r.gutter, ['−', '1', '2', '−', '−', '3', '4', '5', '6']);
     assert.deepEqual(r.marks, ['del 0-0', 'add 1-1', 'del 3-4', 'add 5-6']);
