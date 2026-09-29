@@ -508,8 +508,8 @@ html, body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  min-height: 52px;
-  padding: 8px 12px 8px 16px;
+  min-height: 44px;
+  padding: 6px 10px 6px 16px;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border);
 }
@@ -523,8 +523,8 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-width: 32px;
-  height: 32px;
+  min-width: 28px;
+  height: 28px;
   background: transparent;
   border: 1px solid var(--border);
   border-radius: var(--r-md);
@@ -720,8 +720,8 @@ html, body {
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-3);
-  min-height: 52px;
-  padding: 8px 12px 8px 16px;
+  min-height: 44px;
+  padding: 6px 10px 6px 16px;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border);
 }
@@ -1044,8 +1044,8 @@ button.lens-item:focus-visible {
   display: flex;
   align-items: center;
   gap: 4px;
-  min-height: 52px;
-  padding: 8px 8px 8px 8px;
+  min-height: 44px;
+  padding: 4px 8px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-primary);
 }
@@ -1985,11 +1985,13 @@ button.lens-item:focus-visible {
   position: sticky;
   top: -16px;                 /* cancels .sheet-body's top padding */
   z-index: 2;
-  margin: -16px -16px 16px;
-  padding: 8px 12px 0 16px;
-  background: var(--bg-primary);
+  margin: -16px -16px 12px;
+  padding: 4px 10px 0 16px;
+  background: color-mix(in srgb, var(--bg-primary) 86%, transparent);
+  -webkit-backdrop-filter: saturate(1.6) blur(16px);
+  backdrop-filter: saturate(1.6) blur(16px);
 }
-.wk-row { display: flex; align-items: center; gap: 10px; min-height: 36px; }
+.wk-row { display: flex; align-items: center; gap: 8px; min-height: 32px; }
 /* The bar carries the sheet's name and ✕, so the header above it goes */
 .sheet:has(.wk-row) > .run-header { display: none; }
 
@@ -2018,10 +2020,10 @@ button.lens-item:focus-visible {
 
 .wk-steps { display: flex; flex-shrink: 0; gap: 4px; margin-left: auto; }
 .wk-step {
-  min-width: 32px;
-  height: 32px;
-  padding: 0 8px;
-  font-size: 18px;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 6px;
+  font-size: 16px;
   line-height: 1;
   color: var(--accent);
   background: var(--accent-soft);
@@ -2029,14 +2031,14 @@ button.lens-item:focus-visible {
 }
 .wk-step:hover { background: color-mix(in srgb, var(--accent) 17%, transparent); }
 .wk-step:disabled { color: var(--text-secondary); background: none; opacity: 0.45; cursor: default; }
-.wk-step-text { padding: 0 12px; font-size: 12.5px; font-weight: 600; }
+.wk-step-text { padding: 0 10px; font-size: 12.5px; font-weight: 600; }
 .wk-step[hidden] { display: none; }
 .wk-close {
   flex-shrink: 0;
-  width: 32px;
-  height: 32px;
-  margin-left: -4px;
-  font-size: 13px;
+  width: 28px;
+  height: 28px;
+  margin-left: -2px;
+  font-size: 12px;
   color: var(--text-secondary);
   background: none;
   border: none;
@@ -2047,7 +2049,7 @@ button.lens-item:focus-visible {
 .wk-close:hover { color: var(--text-primary); background: var(--fill-hover); }
 .wk-map:focus-visible, .wk-where:focus-visible, .wk-step:focus-visible, .wk-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
-.wk-progress { height: 2px; margin: 8px -12px 0 -16px; background: var(--border); }
+.wk-progress { height: 2px; margin: 4px -10px 0 -16px; background: var(--border); }
 .wk-progress i { display: block; height: 100%; background: var(--accent); transition: width var(--dur-base) var(--ease-std); }
 
 /* The block list opens under the bar and scrolls on its own */
