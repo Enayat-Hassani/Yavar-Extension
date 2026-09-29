@@ -372,6 +372,12 @@ export class WalkPart {
     }
     const had = this.walkPanel.contains(document.activeElement);
     await this.saveWalk({ ...w, current: k, summaryOpen: false });
+    // The last block of the whole file reached: it counts as read on the map
+    // (Finish file still suggests what to read next)
+    const j = this.journey;
+    if (!w.change && j && k === w.blocks.length - 1 && w.range.end >= w.total && !j.done?.includes(w.path)) {
+      await this.saveJourney({ ...j, done: [...(j.done || []), w.path] });
+    }
     await this.renderWalk();
     this.walkBody.scrollTop = 0;
     // The control that had focus was redrawn: keep it in the sheet, so the keys go on stepping

@@ -246,3 +246,24 @@ test('saved walks make room for themselves: the ones unused longest go, and only
     assert.deepEqual(b.errors, []);
   } finally { await b.close(); }
 });
+
+test('reaching the last block of a file marks it read on the reading map', async () => {
+  const b = await launch();
+  try {
+    const page = await b.open('sidepanel.html');
+    await openFolder(page, 'shop', filesOf(makeRepo(BEFORE, AFTER)));
+    await stubChat(page, () => 'ok');
+    const done = await page.evaluate(async () => {
+      const p = window.__panel;
+      await p.saveJourney({ summary: 'A cart.', path: [{ file: 'src/cart.js', why: '' }, { file: 'src/tax.js', why: '' }], parts: [], done: [] });
+      const fence = '`'.repeat(3);
+      p.askForJson = async (prompt, o) => ({ value: o.parse(`${fence}json\n{"summary":"Cart totals.","blocks":[{"start":1,"end":5,"title":"total()","explain":"a"},{"start":7,"end":9,"title":"count()","explain":"b"}]}\n${fence}`), text: '', tried: 1 });
+      await p.startWalk('src/cart.js');
+      const before = [...(p.journey.done || [])];
+      await p.gotoWalk(1);
+      return { before, after: (await p.loadJourney()).done };
+    });
+    assert.deepEqual(done, { before: [], after: ['src/cart.js'] });
+    assert.deepEqual(b.errors, []);
+  } finally { await b.close(); }
+});
