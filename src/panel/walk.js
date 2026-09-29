@@ -36,6 +36,11 @@ import {
   langFromPath
 } from '../utils/github.js';
 
+// Of the 10 MB Chrome gives an extension's storage (see pruneWalks)
+const STORE_FULL = 7 * 1024 * 1024;
+const STORE_AFTER = 5 * 1024 * 1024;
+const UNUSED = 90 * 24 * 60 * 60 * 1000;
+
 export class WalkPart {
   // The AI splits a file into blocks of related lines; the sheet shows one
   // block at a time with its explanation, and the reader tab highlights the
@@ -46,10 +51,45 @@ export class WalkPart {
     return k ? `${k.replace(/^readMarks:/, 'walk:')}:${path}` : null;
   }
 
+  // Saved with when it was last used, which decides what pruneWalks lets go
+  // first. Storage full: room is made, and the save tried once more.
   async saveWalk(state) {
     this.walk = state;
     const key = state.key || this.walkKey(state.path);
-    if (key) try { await chrome.storage.local.set({ [key]: state }); } catch (e) { /* ignore */ }
+    if (!key) return;
+    const value = { ...state, opened: Date.now() };
+    try {
+      await chrome.storage.local.set({ [key]: value });
+    } catch (e) {
+      await this.pruneWalks({ force: true });
+      try { await chrome.storage.local.set({ [key]: value }); } catch (e2) {
+        this.showNotification(`⚠️ Your place in this walk wasn't saved: ${e2.message}`);
+      }
+    }
+  }
+
+  // Saved walks (every file, commit, pull request and review read) only grow,
+  // and an extension's storage holds 10 MB. Past STORE_FULL (or `force`, when
+  // a save failed), walks not used for 90 days go, then the oldest, until it
+  // is under STORE_AFTER. The open walk stays; reading maps are not walks.
+  async pruneWalks({ force = false } = {}) {
+    let used;
+    try { used = await chrome.storage.local.getBytesInUse(null); } catch (e) { return; }
+    if (!force && used < STORE_FULL) return;
+    const all = await chrome.storage.local.get(null);
+    const open = this.walk?.blocks ? this.walk.key || this.walkKey(this.walk.path) : null;
+    const walks = Object.entries(all).filter(([k]) => k.startsWith('walk:') && k !== open)
+      .map(([k, v]) => ({ k, at: v?.opened || v?.created || 0, size: k.length + JSON.stringify(v).length }))
+      .sort((a, b) => a.at - b.at);
+    const drop = [];
+    for (const w of walks) {
+      if (w.at > Date.now() - UNUSED && used <= STORE_AFTER) break;
+      drop.push(w.k);
+      used -= w.size;
+    }
+    if (!drop.length) return;
+    await chrome.storage.local.remove(drop);
+    this.showNotification(`Made room: ${drop.length} saved walk${drop.length === 1 ? '' : 's'} you hadn't opened for the longest were removed`);
   }
 
   // "Walk through <file>" on a GitHub file page (honours a #L10-L40 selection)

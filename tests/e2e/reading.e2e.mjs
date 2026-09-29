@@ -215,3 +215,34 @@ test('a file walk says so when its file changed since, and can be walked again',
     assert.deepEqual(b.errors, []);
   } finally { await b.close(); }
 });
+
+test('saved walks make room for themselves: the ones unused longest go, and only when storage fills', async () => {
+  const b = await launch();
+  try {
+    const page = await b.open('sidepanel.html');
+    const r = await page.evaluate(async () => {
+      const p = window.__panel;
+      p.showNotification = (t) => { window.__note = t; };
+      const day = 24 * 60 * 60 * 1000;
+      const pad = 'x'.repeat(120 * 1024);
+      const walk = (ago) => ({ blocks: [{ start: 1, end: 2 }], pad, opened: Date.now() - ago * day });
+      // A few old walks and little else: nothing goes
+      await chrome.storage.local.set({ 'walk:o/r:a.js': walk(200), 'journey:o/r': { path: [], pad } });
+      await p.pruneWalks();
+      const light = Object.keys(await chrome.storage.local.get(null)).length;
+      // 20 walks unused for 200 days and 40 recent ones, about 7.2 MB
+      const many = {};
+      for (let k = 0; k < 20; k++) many[`walk:o/r:old${k}.js`] = walk(200 + k);
+      for (let k = 0; k < 40; k++) many[`walk:o/r:new${k}.js`] = walk(k);
+      await chrome.storage.local.set(many);
+      await p.pruneWalks();
+      const keys = Object.keys(await chrome.storage.local.get(null));
+      return { light, old: keys.filter(k => k.includes(':old') || k === 'walk:o/r:a.js').length,
+        recent: keys.filter(k => k.includes(':new')).length, journey: keys.includes('journey:o/r'), note: window.__note };
+    });
+    assert.equal(r.light, 2);
+    assert.deepEqual({ old: r.old, recent: r.recent, journey: r.journey }, { old: 0, recent: 40, journey: true });
+    assert.match(r.note, /^Made room: 21 saved walks/);
+    assert.deepEqual(b.errors, []);
+  } finally { await b.close(); }
+});

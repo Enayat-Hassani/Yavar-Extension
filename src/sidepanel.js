@@ -70,6 +70,7 @@ class YavarSidePanel {
     this.initCodeMirror();
     this.setupTabContext();
     this.drainPending();
+    this.pruneWalks();
   }
 
   cacheElements() {
