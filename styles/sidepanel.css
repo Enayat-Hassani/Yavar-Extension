@@ -2067,6 +2067,10 @@ button.lens-item:focus-visible {
 .wk-skipped { display: block; margin-top: 4px; font-size: 12px; }
 .raw-reply.wk-removed pre { white-space: pre; }   /* code keeps its lines; the pre scrolls sideways */
 
+/* A file walk whose file changed since it was made */
+.wk-stale { margin: 0 0 12px; padding: 8px 10px; font-size: 12.5px; line-height: 1.5; color: var(--text-primary); background: var(--fill-hover); border-radius: var(--r-md); }
+.wk-stale .files-link-btn { margin: 0; font-size: 12.5px; }
+
 /* A change, file by file: the file's header and its sentence, the dots that
    step its changes, then the change's own explanation */
 .wk-filehead { margin-bottom: 10px; }

@@ -24,7 +24,7 @@
 import { highlight } from './utils/markdown.js';
 import { langFromPath, blobUrl } from './utils/github.js';
 import { cmModeFor, defineGenericMode, closeBracketKeys } from './utils/codeEditor.js';
-import { editedLines, shiftRange, shiftWalk } from './utils/walkthrough.js';
+import { editedLines, shiftRange, shiftWalk, textSha } from './utils/walkthrough.js';
 import { diffRows } from './utils/changes.js';
 import { idbGet } from './utils/idb.js';
 import { openPanel } from './utils/panel.js';
@@ -300,7 +300,8 @@ async function save(close) {
 async function afterSave(view, edit, text) {
   if (view.walkKey) {
     const walk = (await chrome.storage.local.get(view.walkKey))[view.walkKey];
-    if (walk?.blocks) await chrome.storage.local.set({ [view.walkKey]: shiftWalk(walk, edit) });
+    // Its lines moved with the edit, so it still matches the file: the file's new hash goes with it
+    if (walk?.blocks) await chrome.storage.local.set({ [view.walkKey]: { ...shiftWalk(walk, edit), sha: await textSha(text) } });
   }
   const { readerView: now } = await chrome.storage.session.get('readerView');
   if (now?.path === view.path && now.repo?.source === 'local' && now.repo.repo === view.repo.repo) {

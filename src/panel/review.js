@@ -2,7 +2,8 @@
 // choice, and the diff read from .git.
 // Its methods join YavarSidePanel's (see the end of sidepanel.js), so `this` is the panel.
 
-import { gitRepo, workingDiff, ignoreRules, blobSha } from '../utils/git.js';
+import { gitRepo, workingDiff, ignoreRules } from '../utils/git.js';
+import { textSha } from '../utils/walkthrough.js';
 import { idbGet, idbSet } from '../utils/idb.js';
 import { isSecretPath } from '../utils/github.js';
 import { fileGroups } from '../utils/changes.js';
@@ -137,7 +138,7 @@ export class ReviewPart {
           `<button type="button" class="files-link-btn jr-link" data-wk="review-back">Back</button></div>`;
         return false;
       }
-      change.diffHash = (await blobSha(new TextEncoder().encode(diff))).slice(0, 12);
+      change.diffHash = await textSha(diff);
       change.key = this.reviewKey(base);
       this._localDiffs = { [change.key]: diff };
       // Walks from before there was one per kind of change (their keys ended in the diff's hash)

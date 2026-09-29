@@ -175,3 +175,43 @@ test('the reader brings back the walk its highlight belongs to, even after the p
     assert.deepEqual(b.errors, []);
   } finally { await b.close(); }
 });
+
+test('a file walk says so when its file changed since, and can be walked again', async () => {
+  const b = await launch();
+  try {
+    const page = await b.open('sidepanel.html');
+    await openFolder(page, 'shop', filesOf(makeRepo(BEFORE, AFTER)));
+    await stubChat(page, () => 'ok');
+    await page.evaluate(async () => {
+      const p = window.__panel;
+      const fence = '`'.repeat(3);
+      window.__walks = 0;
+      p.askForJson = async (prompt, o) => (window.__walks++, { value: o.parse(`${fence}json\n{"summary":"Cart totals.","blocks":[{"start":1,"end":5,"title":"total()","explain":"Adds up the items."},{"start":7,"end":9,"title":"count()","explain":"Counts them."}]}\n${fence}`), text: '', tried: 1 });
+      await p.startWalk('src/cart.js');
+    });
+    await page.waitForFunction(() => window.__panel.walk?.blocks);
+    // Opened again unchanged: no notice
+    await page.evaluate(() => window.__panel.startWalk('src/cart.js'));
+    await wait(page, 400);
+    assert.equal(await page.evaluate(() => !!document.querySelector('.wk-stale')), false);
+    // Edited in another editor: two lines added at the top
+    await page.evaluate(async () => {
+      const root = await (await navigator.storage.getDirectory()).getDirectoryHandle('shop');
+      const f = await (await root.getDirectoryHandle('src')).getFileHandle('cart.js');
+      const text = await (await f.getFile()).text();
+      const w = await f.createWritable();
+      await w.write(`// Cart\n\n${text}`);
+      await w.close();
+      const p = window.__panel;
+      p.clearFileCache('local:');
+      await p.startWalk('src/cart.js');
+    });
+    await page.waitForSelector('.wk-stale');
+    assert.match(await page.evaluate(() => document.querySelector('.wk-stale').textContent), /cart\.js changed since this walk/);
+    await page.evaluate(() => document.querySelector('[data-wk="rewalk"]').click());
+    await page.waitForFunction(() => window.__walks === 2 && window.__panel.walk?.blocks);
+    await wait(page, 300);
+    assert.equal(await page.evaluate(() => !!document.querySelector('.wk-stale')), false);
+    assert.deepEqual(b.errors, []);
+  } finally { await b.close(); }
+});

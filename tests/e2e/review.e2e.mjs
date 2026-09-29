@@ -334,3 +334,33 @@ test('a change is read file by file, and in a file change by change', async () =
     assert.deepEqual(b.errors, []);
   } finally { await b.close(); }
 });
+
+test('a pull request that gained commits is read again, keeping what was said about unchanged parts', async () => {
+  const b = await launch();
+  try {
+    const page = await b.open('sidepanel.html');
+    await stubChat(page, (label, prompt) => [...prompt.matchAll(/^### Part (\d+) · `([^`]+)`/gm)].map(m => `### Part ${m[1]}\n- about ${m[2]}`).join('\n'));
+    const diff = (b) => `diff --git a/a.js b/a.js\n--- a/a.js\n+++ b/a.js\n@@ -1 +1 @@\n-x\n+y\ndiff --git a/b.js b/b.js\n--- a/b.js\n+++ b/b.js\n@@ -1 +1 @@\n-x\n+${b}\n`;
+    const open = async (text) => {
+      await page.evaluate(async (text) => {
+        const p = window.__panel;
+        p.fetchDiff = async () => text;
+        p.openRepoFile = async () => {};   // the reader is checked on its own page
+        p.walk = null;
+        await p.walkChange({ owner: 'o', repo: 'r', kind: 'pull', number: 7, title: 'Tidy' });
+      }, text);
+      await page.waitForFunction(() => window.__panel.walk?.blocks && window.__panel.walk.notes?.[0]);
+      await wait(page, 300);
+    };
+    await open(diff('one'));
+    const asks = await page.evaluate(() => window.__asks.length);
+    // The same diff reopens as it was
+    await open(diff('one'));
+    assert.equal(await page.evaluate(() => window.__asks.length), asks);
+    // A new commit changed b.js: a.js keeps its note, b.js is asked again when it opens
+    await open(diff('two'));
+    const r = await page.evaluate(() => ({ notes: Object.keys(window.__panel.walk.notes || {}), asks: window.__asks.length }));
+    assert.deepEqual(r, { notes: ['0'], asks });
+    assert.deepEqual(b.errors, []);
+  } finally { await b.close(); }
+});

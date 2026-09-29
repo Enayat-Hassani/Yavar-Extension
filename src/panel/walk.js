@@ -4,7 +4,7 @@
 // Its methods join YavarSidePanel's (see the end of sidepanel.js), so `this` is the panel.
 
 import { renderMarkdown } from '../utils/markdown.js';
-import { walkPrompt, parseWalkthrough, compareTyped, quizPrompt, parseQuiz } from '../utils/walkthrough.js';
+import { walkPrompt, parseWalkthrough, compareTyped, quizPrompt, parseQuiz, textSha } from '../utils/walkthrough.js';
 import { nextCandidates, nextPrompt, parseNext } from '../utils/journey.js';
 import {
   parseDiff,
@@ -22,7 +22,6 @@ import {
   isProse
 } from '../utils/changes.js';
 import { intentText } from '../utils/intents.js';
-import { blobSha } from '../utils/git.js';
 import { earlierAnswers } from '../utils/conversation.js';
 import { loadApiConfig, buildRoute, askRoute } from '../utils/llm.js';
 import {
@@ -85,6 +84,7 @@ export class WalkPart {
       await this.saveWalk({ ...saved, current: Math.max(0, at) });
       this.renderWalk();
       this.followWalk();
+      this.checkWalkFile();
       return;
     }
     await this.createWalk(path, lines);
@@ -119,7 +119,8 @@ export class WalkPart {
         this._walkRaw = text;
         throw new Error(`couldn't find the blocks in the replies (asked ${tried})`);
       }
-      await this.saveWalk({ path, range, total, summary: parsed.summary, blocks: parsed.blocks, current: 0, typed: {}, created: Date.now() });
+      await this.saveWalk({ path, range, total, summary: parsed.summary, blocks: parsed.blocks, current: 0, typed: {}, created: Date.now(),
+        sha: await textSha(content) });
       await this.markRead([path]);
       this._readingContext = { label: repo, ts: Date.now() };
       this.followWalk();
@@ -144,12 +145,22 @@ export class WalkPart {
       key: `walk:${owner}/${repo}:@${kind === 'pull' ? `pr-${number}` : sha}` };
     let saved = null;
     try { saved = (await chrome.storage.local.get(change.key))[change.key]; } catch (e) { /* none */ }
+    // A pull request gains commits: its diff is fetched again and compared
+    if (kind === 'pull' && saved?.blocks) {
+      try {
+        const text = await this.fetchDiff({ owner, repo, kind, number });
+        change.diffHash = await textSha(text);
+        this._fetchedDiff = { key: change.key, text };
+      } catch (e) {
+        change.diffHash = saved.change?.diffHash;   // offline: the saved walk stands
+      }
+    }
     this.walkView = 'file';
     document.getElementById('walk-title').textContent = 'Read the change';
     document.getElementById('walk-sub').textContent = change.label + (change.title ? ` · ${change.title}` : '');
     this.walkPanel.classList.remove('hidden');
-    // Your own changes that moved on since are read again
-    if (saved?.blocks?.length && (!change.local || saved.change?.diffHash === change.diffHash)) {
+    // Your own changes, or a pull request, that moved on since are read again
+    if (saved?.blocks?.length && saved.change?.diffHash === change.diffHash) {
       this.walk = saved;
       this.renderWalk();
       this.followWalk();
@@ -172,9 +183,11 @@ export class WalkPart {
     this.walk = { key, change, pending: true };
     this.renderWalk();
     try {
-      const text = change.local ? await this.localDiff(change) : await this.fetchDiff({ owner, repo, kind, sha, number });
-      // Read again (Ask again, Start over): the walk is of the diff as it is now
-      if (change.local) change = { ...change, diffHash: (await blobSha(new TextEncoder().encode(text))).slice(0, 12) };
+      const fetched = this._fetchedDiff?.key === key ? this._fetchedDiff.text : null;
+      this._fetchedDiff = null;
+      const text = change.local ? await this.localDiff(change) : fetched ?? await this.fetchDiff({ owner, repo, kind, sha, number });
+      // The walk is of the diff as it is now (read again by Ask again, Start over)
+      if (change.local || kind === 'pull') change = { ...change, diffHash: await textSha(text) };
       const files = parseDiff(text);
       const { blocks, skipped } = changeBlocks(files);
       if (!blocks.length) throw new Error(files.length ? 'only lockfiles, generated or binary files changed' : 'the diff is empty');
@@ -193,6 +206,21 @@ export class WalkPart {
       this._walkPending = false;
       this.renderWalk();
     }
+  }
+
+  // A file walk opened again: has the file changed since (edited elsewhere,
+  // or new commits)? Then its blocks may sit on the wrong lines, and the walk
+  // says so. A walk saved before walks kept the hash takes today's as its own.
+  async checkWalkFile() {
+    const w = this.walk;
+    if (!w?.blocks || w.change) return;
+    let sha;
+    try { sha = await textSha(await this.readRepoFile(w.path)); } catch (e) { return; }
+    if (this.walk !== w) return;
+    if (!w.sha) return this.saveWalk({ ...w, sha });
+    if (w.sha === sha) return;
+    this._walkStale = this.walkKey(w.path);
+    this.renderWalk();
   }
 
   async resetWalk() {
@@ -283,6 +311,7 @@ export class WalkPart {
     document.getElementById('walk-sub').textContent = c ? c.label + (c.title ? ` · ${c.title}` : '') : saved.path.split('/').pop();
     this.walkPanel.classList.remove('hidden');
     await this.renderWalk();
+    this.checkWalkFile();
     return true;
   }
 
@@ -398,6 +427,9 @@ export class WalkPart {
         items: blocks.map((x, k) => ({ i: k, current: k === i, mark: practised(k) ? '✓' : k + 1, title: esc(x.title), meta: `${x.start}-${x.end}` })),
         extra: `<button type="button" class="files-link-btn wk-redo" data-wk="redo">Ask for a new walkthrough of this file</button>`
       }) +
+      (this._walkStale && this._walkStale === this.walkKey(w.path)
+        ? `<p class="wk-stale" role="status">${esc(w.path.split('/').pop())} changed since this walk, so its blocks may sit on the wrong lines. ` +
+          `<button type="button" class="files-link-btn" data-wk="rewalk">Walk it again</button></p>` : '') +
       (i === 0 && w.summary ? `<p class="wk-summary">${esc(w.summary)}</p>` : '') +
       `<div class="wk-meta"><span>Lines ${b.start}-${b.end}${b.edited ? ' · edited after this was explained' : ''}</span>` +
         `<button type="button" class="files-link-btn wk-show" data-wk="show">Show in reader</button></div>` +
@@ -595,6 +627,10 @@ export class WalkPart {
     if (act === 'next') return go(Math.min(w.blocks.length - 1, i + 1));
     if (act === 'show') return this.followWalk();
     if (act === 'redo') return this.resetWalk();
+    if (act === 'rewalk') {
+      this._walkStale = null;
+      return this.createWalk(w.path, w.range.start > 1 || w.range.end < w.total ? w.range : null);
+    }
     if (act === 'explain-change') return this.explainDiff(w.change);
     if (act === 'continue') return this.createWalk(w.path, null, w.range.end + 1);
     if (act === 'finish') return this.finishWalkFile(el);
@@ -614,8 +650,10 @@ export class WalkPart {
       return;
     }
 
-    const code = await this.walkBlockCode();
     const c = w.change;
+    // A change's questions carry its diff; its code is fetched only to compare
+    // with what you typed, so a file that can't be fetched stops nothing else
+    const code = !c || ['compare', 'feedback'].includes(act) ? await this.walkBlockCode() : '';
     // A change has a chat of its own; a file's walk shares its project's
     const topic = c ? w.key : this.readTopic();
     const chat = this.claimChat(topic);
