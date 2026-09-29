@@ -44,8 +44,8 @@ test('a change leads with judging it, with the rest in the ⋯ menu', async () =
       return { dock, more: shown() };
     });
     // Each change is explained line by line as it opens, so Line by line waits under More
-    assert.deepEqual(r.dock, ['Find bugs', 'Better ways', 'Explain more']);
-    assert.deepEqual(r.more, ['Find bugs', 'Better ways', 'Explain more', 'Line by line', 'How to test it', 'Quiz me', 'Write it yourself']);
+    assert.deepEqual(r.dock, ['Bugs', 'Improve', 'Explain']);
+    assert.deepEqual(r.more, ['Bugs', 'Improve', 'Explain', 'Line by line', 'How to test it', 'Quiz me', 'Write it yourself']);
     assert.deepEqual(b.errors, []);
   } finally { await b.close(); }
 });
@@ -129,7 +129,7 @@ test('a file walk offers the same help as a change, and typing practice compares
         score: document.querySelector('.walk-score')?.textContent || '', best: p.walk.typed?.[0]?.best };
     });
     // A block is already explained line by line, so learning it leads
-    assert.deepEqual(r.dock, ['Explain more', 'Type it', 'Quiz me']);
+    assert.deepEqual(r.dock, ['Explain', 'Type', 'Quiz']);
     assert.deepEqual(r.asked, ['Find bugs']);
     // A one-line gap joins the block before it (walkthrough.js)
     assert.match(r.bugsPrompt, /^I'm reading lines 1-6 of `src\/cart\.js` from shop\. Review this code for bugs/);
@@ -357,7 +357,7 @@ test('the ⋯ menu keeps the bar one row, and closes on a choice, a click elsewh
   } finally { await b.close(); }
 });
 
-test('the question field is always there, names the lines, and Escape leaves it before closing the sheet', async () => {
+test('the chat button unrolls a field that names the lines, and Escape rolls it up before closing the sheet', async () => {
   const b = await launch();
   try {
     const page = await b.open('sidepanel.html');
@@ -369,16 +369,25 @@ test('the question field is always there, names the lines, and Escape leaves it 
       p.askForJson = async (prompt, o) => ({ value: o.parse(`${fence}json\n{"summary":"Cart totals.","blocks":[{"start":1,"end":5,"title":"total()","explain":"Adds up."},{"start":7,"end":9,"title":"count()","explain":"Counts."}]}\n${fence}`), text: '', tried: 1 });
       await p.startWalk('src/cart.js');
     });
+    const fieldOpen = () => page.evaluate(() => !document.querySelector('.wk-ask').hidden);
+    const dockHeight = () => page.evaluate(() => document.querySelector('.wk-dock').offsetHeight);
+    assert.equal(await fieldOpen(), false);
+    const before = await dockHeight();
+    await page.click('.wk-ask-open');
+    assert.equal(await fieldOpen(), true);
+    // The field covers the actions' row; the dock doesn't grow
+    assert.equal(await dockHeight(), before);
     const field = page.locator('.wk-ask-input');
-    assert.equal(await field.isVisible(), true);
+    assert.equal(await page.evaluate(() => document.activeElement.className), 'wk-ask-input');
     assert.equal(await field.getAttribute('placeholder'), 'Ask about lines 1–6…');
     await field.fill('Why a loop?');
     await field.press('Enter');
     await page.waitForFunction(() => window.__asks.length);
     assert.equal(await page.evaluate(() => window.__asks[0].label), 'Why a loop?');
-    assert.equal(await field.inputValue(), '');
     await field.focus();
     await page.keyboard.press('Escape');
+    assert.equal(await fieldOpen(), false);
+    assert.equal(await page.evaluate(() => document.activeElement.className), 'wk-ask-open');
     const open = () => page.evaluate(() => !document.getElementById('walk-panel').classList.contains('hidden'));
     assert.equal(await open(), true);
     await page.keyboard.press('Escape');

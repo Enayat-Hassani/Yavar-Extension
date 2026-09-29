@@ -488,9 +488,9 @@ export class WalkPart {
       // Pinned to the bottom of the sheet, so answers never push them away
       `<div class="wk-dock">` + this.askBox('data-wk', `Ask about lines ${b.start}–${b.end}…`,
         // The block is already explained line by line, so learning it comes first
-        `<button type="button" class="run-ask is-key" data-wk="more">Explain more</button>` +
-        `<button type="button" class="run-ask is-key" data-wk="type" aria-expanded="false" title="Practise typing these lines">Type it${best ? ` · ${best}%` : ''}</button>` +
-        `<button type="button" class="run-ask is-key" data-wk="quiz">Quiz me</button>` +
+        `<button type="button" class="run-ask is-key" data-wk="more" title="Explain more">Explain</button>` +
+        `<button type="button" class="run-ask is-key" data-wk="type" aria-expanded="false" title="Practise typing these lines">Type${best ? ` · ${best}%` : ''}</button>` +
+        `<button type="button" class="run-ask is-key" data-wk="quiz" title="Quiz me">Quiz</button>` +
         `<button type="button" class="wk-more-toggle" data-wk="moreacts" aria-haspopup="menu" aria-expanded="false" title="More actions" aria-label="More actions">${icon('more', 18)}</button>` +
         `<span class="wk-extra" role="menu" hidden>` +
           `<button type="button" class="run-ask" data-wk="lines">Line by line</button>` +
@@ -593,9 +593,9 @@ export class WalkPart {
       // Pinned to the bottom of the sheet, so answers never push them away
       `<div class="wk-dock">` + this.askBox('data-wk', `Ask about ${esc(name(f.path))}…`,
         // Each change is explained line by line as it opens, so judging it comes first
-        `<button type="button" class="run-ask is-key" data-wk="bugs">Find bugs</button>` +
-        `<button type="button" class="run-ask is-key" data-wk="better">Better ways</button>` +
-        `<button type="button" class="run-ask is-key" data-wk="more">Explain more</button>` +
+        `<button type="button" class="run-ask is-key" data-wk="bugs" title="Find bugs">Bugs</button>` +
+        `<button type="button" class="run-ask is-key" data-wk="better" title="Better ways">Improve</button>` +
+        `<button type="button" class="run-ask is-key" data-wk="more" title="Explain more">Explain</button>` +
         `<button type="button" class="wk-more-toggle" data-wk="moreacts" aria-haspopup="menu" aria-expanded="false" title="More actions" aria-label="More actions">${icon('more', 18)}</button>` +
         `<span class="wk-extra" role="menu" hidden>` +
           `<button type="button" class="run-ask" data-wk="lines">${prose ? 'In brief' : 'Line by line'}</button>` +
@@ -743,7 +743,7 @@ export class WalkPart {
         `${accuracy < 100 ? ' <span>Highlighted lines are in the original but weren\'t matched in yours; faded ones are only in yours.</span>' : ''}</div>` +
         (accuracy < 100 ? `<pre class="walk-diff">${ops.map(o =>
           `<span class="is-${o.type}">${this.escapeHtml(o.text)}</span>`).join('')}</pre>` : '');
-      this.walkBody.querySelector('[data-wk="type"]').textContent = w.change ? `Write it yourself${bestSoFar ? ` · best ${bestSoFar}%` : ''}` : `Type it${bestSoFar ? ` · ${bestSoFar}%` : ''}`;
+      this.walkBody.querySelector('[data-wk="type"]').textContent = w.change ? `Write it yourself${bestSoFar ? ` · best ${bestSoFar}%` : ''}` : `Type${bestSoFar ? ` · ${bestSoFar}%` : ''}`;
       if (bestSoFar >= 90 && !w.change) {
         const n = this.walkBody.querySelector(`.wk-blocks [data-i="${i}"] .wk-n`);
         if (n) n.textContent = '✓';
