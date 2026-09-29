@@ -24,7 +24,7 @@ import { LabsPart } from './panel/labs.js';
 
 // Session-storage keys other parts of the extension use to hand work to the panel
 const PENDING_KEYS = ['pendingAutoSubmit', 'pendingPromptLabel', 'lastSubmitTime', 'pendingText', 'pendingAction',
-  'pendingScreenshot', 'pendingScreenshotRect', 'pendingCapture', 'pendingSelection'];
+  'pendingScreenshot', 'pendingScreenshotRect', 'pendingCapture', 'pendingSelection', 'readerNav'];
 
 class YavarSidePanel {
   constructor() {
@@ -881,7 +881,6 @@ class YavarSidePanel {
     chrome.storage.onChanged.addListener((changes, areaName) => {
       if (areaName === 'sync' && changes.promptTemplates) this.loadPromptTemplates();
       if (areaName === 'sync' && changes[PROMPTS_KEY]) this._promptEdits = changes[PROMPTS_KEY].newValue || {};
-      if (areaName === 'session' && changes.readerNav?.newValue) this.stepWalk(changes.readerNav.newValue.dir);
       if (areaName === 'sync' && changes.aiModels) this.onModelsChanged(changes.aiModels.newValue);
       if (areaName === 'sync' && changes.settings) {
         this.answerWith = changes.settings.newValue?.answerWith === 'api' ? 'api' : 'chat';
@@ -921,6 +920,8 @@ class YavarSidePanel {
     await chrome.storage.session.remove(present);
 
     if (r.pendingAction) this.runPendingAction(r.pendingAction);
+    // The reader's ‹ › or its sign by the highlight (it opened this panel if it was closed)
+    if (r.readerNav && Date.now() - r.readerNav.ts < 60000) this.followReader(r.readerNav);
     if (r.pendingText) this.handlePendingText(r.pendingText);
     if (r.pendingSelection?.text) this.attachSelection(r.pendingSelection);
     if (r.pendingScreenshot) this.attachScreenshot(r.pendingScreenshot, r.pendingScreenshotRect, r.pendingCapture);

@@ -5,13 +5,17 @@
 //
 // readerView: { repo: { source, owner, repo, ref, name }, path, content,
 //               lines: { start, end } | null, label, walkKey, ts,
-//               diff: { add, del } | null, focus, nav: { prev, next } | null }
+//               diff: { add, del, part? } | null, focus, nav: { prev, next } | null,
+//               walk: { id, block } | null }
 //
 // With `diff` (a part of a commit or pull request), the file is shown as it is
 // after the change, with the removed lines put back in red where they were and
 // the added lines in green; the part is the band around them, or with
 // `focus` the lines an explanation named. `nav` shows ‹ › to step the walk,
-// which the panel follows through `readerNav`.
+// which the panel follows through `readerNav`. `walk` names the walk the
+// highlight belongs to (its storage key) and its block: a small sign beside
+// the highlight, and ‹ ›, open the panel on that walk, even after the panel
+// was closed or moved on to something else.
 //
 // A local file can be edited here and saved back to its folder. Saving moves
 // the lines after the edit, so the file's walk, the highlighted lines and the
@@ -23,6 +27,11 @@ import { cmModeFor, defineGenericMode, closeBracketKeys } from './utils/codeEdit
 import { editedLines, shiftRange, shiftWalk } from './utils/walkthrough.js';
 import { diffRows } from './utils/changes.js';
 import { idbGet } from './utils/idb.js';
+import { openPanel } from './utils/panel.js';
+
+// This window, known up front: the panel must open within the click, before any await
+let windowId;
+chrome.windows.getCurrent().then(w => { windowId = w.id; }).catch(() => {});
 
 const $ = (id) => document.getElementById(id);
 let shown = '';        // which file the code area holds, so a new range doesn't redraw it
@@ -131,13 +140,17 @@ function drawMarks() {
 // Draw the highlight behind the lines and, unless `scroll` is false, bring them into view
 function place(lines, scroll = true) {
   const band = $('rd-band');
-  if (!lines) { band.hidden = true; return; }
+  if (!lines) { band.hidden = true; $('rd-explain').hidden = true; return; }
   const lh = lineHeight();
   const top = codePad() + (lines.start - 1) * lh;
   const height = (lines.end - lines.start + 1) * lh;
   band.hidden = false;
   band.style.top = `${top}px`;
   band.style.height = `${height}px`;
+  // Beside the highlight, the way back to what Yavar said about it
+  const back = $('rd-explain');
+  back.hidden = !current?.walk;
+  back.style.top = `${top}px`;
   band.classList.remove('is-new');
   void band.offsetWidth;   // restart the arrival pulse
   band.classList.add('is-new');
@@ -309,8 +322,14 @@ function say(text, isError = false) {
 }
 
 $('rd-edit').addEventListener('click', () => { say(''); startEdit(); });
-// The walk steps in the panel, which follows readerNav
-const step = (dir) => chrome.storage.session.set({ readerNav: { dir, ts: Date.now() } });
+// The walk steps in the panel, which follows readerNav (dir 0: show the
+// highlighted block). The panel opens first, within the click: it may have
+// been closed, and it reopens the walk this view belongs to.
+const step = (dir) => {
+  openPanel({ windowId });
+  chrome.storage.session.set({ readerNav: { dir, walk: current?.walk || null, repo: current?.repo || null, ts: Date.now() } });
+};
+$('rd-explain').addEventListener('click', () => step(0));
 $('rd-prev').addEventListener('click', () => step(-1));
 $('rd-next').addEventListener('click', () => step(1));
 document.addEventListener('keydown', (e) => {

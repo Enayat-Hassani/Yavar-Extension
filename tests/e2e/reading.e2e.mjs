@@ -136,3 +136,42 @@ test('a file walk offers the same help as a change, and typing practice compares
     assert.deepEqual(b.errors, []);
   } finally { await b.close(); }
 });
+
+test('the reader brings back the walk its highlight belongs to, even after the panel moved on', async () => {
+  const b = await launch();
+  try {
+    const page = await b.open('sidepanel.html');
+    await openFolder(page, 'shop', filesOf(makeRepo(BEFORE, AFTER)));
+    await stubChat(page, () => 'ok');
+    await page.evaluate(async () => {
+      const p = window.__panel;
+      const fence = '`'.repeat(3);
+      p.askForJson = async (prompt, o) => ({ value: o.parse(`${fence}json\n{"summary":"Cart totals.","blocks":[{"start":1,"end":5,"title":"total()","explain":"Adds up the items."},{"start":7,"end":9,"title":"count()","explain":"Counts them."}]}\n${fence}`), text: '', tried: 1 });
+      await p.startWalk('src/cart.js');
+    });
+    await page.waitForFunction(() => window.__panel.walk?.blocks);
+    const reader = await b.open('reader.html', { width: 1000, height: 500 });
+    await wait(reader, 400);
+    assert.equal(await reader.evaluate(() => document.getElementById('rd-explain').hidden), false, 'the sign shows by the highlight');
+
+    // The panel moved on to another walk and closed the sheet: › in the reader
+    // reopens the file's walk and steps it, not the other one
+    await page.evaluate(() => {
+      const p = window.__panel;
+      p.walkPanel.classList.add('hidden');
+      p.walk = { key: 'walk:other', path: 'other.js', blocks: [{ start: 1, end: 1 }, { start: 2, end: 2 }], current: 0 };
+    });
+    await reader.keyboard.press('ArrowRight');
+    await page.waitForFunction(() => window.__panel.walk.path === 'src/cart.js' && window.__panel.walk.current === 1);
+    assert.equal(await page.evaluate(() => window.__panel.walkPanel.classList.contains('hidden')), false);
+    await wait(page, 300);
+
+    // Closed again, and forgotten in memory: the sign opens it at the block the reader shows
+    await page.evaluate(() => { const p = window.__panel; p.walkPanel.classList.add('hidden'); p.walk = null; });
+    await reader.evaluate(() => document.getElementById('rd-explain').click());
+    await page.waitForFunction(() => window.__panel.walk?.path === 'src/cart.js' && !window.__panel.walkPanel.classList.contains('hidden'));
+    const r = await page.evaluate(() => ({ current: window.__panel.walk.current, title: document.querySelector('.wk-title').textContent }));
+    assert.deepEqual(r, { current: 1, title: 'count()' });
+    assert.deepEqual(b.errors, []);
+  } finally { await b.close(); }
+});

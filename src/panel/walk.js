@@ -217,7 +217,7 @@ export class WalkPart {
     }
     if (!this.repoTree) return;
     this.openRepoFile({ ...this.fileRefFor(w.path, { start: b.start, end: b.end }),
-      label: `Block ${w.current + 1} of ${w.blocks.length} · ${b.title}`, nav: this.walkNav() });
+      label: `Block ${w.current + 1} of ${w.blocks.length} · ${b.title}`, nav: this.walkNav(), walk: this.walkRef() });
   }
 
   // What the reader shows for a part of a change: the file after the change
@@ -233,9 +233,57 @@ export class WalkPart {
     const f = files[fi];
     const parts = w.blocks.slice(f.first, f.last + 1);
     const count = f.last - f.first + 1;
-    return { source: local ? 'local' : 'github', owner, repo, ref, path: b.path, lines, focus, nav: this.walkNav(),
+    return { source: local ? 'local' : 'github', owner, repo, ref, path: b.path, lines, focus, nav: this.walkNav(), walk: this.walkRef(),
       label: `File ${fi + 1} of ${files.length}${count > 1 ? ` · Change ${w.current - f.first + 1} of ${count}` : ''} · ${partTitle(b)}`,
       diff: b.add ? { add: parts.flatMap(x => x.add || []), del: parts.flatMap(x => x.del || []), part: { add: b.add, del: b.del } } : null };
+  }
+
+  // What the reader's highlight belongs to: the walk (by its storage key) and block
+  walkRef() {
+    const w = this.walk;
+    return { id: w.key || this.walkKey(w.path), block: w.current };
+  }
+
+  // The reader asked: step the walk (`dir`), or show its highlighted block
+  // (dir 0). Its walk is reopened when the panel shows something else, or
+  // was closed, so the reader never steps a walk it isn't showing.
+  async followReader({ dir = 0, walk: ref, repo }) {
+    if (!ref?.id) return;
+    const w = this.walk;
+    const showing = !this.walkPanel.classList.contains('hidden') && this.walkView === 'file' && w?.blocks;
+    if (!showing || (w.key || this.walkKey(w.path)) !== ref.id) {
+      if (!(await this.reopenWalk(ref, repo))) return;
+    }
+    if (dir) this.stepWalk(dir);
+    else if (this.walk.current !== ref.block) await this.gotoWalk(ref.block);
+    this.walkBody.focus({ preventScroll: true });
+  }
+
+  // A saved walk, open again at `ref.block`, with the repository or folder it
+  // reads from loaded when it can be
+  async reopenWalk(ref, repo) {
+    let saved = null;
+    try { saved = (await chrome.storage.local.get(ref.id))[ref.id]; } catch (e) { /* none */ }
+    if (!saved?.blocks?.length) {
+      this.showNotification('That walk is no longer saved; start it again from the file or the change');
+      return false;
+    }
+    const c = saved.change;
+    if (repo && (!c || c.local)) {
+      try {
+        if (!(await this.restoreSource(repo))) this.showNotification(`Open the ${repo.repo} folder again for the reader to follow`);
+      } catch (e) {
+        this.showNotification(`⚠️ Could not load ${repo.name}: ${e.message}`);
+      }
+    }
+    this.walkView = 'file';
+    this.walk = { ...saved, current: Math.min(ref.block, saved.blocks.length - 1), summaryOpen: false };
+    this.journey = c ? null : await this.loadJourney();
+    document.getElementById('walk-title').textContent = c ? 'Read the change' : 'Walk through';
+    document.getElementById('walk-sub').textContent = c ? c.label + (c.title ? ` · ${c.title}` : '') : saved.path.split('/').pop();
+    this.walkPanel.classList.remove('hidden');
+    await this.renderWalk();
+    return true;
   }
 
   // Whether the reader's ‹ › can step from here
@@ -295,7 +343,7 @@ export class WalkPart {
     }
     if (!this.repoTree) return;
     this.openRepoFile({ ...this.fileRefFor(w.path, { start, end }),
-      label: `Block ${w.current + 1} of ${w.blocks.length} · ${b.title}`, nav: this.walkNav() });
+      label: `Block ${w.current + 1} of ${w.blocks.length} · ${b.title}`, nav: this.walkNav(), walk: this.walkRef() });
   }
 
   // The current block's code, from the cached file. In a change: its new

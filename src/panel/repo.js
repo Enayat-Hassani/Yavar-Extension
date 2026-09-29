@@ -302,7 +302,7 @@ export class RepoPart {
   // is highlighted (a walkthrough block). When several calls race (Next
   // clicked quickly), only the latest is shown. A local file carries its
   // walk's storage key, so an edit saved in the reader can move the walk.
-  async openRepoFile({ source = 'github', owner, repo, ref, path, lines = null, label = '', diff = null, focus = false, nav = null }) {
+  async openRepoFile({ source = 'github', owner, repo, ref, path, lines = null, label = '', diff = null, focus = false, nav = null, walk = null }) {
     const seq = (this._readerSeq = (this._readerSeq || 0) + 1);
     try {
       const t = this.repoTree;
@@ -314,12 +314,32 @@ export class RepoPart {
       if (seq !== this._readerSeq) return;
       await chrome.storage.session.set({ readerView: {
         repo: { source, owner, repo, ref, name: owner ? `${owner}/${repo}` : repo },
-        path, content, lines, label, diff, focus, nav, walkKey: source === 'local' ? this.walkKey(path) : null, ts: Date.now()
+        path, content, lines, label, diff, focus, nav, walk, walkKey: source === 'local' ? this.walkKey(path) : null, ts: Date.now()
       } });
       await this.showReaderTab();
     } catch (e) {
       this.showNotification('⚠️ Could not open ' + path.split('/').pop() + ': ' + e.message);
     }
+  }
+
+  // Load the repository or folder a reader view came from, to reopen its
+  // walk. A folder is opened only if Chrome still allows reading it, without
+  // asking (the click was in the reader, not here). True when it's loaded.
+  async restoreSource(r) {
+    const t = this.repoTree;
+    if (r.source === 'local') {
+      if (t?.source === 'local' && t.repo === r.repo && this.localRoot) return true;
+      const recent = ((await idbGet('recentFolders')) || []).map(x => x.handle);
+      const handle = [await idbGet('lastFolder'), ...recent].find(h => h?.name === r.repo);
+      if (!handle || (await handle.queryPermission({ mode: 'read' })) !== 'granted') return false;
+      return this.openLocalFolder({ handle });
+    }
+    if (t && t.source !== 'local' && t.owner === r.owner && t.repo === r.repo && t.ref === r.ref) return true;
+    const tree = await this.loadRepoTree(r.owner, r.repo, r.ref);
+    this.repoTree = { ...tree, ...this.deriveTree(tree) };
+    this.activeRepoFile = null;
+    await this.loadReadMarks();
+    return true;
   }
 
   // The reader saved an edit to a local file. Cached copies of local files go

@@ -228,6 +228,29 @@ body {
   pointer-events: none;
 }
 .rd-band[hidden] { display: none; }
+/* Beside the highlight, in the gutter's margin: back to what Yavar said about it */
+.rd-code { position: relative; }
+.rd-explain {
+  position: absolute;
+  left: 1px;
+  display: grid;
+  place-items: center;
+  width: 15px;
+  height: var(--line);
+  padding: 0;
+  color: var(--accent);
+  background: none;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0.75;
+  transition: top var(--dur-base) var(--ease-std), opacity var(--dur-base), background-color var(--dur-base);
+  animation: rd-explain-in var(--dur-base) var(--ease-std);
+}
+.rd-explain[hidden] { display: none; }
+.rd-explain:hover { opacity: 1; background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.rd-explain:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; opacity: 1; }
+@keyframes rd-explain-in { from { opacity: 0; } }
 /* Over a diff the band only marks the part, so red and green stay true */
 .rd-band.is-diff { background: none; }
 .rd-band.is-new { animation: arrive var(--dur-slow) var(--ease-std); }
@@ -242,6 +265,7 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .rd-band { transition: none; }
+  .rd-explain { transition: none; animation: none; }
   .rd-band.is-new { animation: none; }
 }
 
