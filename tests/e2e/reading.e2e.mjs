@@ -356,3 +356,33 @@ test('the ⋯ menu keeps the bar one row, and closes on a choice, a click elsewh
     assert.deepEqual(b.errors, []);
   } finally { await b.close(); }
 });
+
+test('the question field is always there, names the lines, and Escape leaves it before closing the sheet', async () => {
+  const b = await launch();
+  try {
+    const page = await b.open('sidepanel.html');
+    await openFolder(page, 'shop', filesOf(makeRepo(BEFORE, AFTER)));
+    await stubChat(page, () => 'Because it adds.');
+    await page.evaluate(async () => {
+      const p = window.__panel;
+      const fence = '`'.repeat(3);
+      p.askForJson = async (prompt, o) => ({ value: o.parse(`${fence}json\n{"summary":"Cart totals.","blocks":[{"start":1,"end":5,"title":"total()","explain":"Adds up."},{"start":7,"end":9,"title":"count()","explain":"Counts."}]}\n${fence}`), text: '', tried: 1 });
+      await p.startWalk('src/cart.js');
+    });
+    const field = page.locator('.wk-ask-input');
+    assert.equal(await field.isVisible(), true);
+    assert.equal(await field.getAttribute('placeholder'), 'Ask about lines 1–6…');
+    await field.fill('Why a loop?');
+    await field.press('Enter');
+    await page.waitForFunction(() => window.__asks.length);
+    assert.equal(await page.evaluate(() => window.__asks[0].label), 'Why a loop?');
+    assert.equal(await field.inputValue(), '');
+    await field.focus();
+    await page.keyboard.press('Escape');
+    const open = () => page.evaluate(() => !document.getElementById('walk-panel').classList.contains('hidden'));
+    assert.equal(await open(), true);
+    await page.keyboard.press('Escape');
+    assert.equal(await open(), false);
+    assert.deepEqual(b.errors, []);
+  } finally { await b.close(); }
+});

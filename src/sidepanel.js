@@ -202,24 +202,15 @@ class YavarSidePanel {
     });
     this.walkBody?.addEventListener('click', (e) => this.onWalkClick(e));
     for (const body of [this.walkBody]) {
-      body?.addEventListener('click', (e) => {
-        if (e.target.closest('.wk-ask-open')) this.toggleAsk(body, true);
-      });
       body?.addEventListener('keydown', (e) => {
         if (!e.target.matches('.wk-ask-input') || e.isComposing) return;
         if (e.key === 'Escape') {
-          e.stopPropagation();   // closes the field, not the sheet
-          this.toggleAsk(body, false, { refocus: true });
+          e.stopPropagation();   // leaves the field for the sheet; a second Escape closes it
+          body.focus();
         } else if (e.key === 'Enter' && !e.shiftKey) {
           e.preventDefault();
           e.target.nextElementSibling.click();
         }
-      });
-      // Left empty: back to the actions. A question being written stays.
-      body?.addEventListener('focusout', (e) => {
-        const ask = e.target.closest?.('.wk-ask');
-        if (!ask || ask.contains(e.relatedTarget) || ask.querySelector('.wk-ask-input').value.trim()) return;
-        this.toggleAsk(body, false);
       });
       body?.addEventListener('input', (e) => {
         if (!e.target.matches('.wk-ask-input')) return;

@@ -2179,7 +2179,7 @@ button.lens-item:focus-visible {
   backdrop-filter: saturate(1.6) blur(16px);
   border-top: 1px solid var(--border);
 }
-.wk-acts { flex: 1 0 100%; min-width: 0; min-height: 36px; display: flex; align-items: center; gap: var(--sp-1); }   /* as tall as the field, so swapping doesn't move the dock */
+.wk-acts { flex: 1 0 100%; min-width: 0; display: flex; align-items: center; gap: var(--sp-1); }
 
 /* A narrow panel (Chrome's side panel goes down to about 320px) tightens
    the bar so every label still fits whole */
@@ -2223,7 +2223,6 @@ button.lens-item:focus-visible {
 }
 .wk-more-toggle:hover, .wk-more-toggle[aria-expanded="true"] { color: var(--text-primary); background: var(--fill-hover); }
 .wk-more-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.wk-more-toggle ~ .wk-ask-open { margin-left: 0; }
 
 .wk-extra {
   position: absolute;
@@ -2255,22 +2254,6 @@ button.lens-item:focus-visible {
 .wk-extra .run-ask:active:not(:disabled) { background: var(--fill-press); opacity: 1; }
 .wk-extra .run-ask:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
-.wk-ask-open {
-  flex-shrink: 0;
-  margin-left: auto;
-  width: 32px;
-  height: 32px;
-  display: grid;
-  place-items: center;
-  color: var(--accent-ink);    /* an action, like the ones beside it */
-  background: none;
-  border: none;
-  border-radius: 50%;
-  cursor: pointer;
-}
-.wk-ask-open:hover { background: var(--accent-soft); }
-.wk-ask-open:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.wk-dock.is-asking .wk-acts { display: none; }
 @media (prefers-reduced-motion: reduce) {
   .wk-extra { transition: none; }
   .run-ask.is-key:disabled { animation: none; }
@@ -2278,10 +2261,10 @@ button.lens-item:focus-visible {
 /* Narrow panel: after the rules it tightens */
 @container (max-width: 340px) {
   .run-ask.is-key { padding: 0 9px; font-size: 12px; }
-  .wk-more-toggle, .wk-ask-open { width: 30px; height: 30px; }
+  .wk-more-toggle { width: 30px; height: 30px; }
 }
 
-/* Your own question: takes the actions' row, sliding in from the chat button */
+/* Your own question: always under the actions, one line until you write more */
 .wk-ask {
   flex: 1 0 100%;
   display: flex;
@@ -2290,16 +2273,12 @@ button.lens-item:focus-visible {
   padding: 3px 3px 3px 12px;
   background: var(--surface);
   border: 1px solid var(--border);
+  margin-top: 6px;
   border-radius: var(--r-lg);
-  transition: border-color var(--dur-quick), opacity var(--dur-base) var(--ease-out), translate var(--dur-base) var(--ease-out);
+  transition: border-color var(--dur-quick) var(--ease-std), box-shadow var(--dur-quick) var(--ease-std);
 }
-@starting-style { .wk-ask:not([hidden]) { opacity: 0; translate: 16px 0; } }
-.wk-ask[hidden] { display: none; }
-@media (prefers-reduced-motion: reduce) {
-  .wk-ask { transition: border-color var(--dur-quick), opacity var(--dur-quick); }
-  @starting-style { .wk-ask:not([hidden]) { translate: none; } }
-}
-.wk-ask:focus-within { border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); }
+.wk-ask:hover:not(:focus-within) { border-color: color-mix(in srgb, var(--text-primary) 16%, transparent); }
+.wk-ask:focus-within { border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); box-shadow: 0 0 0 3px var(--accent-soft); }
 .wk-ask-input {
   flex: 1;
   min-width: 0;

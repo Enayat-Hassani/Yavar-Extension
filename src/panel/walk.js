@@ -486,7 +486,7 @@ export class WalkPart {
       `<div class="walk-notes"></div>` +
       `<div class="walk-next" aria-live="polite"></div>` +
       // Pinned to the bottom of the sheet, so answers never push them away
-      `<div class="wk-dock">` + this.askBox('data-wk', 'Ask about these lines…',
+      `<div class="wk-dock">` + this.askBox('data-wk', `Ask about lines ${b.start}–${b.end}…`,
         // The block is already explained line by line, so learning it comes first
         `<button type="button" class="run-ask is-key" data-wk="more">Explain more</button>` +
         `<button type="button" class="run-ask is-key" data-wk="type" aria-expanded="false" title="Practise typing these lines">Type it${best ? ` · ${best}%` : ''}</button>` +
