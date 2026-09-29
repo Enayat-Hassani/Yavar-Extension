@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseDiff, changeBlocks, changePack, diffRows, partTitle, orderParts, linesBatch, linesPrompt, splitParts, carryNotes } from '../src/utils/changes.js';
+import { parseDiff, changeBlocks, changePack, diffRows, partTitle, orderParts, linesBatch, linesPrompt, splitParts, carryNotes, isProse } from '../src/utils/changes.js';
 
 const DIFF = `diff --git a/src/app.js b/src/app.js
 index 111..222 100644
@@ -182,4 +182,20 @@ test('notes carry over to parts whose diff is the same, even when their lines mo
   const after = [part('b.js', '@@ -1 +1 @@\n+   1 | y'), part('a.js', '@@ -5 +5 @@\n-   5 | old\n+   5 | new')];
   assert.deepEqual(carryNotes(before, after), { 1: [{ label: 'Line by line', text: 'a' }] });
   assert.deepEqual(carryNotes(null, after), {});
+});
+
+test('docs and comment-only changes are summed up in prose, code line by line', () => {
+  const b = (path, diff) => ({ path, status: 'modified', start: 1, end: 2, diff });
+  const doc = b('docs/AGENTS.md', '@@ -1 +1 @@\n-   1 | Old rule.\n+   1 | New rule.');
+  const comment = b('src/a.js', '@@ -4 +4 @@\n-   4 | // reads the file\n+   4 | // reads the file once\n    5 | run();');
+  const code = b('src/a.js', '@@ -9 +9 @@\n-   9 | run();\n+   9 | run(1); // once');
+  assert.deepEqual([doc, comment, code].map(isProse), [true, true, false]);
+  const mixed = linesPrompt({ blocks: [code, doc], nums: [1, 2], what: 'a commit', repo: 'o/r' });
+  assert.match(mixed, /### Part 2 · `docs\/AGENTS\.md`[^\n]*\(prose\)/);
+  assert.doesNotMatch(mixed, /### Part 1 ·[^\n]*\(prose\)/);
+  assert.match(mixed, /For a part marked \(prose\), write only two to four plain sentences/);
+  // Only prose: no line-by-line instructions at all
+  const docsOnly = linesPrompt({ blocks: [doc], nums: [1], what: 'a commit', repo: 'o/r' });
+  assert.match(docsOnly, /Under it: Write only two to four plain sentences/);
+  assert.doesNotMatch(docsOnly, /\(prose\)|line number after the change/);
 });

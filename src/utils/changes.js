@@ -200,6 +200,16 @@ export function changePack(blocks, what) {
     blocks.map((b, k) => `## Part ${k + 1} · ${where(b)}\n\n\`\`\`diff\n${b.diff}\n\`\`\``).join('\n\n') + '\n';
 }
 
+// Docs, and code whose changed lines are all comments, read as prose: a
+// short summary says more than going through them line by line
+const COMMENT = /^\s*(\/\/|\/\*|\*|#(?!include|!|\[)|<!--|--|;|$)/;
+export function isProse(b) {
+  if (DOCS.test(b.path)) return true;
+  const changed = b.diff.split('\n').filter(l => /^[+-]/.test(l)).map(l => l.replace(/^[+-] *\d+ \| /, ''));
+  return changed.length > 0 && changed.every(l => COMMENT.test(l));
+}
+const PROSE = 'For a part marked (prose), write only two to four plain sentences on what changed and why it matters, with no line numbers and no list.';
+
 // Line by line, for the parts `nums` (1-based) of the walk. The first
 // message also carries the whole diff and opens with what the change does.
 export function linesPrompt({ blocks, nums, what, repo, title = '', fname = '', skipped = [], edits = {}, brief = '' }) {
@@ -208,9 +218,12 @@ export function linesPrompt({ blocks, nums, what, repo, title = '', fname = '', 
       `${skipped.length ? ` (left out: ${skipped.length} lockfile, generated or binary file${skipped.length === 1 ? '' : 's'})` : ''}. ` +
       `I'm reading it part by part. Begin with two or three sentences on what the change does as a whole and why. Then go through the parts below.`
     : `I'm reading ${what} in ${repo}${title ? ` ("${title}")` : ''} part by part. Go through the parts below.`;
+  const prose = nums.filter(n => isProse(blocks[n - 1]));
+  const code = prose.length < nums.length;
   return `${brief ? `${brief}\n\n` : ''}${head}\n\n` +
-    `Put each part under a heading "### Part N". Under it: ${intentText(edits, 'lines')} ${CHANGED} ${NUMBERS_NOTE}\n\n` +
-    nums.map(n => `### Part ${n} · ${where(blocks[n - 1])}\n\n\`\`\`diff\n${blocks[n - 1].diff}\n\`\`\``).join('\n\n');
+    `Put each part under a heading "### Part N". Under it: ` +
+    (code ? `${intentText(edits, 'lines')} ${CHANGED} ${NUMBERS_NOTE}${prose.length ? ` ${PROSE}` : ''}` : PROSE.replace('For a part marked (prose), write', 'Write')) + `\n\n` +
+    nums.map(n => `### Part ${n} · ${where(blocks[n - 1])}${code && prose.includes(n) ? ' (prose)' : ''}\n\n\`\`\`diff\n${blocks[n - 1].diff}\n\`\`\``).join('\n\n');
 }
 
 // A line-by-line reply cut at its "### Part N" headings: { intro, parts }
