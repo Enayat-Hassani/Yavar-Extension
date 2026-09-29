@@ -4,6 +4,7 @@
 // Its methods join YavarSidePanel's (see the end of sidepanel.js), so `this` is the panel.
 
 import { renderMarkdown } from '../utils/markdown.js';
+import { icon } from '../utils/icons.js';
 import { walkPrompt, parseWalkthrough, compareTyped, quizPrompt, parseQuiz, textSha } from '../utils/walkthrough.js';
 import { nextCandidates, nextPrompt, parseNext } from '../utils/journey.js';
 import {
@@ -476,22 +477,22 @@ export class WalkPart {
       (this._walkStale && this._walkStale === this.walkKey(w.path)
         ? `<p class="wk-stale" role="status">${esc(w.path.split('/').pop())} changed since this walk, so its blocks may sit on the wrong lines. ` +
           `<button type="button" class="files-link-btn" data-wk="rewalk">Walk it again</button></p>` : '') +
-      (i === 0 && w.summary ? `<p class="wk-summary">${esc(w.summary)}</p>` : '') +
+      (i === 0 && w.summary ? `<div class="wk-summary md">${renderMarkdown(w.summary).html}</div>` : '') +
       `<div class="wk-meta"><span>Lines ${b.start}-${b.end}${b.edited ? ' · edited after this was explained' : ''}</span>` +
         `<button type="button" class="files-link-btn wk-show" data-wk="show">Show in reader</button></div>` +
       `<h3 class="wk-title">${esc(b.title)}</h3>` +
-      (b.explain ? `<p class="wk-explain">${esc(b.explain)}</p>` : `<p class="wk-explain is-empty">The AI didn't explain these lines. Ask with Explain more.</p>`) +
+      (b.explain ? `<div class="wk-explain md">${renderMarkdown(b.explain).html}</div>` : `<p class="wk-explain is-empty">The AI didn't explain these lines. Ask with Explain more.</p>`) +
       this.typeBox(b) +
       `<div class="walk-notes"></div>` +
       `<div class="walk-next" aria-live="polite"></div>` +
       // Pinned to the bottom of the sheet, so answers never push them away
-      `<div class="wk-dock">` + this.askBox('data-wk', 'Ask about these lines…',
+      `<div class="wk-dock">` + this.askBox('data-wk', `Ask about lines ${b.start}–${b.end}…`,
         // The block is already explained line by line, so learning it comes first
         `<button type="button" class="run-ask is-key" data-wk="more">Explain more</button>` +
-        `<button type="button" class="run-ask is-key" data-wk="type" aria-expanded="false">Practise typing${best != null ? ` · best ${best}%` : ''}</button>` +
+        `<button type="button" class="run-ask is-key" data-wk="type" aria-expanded="false" title="Practise typing these lines">Type it${best ? ` · ${best}%` : ''}</button>` +
         `<button type="button" class="run-ask is-key" data-wk="quiz">Quiz me</button>` +
-        `<button type="button" class="run-ask wk-more-toggle" data-wk="moreacts" aria-expanded="false"><span>More</span><i class="wk-more-chev" aria-hidden="true"></i></button>` +
-        `<span class="wk-extra" hidden>` +
+        `<button type="button" class="wk-more-toggle" data-wk="moreacts" aria-haspopup="menu" aria-expanded="false" title="More actions" aria-label="More actions">${icon('more', 18)}</button>` +
+        `<span class="wk-extra" role="menu" hidden>` +
           `<button type="button" class="run-ask" data-wk="lines">Line by line</button>` +
           `<button type="button" class="run-ask" data-wk="bugs">Find bugs</button>` +
           `<button type="button" class="run-ask" data-wk="better">Better ways</button>` +
@@ -562,13 +563,13 @@ export class WalkPart {
         extra: (change.local ? '' : `<button type="button" class="files-link-btn wk-redo" data-wk="explain-change">Explain the whole change in the chat</button>`) +
           `<button type="button" class="files-link-btn wk-redo" data-wk="redo">Ask for a new walkthrough of this change</button>`
       }) +
-      (fi === 0 && (w.summary || skippedNote) ? `<p class="wk-summary">${esc(w.summary)}${skippedNote}</p>` : '') +
+      (fi === 0 && (w.summary || skippedNote) ? `<div class="wk-summary md">${renderMarkdown(w.summary).html}${skippedNote}</div>` : '') +
       `<div class="wk-filehead"${fileEnter}>` +
         `<div class="wk-meta"><span><code>${esc(f.path)}</code>` +
           `<span class="wk-counts">${f.added ? ` <ins>+${f.added}</ins>` : ''}${f.removed ? ` <del>−${f.removed}</del>` : ''}</span>` +
           `${f.status === 'modified' ? '' : ` · ${f.status}`}</span>` +
           (b.start ? `<button type="button" class="files-link-btn wk-show" data-wk="show">Show in reader</button>` : '') + `</div>` +
-        (about ? `<p class="wk-about">${esc(about)}</p>` : '') +
+        (about ? `<div class="wk-about md">${renderMarkdown(about).html}</div>` : '') +
       `</div>` +
       (count > 1
         ? `<div class="wk-changes"><span class="wk-dots" role="group" aria-label="Changes in ${esc(name(f.path))}">` +
@@ -595,12 +596,12 @@ export class WalkPart {
         `<button type="button" class="run-ask is-key" data-wk="bugs">Find bugs</button>` +
         `<button type="button" class="run-ask is-key" data-wk="better">Better ways</button>` +
         `<button type="button" class="run-ask is-key" data-wk="more">Explain more</button>` +
-        `<button type="button" class="run-ask wk-more-toggle" data-wk="moreacts" aria-expanded="false"><span>More</span><i class="wk-more-chev" aria-hidden="true"></i></button>` +
-        `<span class="wk-extra" hidden>` +
+        `<button type="button" class="wk-more-toggle" data-wk="moreacts" aria-haspopup="menu" aria-expanded="false" title="More actions" aria-label="More actions">${icon('more', 18)}</button>` +
+        `<span class="wk-extra" role="menu" hidden>` +
           `<button type="button" class="run-ask" data-wk="lines">${prose ? 'In brief' : 'Line by line'}</button>` +
           `<button type="button" class="run-ask" data-wk="tests">How to test it</button>` +
           `<button type="button" class="run-ask" data-wk="quiz">Quiz me</button>` +
-          (b.added ? `<button type="button" class="run-ask" data-wk="type" aria-expanded="false">Write it yourself${best != null ? ` · best ${best}%` : ''}</button>` : '') +
+          (b.added ? `<button type="button" class="run-ask" data-wk="type" aria-expanded="false">Write it yourself${best ? ` · best ${best}%` : ''}</button>` : '') +
         `</span>`) +
       `</div>`;
 
@@ -623,8 +624,19 @@ export class WalkPart {
     this.walkBody.querySelector('[data-wk="lines"]:not(:disabled)')?.click();
   }
 
+  // The dock's ⋯ menu: the actions a walk needs less often, opened above it
+  toggleMoreActs(open) {
+    const menu = this.walkBody.querySelector('.wk-extra');
+    if (!menu || menu.hidden === !open) return false;
+    menu.hidden = !open;
+    menu.previousElementSibling.setAttribute('aria-expanded', String(open));
+    return true;
+  }
+
   async onWalkClick(e) {
     if (!e.target.closest('.wk-bar')) this.closeStepList(this.walkBody);
+    // Any click but the ⋯ itself closes its menu; a choice in it still runs
+    if (!e.target.closest('[data-wk="moreacts"]')) this.toggleMoreActs(false);
     const ref = e.target.closest('.line-ref');
     if (ref) return this.showLineRef(Number(ref.dataset.start), Number(ref.dataset.end));
     const el = e.target.closest('[data-wk]');
@@ -657,13 +669,7 @@ export class WalkPart {
     const b = w.blocks[i];
     const go = (k) => this.gotoWalk(k);
     if (act === 'list') return this.toggleStepList(this.walkBody, el);
-    if (act === 'moreacts') {
-      const extra = el.nextElementSibling;
-      extra.hidden = !extra.hidden;
-      el.setAttribute('aria-expanded', String(!extra.hidden));
-      el.firstElementChild.textContent = extra.hidden ? 'More' : 'Less';
-      return;
-    }
+    if (act === 'moreacts') return this.toggleMoreActs(el.nextElementSibling.hidden);
     if (act === 'goto') return go(Number(el.dataset.i));
     if (act === 'prev') return go(w.summaryOpen ? i : Math.max(0, i - 1));
     if (act === 'summary') {
@@ -737,7 +743,7 @@ export class WalkPart {
         `${accuracy < 100 ? ' <span>Highlighted lines are in the original but weren\'t matched in yours; faded ones are only in yours.</span>' : ''}</div>` +
         (accuracy < 100 ? `<pre class="walk-diff">${ops.map(o =>
           `<span class="is-${o.type}">${this.escapeHtml(o.text)}</span>`).join('')}</pre>` : '');
-      this.walkBody.querySelector('[data-wk="type"]').textContent = `${w.change ? 'Write it yourself' : 'Practise typing'} · best ${bestSoFar}%`;
+      this.walkBody.querySelector('[data-wk="type"]').textContent = w.change ? `Write it yourself${bestSoFar ? ` · best ${bestSoFar}%` : ''}` : `Type it${bestSoFar ? ` · ${bestSoFar}%` : ''}`;
       if (bestSoFar >= 90 && !w.change) {
         const n = this.walkBody.querySelector(`.wk-blocks [data-i="${i}"] .wk-n`);
         if (n) n.textContent = '✓';
@@ -866,7 +872,7 @@ export class WalkPart {
         items: files.map((g, k) => ({ i: g.first, current: false, mark: k + 1, title: esc(g.path.split('/').pop()), meta: '' }))
       }) +
       `<h3 class="wk-title">Review summary</h3>` +
-      (w.summary ? `<p class="wk-summary">${esc(w.summary)}</p>` : '') +
+      (w.summary ? `<div class="wk-summary md">${renderMarkdown(w.summary).html}</div>` : '') +
       `<div class="sheet-label">Found with Find bugs</div>` +
       (found.length
         ? `<ul class="wk-found">${found.map(g =>

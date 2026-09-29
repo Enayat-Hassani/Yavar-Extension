@@ -3,31 +3,17 @@
 // Its methods join YavarSidePanel's (see the end of sidepanel.js), so `this` is the panel.
 
 import { cmModeFor, defineGenericMode, closeBracketKeys } from '../utils/codeEditor.js';
-import { icon } from '../utils/icons.js';
 
 export class SheetsPart {
-  // A dock's content: the quick actions, ending in a chat button that swaps
-  // them for a question field in the same row (so the dock doesn't grow).
-  // The field grows as you type; Enter asks, Shift+Enter starts a new line,
-  // and Escape, or leaving it empty, brings the actions back (toggleAsk).
+  // A dock's content: the quick actions in one row, and under them the
+  // question field, always there because asking is what you do most. It
+  // starts one line tall and grows as you type; Enter asks, Shift+Enter
+  // starts a new line, Escape leaves the field.
   askBox(attr, placeholder, actions) {
-    return `<div class="wk-acts">${actions}` +
-      `<button type="button" class="wk-ask-open" title="${placeholder.replace(/…$/, '')}" aria-label="${placeholder.replace(/…$/, '')}" aria-expanded="false">${icon('chat', 18)}</button></div>` +
-      `<div class="wk-ask" hidden><textarea class="wk-ask-input" rows="1" placeholder="${placeholder}" aria-label="${placeholder}"></textarea>` +
+    return `<div class="wk-acts">${actions}</div>` +
+      `<div class="wk-ask"><textarea class="wk-ask-input" rows="1" placeholder="${placeholder}" aria-label="${placeholder}"></textarea>` +
       `<button type="button" class="wk-ask-send" ${attr}="ask" title="Ask (Enter)" aria-label="Ask">` +
       `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"></path></svg></button></div>`;
-  }
-
-  toggleAsk(body, open, { refocus = false } = {}) {
-    const dock = body.querySelector('.wk-dock');
-    const ask = dock?.querySelector('.wk-ask');
-    if (!ask || ask.hidden === !open) return;
-    const btn = dock.querySelector('.wk-ask-open');
-    dock.classList.toggle('is-asking', open);
-    ask.hidden = !open;
-    btn.setAttribute('aria-expanded', String(open));
-    if (open) ask.querySelector('.wk-ask-input').focus();
-    else if (refocus) btn.focus();
   }
 
   // The question typed in a dock's ask field, cleared once taken; '' when empty

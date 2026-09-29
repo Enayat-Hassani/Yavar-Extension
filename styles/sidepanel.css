@@ -2003,7 +2003,7 @@ button.lens-item:focus-visible {
   cursor: pointer;
   transition: color var(--dur-quick) var(--ease-std), background var(--dur-quick) var(--ease-std);
 }
-.wk-map { padding: 4px 2px; }
+.wk-map { flex-shrink: 0; padding: 4px 2px; white-space: nowrap; }
 .wk-map:hover { color: var(--accent); }
 .wk-where { display: inline-flex; align-items: center; gap: 6px; min-width: 0; padding: 4px 6px; margin-left: -6px; font-weight: 600; color: var(--text-primary); }
 .wk-ctx, .wk-pos { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
@@ -2013,7 +2013,7 @@ button.lens-item:focus-visible {
 .wk-ctx + .wk-pos::before { content: '·'; margin-right: 6px; font-weight: 400; color: var(--text-secondary); }
 .wk-map + .wk-where { margin-left: 0; }
 .wk-where:hover { background: var(--fill-hover); }
-.wk-chev { width: 7px; height: 7px; margin-top: -3px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(45deg); opacity: 0.6; }
+.wk-chev { flex-shrink: 0; width: 7px; height: 7px; margin-top: -3px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(45deg); opacity: 0.6; }
 .wk-where[aria-expanded="true"] .wk-chev { margin-top: 3px; transform: rotate(-135deg); }
 
 .wk-steps { display: flex; flex-shrink: 0; gap: 4px; margin-left: auto; }
@@ -2089,6 +2089,7 @@ button.lens-item:focus-visible {
 .wk-redo { margin: 6px 8px 0; font-size: 12px; }
 .wk-redo:hover { color: var(--text-primary); }
 
+.wk-summary > :last-child, .wk-explain > :last-child, .wk-about > :last-child, .jr-summary > :last-child { margin-bottom: 0; }
 .wk-summary { margin: 0 0 var(--sp-4); color: var(--text-secondary); line-height: 1.55; text-wrap: pretty; }
 .wk-meta { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 11.5px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
 .wk-show { margin: 0; font-size: 11.5px; }
@@ -2178,13 +2179,22 @@ button.lens-item:focus-visible {
   backdrop-filter: saturate(1.6) blur(16px);
   border-top: 1px solid var(--border);
 }
-.wk-acts { flex: 1 0 100%; min-height: 36px; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1); }   /* as tall as the field, so swapping doesn't move the dock */
+.wk-acts { flex: 1 0 100%; min-width: 0; display: flex; align-items: center; gap: var(--sp-1); }
+
+/* A narrow panel (Chrome's side panel goes down to about 320px) tightens
+   the bar so every label still fits whole */
+.wk-dock { container-type: inline-size; }
 
 /* The key actions: tinted capsules */
 .run-ask.is-key {
+  flex: 0 1 auto;
+  min-width: 0;
   min-height: 32px;
   padding: 0 12px;
+  overflow: hidden;
   font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   background: var(--accent-soft);
 }
 .run-ask.is-key:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 16%, transparent); }
@@ -2196,57 +2206,65 @@ button.lens-item:focus-visible {
 .run-ask.is-key:disabled { background: color-mix(in srgb, var(--text-primary) 5%, transparent); animation: askWait 1.2s var(--ease-std) infinite alternate; }
 @keyframes askWait { to { opacity: 0.55; } }
 
-/* More: plain, with a chevron that turns as the row opens */
-.wk-more-toggle { display: inline-flex; align-items: center; gap: 6px; padding: 0 8px; color: var(--text-secondary); }
-.wk-more-toggle:hover { color: var(--text-primary); background: var(--fill-hover); }
-.wk-more-chev {
-  width: 6px;
-  height: 6px;
-  margin-top: -3px;
-  border-right: 1.5px solid currentColor;
-  border-bottom: 1.5px solid currentColor;
-  rotate: 45deg;
-  transition: rotate var(--dur-base) var(--ease-out), margin var(--dur-base) var(--ease-out);
-}
-.wk-more-toggle[aria-expanded="true"] { color: var(--text-primary); }
-.wk-more-toggle[aria-expanded="true"] .wk-more-chev { margin-top: 3px; rotate: -135deg; }
-
-/* The chat button ends the first row; the rest of the actions open below */
-.wk-ask-open { order: 1; }
-.wk-extra {
-  order: 2;
-  flex: 1 0 100%;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px;
-  margin: 2px -4px 0;
-  padding-top: 6px;
-  border-top: 1px solid var(--border);
-  transition: opacity var(--dur-base) var(--ease-std), translate var(--dur-base) var(--ease-out), display var(--dur-base) allow-discrete;
-}
-@starting-style { .wk-extra:not([hidden]) { opacity: 0; translate: 0 4px; } }
-.wk-extra[hidden] { display: none; }
-
-.wk-ask-open {
-  margin-left: auto;
+/* ⋯ opens the actions a walk needs less often, in a menu above the bar,
+   so the bar stays one row at any width */
+.wk-more-toggle {
+  flex-shrink: 0;
   width: 32px;
   height: 32px;
   display: grid;
   place-items: center;
-  color: var(--accent-ink);    /* an action, like the ones beside it */
+  margin-left: auto;
+  color: var(--text-secondary);
   background: none;
   border: none;
   border-radius: 50%;
   cursor: pointer;
 }
-.wk-ask-open:hover { background: var(--accent-soft); }
-.wk-ask-open:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.wk-dock.is-asking .wk-acts { display: none; }
+.wk-more-toggle:hover, .wk-more-toggle[aria-expanded="true"] { color: var(--text-primary); background: var(--fill-hover); }
+.wk-more-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.wk-extra {
+  position: absolute;
+  right: 10px;
+  bottom: calc(100% + 6px);
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  min-width: 200px;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  transform-origin: bottom right;
+  transition: opacity var(--dur-quick) var(--ease-std), scale var(--dur-base) var(--ease-out), translate var(--dur-base) var(--ease-out), display var(--dur-base) allow-discrete;
+}
+@starting-style { .wk-extra:not([hidden]) { opacity: 0; scale: 0.96; translate: 0 4px; } }
+.wk-extra[hidden] { display: none; opacity: 0; scale: 0.96; translate: 0 4px; }
+.wk-extra .run-ask {
+  width: 100%;
+  min-height: 34px;
+  padding: 0 10px;
+  text-align: left;
+  color: var(--text-primary);
+  border-radius: var(--r-md);
+}
+.wk-extra .run-ask:hover:not(:disabled) { background: var(--fill-hover); }
+.wk-extra .run-ask:active:not(:disabled) { background: var(--fill-press); opacity: 1; }
+.wk-extra .run-ask:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
 @media (prefers-reduced-motion: reduce) {
-  .wk-more-chev, .wk-extra { transition: none; }
+  .wk-extra { transition: none; }
   .run-ask.is-key:disabled { animation: none; }
 }
-/* Your own question: takes the actions' row, sliding in from the chat button */
+/* Narrow panel: after the rules it tightens */
+@container (max-width: 340px) {
+  .run-ask.is-key { padding: 0 9px; font-size: 12px; }
+  .wk-more-toggle { width: 30px; height: 30px; }
+}
+
+/* Your own question: always under the actions, one line until you write more */
 .wk-ask {
   flex: 1 0 100%;
   display: flex;
@@ -2255,16 +2273,12 @@ button.lens-item:focus-visible {
   padding: 3px 3px 3px 12px;
   background: var(--surface);
   border: 1px solid var(--border);
+  margin-top: 6px;
   border-radius: var(--r-lg);
-  transition: border-color var(--dur-quick), opacity var(--dur-base) var(--ease-out), translate var(--dur-base) var(--ease-out);
+  transition: border-color var(--dur-quick) var(--ease-std), box-shadow var(--dur-quick) var(--ease-std);
 }
-@starting-style { .wk-ask:not([hidden]) { opacity: 0; translate: 16px 0; } }
-.wk-ask[hidden] { display: none; }
-@media (prefers-reduced-motion: reduce) {
-  .wk-ask { transition: border-color var(--dur-quick), opacity var(--dur-quick); }
-  @starting-style { .wk-ask:not([hidden]) { translate: none; } }
-}
-.wk-ask:focus-within { border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); }
+.wk-ask:hover:not(:focus-within) { border-color: color-mix(in srgb, var(--text-primary) 16%, transparent); }
+.wk-ask:focus-within { border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); box-shadow: 0 0 0 3px var(--accent-soft); }
 .wk-ask-input {
   flex: 1;
   min-width: 0;

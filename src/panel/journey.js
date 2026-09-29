@@ -5,6 +5,7 @@
 import { journeyPrompt, parseJourney, connectionTree, pickCoreFiles } from '../utils/journey.js';
 import { idbGet } from '../utils/idb.js';
 import { extractImports, resolveImports } from '../utils/github.js';
+import { renderMarkdown } from '../utils/markdown.js';
 
 export class JourneyPart {
   // The big picture first: the free chat reads the README and core files and
@@ -192,7 +193,7 @@ export class JourneyPart {
       : '';
     // The big picture before the files, until reading has begun; then where you are comes first
     this.walkBody.innerHTML =
-      (j.summary ? `<p class="jr-summary">${esc(j.summary)}</p>` : '') +
+      (j.summary ? `<div class="jr-summary md">${renderMarkdown(j.summary).html}</div>` : '') +
       (read ? '' : parts) +
       `<div class="jr-head"><span class="sheet-label">Reading order</span>` +
         (read ? `<span class="jr-count">${read} of ${j.path.length} read</span>` : '') + `</div>` +
