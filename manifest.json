@@ -69,6 +69,7 @@
         "https://gemini.google.com/*"
       ],
       "js": [
+        "src/bridge-markdown.js",
         "src/ai-bridge.js"
       ],
       "run_at": "document_idle",
