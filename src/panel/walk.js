@@ -905,13 +905,21 @@ export class WalkPart {
       } else if (lineNums) {
         this._linesPending = { key: w.key, nums: lineNums };
         const up = await this.walkContextFiles(notesEl, w, b, project, chat);
+        // The reply covers several parts; this part's card shows only its own
+        // section as it arrives (nothing before its heading), and saveLines
+        // gives the others theirs. A finished reply without headings shows whole.
+        const show = (t, final) => {
+          if (!/^#{1,4}\s*\**\s*Part\s+\d/im.test(t)) return final ? t : '';
+          // A heading still arriving at the end isn't this part's
+          return splitParts(final ? t : t.replace(/\n#[^\n]*$/, ''), lineNums).parts.get(lineNums[0]) || '';
+        };
         let text = await this.showAnswerIn(notesEl, label, up ? `${prompt}\n\n${up.note}` : prompt,
-          { via: 'chat', inline: true, topic, attachments: up ? [...attachments, up.attachment] : attachments });
+          { via: 'chat', inline: true, topic, attachments: up ? [...attachments, up.attachment] : attachments, show });
         if (text) {
           if (files) chat.sent.add('file-list');
           if (attachments.length) chat.sent.add('diff');
         }
-        text = await this.answerWithFiles(notesEl, label, text, project, chat);
+        text = await this.answerWithFiles(notesEl, label, text, project, chat, show);
         this.markLineRefs(notesEl);
         this._linesPending = null;
         if (text) await this.saveLines(w.key, lineNums, label, text);

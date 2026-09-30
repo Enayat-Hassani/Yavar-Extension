@@ -137,7 +137,8 @@ export class AnswersPart {
   // Ask in the background and stream the answer into a card in `container`
   // via: 'chat' or 'api' to force a route; otherwise the model menu's choice
   async showAnswerIn(container, title, prompt, opts = {}) {
-    const { attachments = [], onUseCode = null, onDone = null, saveAs = null, collapsible = true, via = null, inline = false, topic = undefined } = opts;
+    // show(text, final): the part of the reply the card displays (all of it by default)
+    const { attachments = [], onUseCode = null, onDone = null, saveAs = null, collapsible = true, via = null, inline = false, topic = undefined, show = (t) => t } = opts;
     const api = (via || this.answerWith) === 'api';
     const inThread = container === this.threadBody;
     // Retry and "Ask <chat>" in the thread show as busy there, like any question
@@ -182,11 +183,11 @@ export class AnswersPart {
         attachments: askAttachments, via, topic,
         onModel: (label) => card.setModel(label),
         onProgress: (t) => {
-          card.update(t);
+          card.update(show(t));
           if (!shown && t) { shown = true; card.el.scrollIntoView({ block: 'start', behavior: 'smooth' }); }
         }
       });
-      card.done(text);
+      card.done(show(text, true));
       onDone?.(text);
       if (inThread) {
         if (handoff && !opts.handoff) this._handoff = false;   // the new model has it now

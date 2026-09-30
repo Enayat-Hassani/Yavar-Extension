@@ -364,3 +364,40 @@ test('a pull request that gained commits is read again, keeping what was said ab
     assert.deepEqual(b.errors, []);
   } finally { await b.close(); }
 });
+
+test('while several parts are explained in one reply, a part shows only its own section as it arrives', async () => {
+  const b = await launch();
+  try {
+    const page = await b.open('sidepanel.html');
+    await openFolder(page, 'shop', filesOf(makeRepo(BEFORE, AFTER)));
+    await page.evaluate(() => {
+      const p = window.__panel;
+      p.showReaderTab = async () => {};
+      window.__seen = [];
+      window.__asks = [];
+      p.askInPanel = async (prompt, { onProgress }) => {
+        window.__asks.push(prompt);
+        const reply = 'The change adds tax to totals.\n\n' +
+          [...prompt.matchAll(/^### Part (\d+)/gm)].map(m => `### Part ${m[1]}\n- **${m[1]}** explained part ${m[1]}`).join('\n\n');
+        // Streamed a few words at a time; what the open part's card shows is recorded after each
+        const words = reply.split(' ');
+        for (let k = 1; k <= words.length; k++) {
+          onProgress?.(words.slice(0, k).join(' '));
+          await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+          const body = document.querySelector('.walk-notes .answer-card .answer-body');
+          if (body) window.__seen.push(body.textContent);
+        }
+        return reply;
+      };
+    });
+    await reviewUncommitted(page);
+    const r = await page.evaluate(() => ({ seen: window.__seen, parts: (window.__asks[0].match(/^### Part \d+/gm) || []).length,
+      shown: document.querySelector('.walk-notes .answer-card .answer-body').textContent }));
+    assert.ok(r.parts > 1, 'several parts in one message');
+    assert.ok(r.seen.length > 5);
+    // Never the overview, and never another part's section
+    assert.ok(r.seen.every(t => !t.includes('adds tax') && !/part [2-9]/.test(t)), r.seen.find(t => t.includes('adds tax') || /part [2-9]/.test(t)));
+    assert.match(r.shown, /explained part 1/);
+    assert.deepEqual(b.errors, []);
+  } finally { await b.close(); }
+});
