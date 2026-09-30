@@ -146,3 +146,11 @@ test('a saved walk follows the edit', () => {
   assert.deepEqual(w.notes, walk.notes);
   assert.equal(shiftWalk({ change: {}, blocks: [] }, edit).blocks.length, 0);
 });
+
+test('a document\'s walk still covers the whole file when lines are added after its end', () => {
+  const doc = { path: 'PLAN.md', doc: true, total: 3, range: { start: 1, end: 3 }, blocks: [{ start: 1, end: 3, title: 'PLAN.md', explain: 'A plan.' }] };
+  const w = shiftWalk(doc, editedLines('# Plan\n\nCart.\n', '# Plan\n\nCart.\nTax.\n'));
+  assert.deepEqual(w.blocks, [{ start: 1, end: 4, title: 'PLAN.md', explain: 'A plan.', edited: true }]);
+  assert.deepEqual(w.range, { start: 1, end: 4 });
+  assert.equal(w.total, 4);
+});

@@ -519,9 +519,11 @@ export class WalkPart {
       }) +
       (this._walkStale && this._walkStale === this.walkKey(w.path)
         ? `<p class="wk-stale" role="status">${esc(w.path.split('/').pop())} changed since this walk, so its blocks may sit on the wrong lines. ` +
-          `<button type="button" class="files-link-btn" data-wk="rewalk">Walk it again</button></p>` : '') +
+          `<button type="button" class="files-link-btn" data-wk="rewalk">Walk it again</button></p>`
+        : b.edited ? `<p class="wk-stale" role="status">${esc(w.path.split('/').pop())} was edited after this ${w.doc ? 'summary' : 'explanation'}. ` +
+          `Questions send it as it is now. <button type="button" class="files-link-btn" data-wk="rewalk">${w.doc ? 'Sum it up again' : 'Walk it again'}</button></p>` : '') +
       (i === 0 && w.summary ? `<div class="wk-summary md">${renderMarkdown(w.summary).html}</div>` : '') +
-      `<div class="wk-meta"><span>${w.doc ? `Document · ${total} line${total === 1 ? '' : 's'}` : `Lines ${b.start}-${b.end}`}${b.edited ? ' · edited after this was explained' : ''}</span>` +
+      `<div class="wk-meta"><span>${w.doc ? `Document · ${total} line${total === 1 ? '' : 's'}` : `Lines ${b.start}-${b.end}`}</span>` +
         `<button type="button" class="files-link-btn wk-show" data-wk="show">Show in reader</button></div>` +
       `<h3 class="wk-title">${esc(b.title)}</h3>` +
       (b.explain ? `<div class="wk-explain md">${renderMarkdown(b.explain).html}</div>` : `<p class="wk-explain is-empty">The AI didn't explain these lines. Ask with Explain more.</p>`) +
@@ -804,7 +806,9 @@ export class WalkPart {
     const where = !c ? `lines ${b.start}-${b.end} of \`${w.path}\`${repo ? ` from ${repo}` : ''}`
       : fileLevel ? `the changes to \`${b.path}\` in ${inChange}`
         : `change ${i - f.first + 1} of ${f.last - f.first + 1} to \`${b.path}\` in ${inChange}`;
-    const block = !c ? `${LINE_NUMBER_NOTE}\n\n${fencedFile({ path: w.path, content: code, lines: b })}`
+    // Edited since it was explained: the chat is told the lines are the new version
+    const block = !c ? `${b.edited ? `(I've edited these lines since they were explained; below is the current version.)\n\n` : ''}` +
+        `${LINE_NUMBER_NOTE}\n\n${fencedFile({ path: w.path, content: code, lines: b })}`
       : fileLevel ? fileContext(w.blocks.slice(f.first, f.last + 1)) : partContext(b);
     const project = this.walkProject();
     const listed = chat.sent.has('file-list');

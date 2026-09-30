@@ -184,13 +184,11 @@ export function shiftRange(range, edit) {
 
 // A saved walk after the edit: its blocks, the lines it covers and the
 // file's length. A walk of a change, or one still being made, is unchanged.
+// A document's one block is the whole file, whatever the edit touched.
 export function shiftWalk(walk, edit) {
   if (!edit || !walk?.blocks || walk.change) return walk;
+  const total = walk.total + edit.endAfter - edit.endBefore;
+  if (walk.doc) return { ...walk, blocks: [{ ...walk.blocks[0], start: 1, end: total, edited: true }], range: { start: 1, end: total }, total };
   const { start, end } = shiftRange(walk.range, edit);
-  return {
-    ...walk,
-    blocks: walk.blocks.map(b => shiftRange(b, edit)),
-    range: { start, end },
-    total: walk.total + edit.endAfter - edit.endBefore
-  };
+  return { ...walk, blocks: walk.blocks.map(b => shiftRange(b, edit)), range: { start, end }, total };
 }

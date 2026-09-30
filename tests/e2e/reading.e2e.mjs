@@ -528,6 +528,44 @@ test('a document in the reading order is summed up, not walked line by line', as
   } finally { await b.close(); }
 });
 
+test('a document changed in another editor shows again in the reader, and the chat is given the new version', async () => {
+  const b = await launch();
+  try {
+    const page = await b.open('sidepanel.html');
+    await openFolder(page, 'shop', filesOf(makeRepo({ ...BEFORE, 'plan.md': '# Plan\n\nFirst the cart, then tax.\n' }, AFTER)));
+    await page.evaluate(async () => {
+      const p = window.__panel;
+      window.__prompts = [];
+      p.askInPanel = async (prompt) => (window.__prompts.push(prompt), '**A plan.** Cart first, then tax.');
+      await p.startWalk('plan.md');
+    });
+    const reader = await b.open('reader.html');
+    await reader.waitForFunction(() => document.getElementById('rd-text').children.length === 3);
+    assert.equal(await page.evaluate(() => !!document.querySelector('.wk-stale')), false);
+    // Edited in another editor: a line added at the end
+    await page.evaluate(async () => {
+      const f = await (await (await navigator.storage.getDirectory()).getDirectoryHandle('shop')).getFileHandle('plan.md');
+      const w = await f.createWritable();
+      await w.write('# Plan\n\nFirst the cart, then tax.\nThen shipping.\n');
+      await w.close();
+    });
+    await reader.waitForFunction(() => document.getElementById('rd-text').children.length === 4, null, { timeout: 5000 });
+    assert.match(await reader.textContent('#rd-status'), /plan\.md changed on disk/);
+    // The walk covers the new line and says its summary is older than the file
+    await page.waitForSelector('.wk-stale');
+    assert.match(await page.textContent('.wk-stale'), /plan\.md was edited after this summary/);
+    assert.equal(await page.textContent('.wk-stale [data-wk="rewalk"]'), 'Sum it up again');
+    await page.evaluate(() => document.querySelector('[data-wk="quiz"]').click());
+    await page.waitForFunction(() => window.__prompts.length === 2);
+    const quiz = await page.evaluate(() => window.__prompts[1]);
+    assert.match(quiz, /Then shipping\./);
+    assert.match(quiz, /edited these lines since they were explained/);
+    await page.evaluate(() => document.querySelector('[data-wk="rewalk"]').click());
+    await page.waitForFunction(() => window.__prompts.length === 3 && !document.querySelector('.wk-stale'));
+    assert.deepEqual(b.errors, []);
+  } finally { await b.close(); }
+});
+
 test('the reader wraps long lines keeping their numbers, and shows Markdown rendered, both remembered', async () => {
   const b = await launch();
   try {
