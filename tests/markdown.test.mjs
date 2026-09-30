@@ -83,3 +83,24 @@ test('drops ChatGPT citation markers', () => {
   assert.equal(stripChatArtifacts('Uses Ghostscript and qpdf. :contentReference[oaicite:0]{index=0}'), 'Uses Ghostscript and qpdf. ');
   assert.ok(!renderMarkdown('A fact.contentReference[oaicite:12]{index=12}').html.includes('oaicite'));
 });
+
+import { highlightLines } from '../src/utils/markdown.js';
+
+test('highlighted code splits into lines, a comment or string across lines closed and reopened on each', () => {
+  const lines = highlightLines('const a = 1; /* one\ntwo */ let b = `x\ny`;\n\nend', 'js');
+  assert.equal(lines.length, 5);
+  // Each line is whole HTML on its own
+  for (const l of lines) assert.equal((l.match(/<span/g) || []).length, (l.match(/<\/span>/g) || []).length, l);
+  assert.match(lines[0], /<span class="tok-c">\/\* one<\/span>$/);
+  assert.match(lines[1], /^<span class="tok-c">two \*\/<\/span>/);
+  assert.match(lines[1], /<span class="tok-s">`x<\/span>$/);
+  assert.match(lines[2], /^<span class="tok-s">y`<\/span>;$/);
+  assert.equal(lines[3], '');
+  assert.equal(lines.map(l => l.replace(/<[^>]+>/g, '')).join('\n'), 'const a = 1; /* one\ntwo */ let b = `x\ny`;\n\nend');
+});
+
+test('headings go two levels down in the sidebar, and keep their level in a page of their own', () => {
+  assert.match(renderMarkdown('# A\n\n## B').html, /<h3>A<\/h3>\s*<h4>B<\/h4>/);
+  assert.match(renderMarkdown('# A\n\n## B', { headingShift: 0 }).html, /<h1>A<\/h1>\s*<h2>B<\/h2>/);
+  assert.match(renderMarkdown('##### E').html, /<h6>E<\/h6>/);
+});

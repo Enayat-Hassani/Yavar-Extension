@@ -17,11 +17,15 @@
 // the highlight, and ‹ ›, open the panel on that walk, even after the panel
 // was closed or moved on to something else.
 //
+// Wrap folds long lines onto the rows under them, which have no number of
+// their own, so line numbers (and Yavar's path:12-15) stay the same. A
+// Markdown file can be shown rendered (Preview). Both are remembered.
+//
 // A local file can be edited here and saved back to its folder. Saving moves
 // the lines after the edit, so the file's walk, the highlighted lines and the
 // panel's cached copy are brought up to date (afterSave).
 
-import { highlight } from './utils/markdown.js';
+import { highlightLines, renderMarkdown } from './utils/markdown.js';
 import { langFromPath, blobUrl } from './utils/github.js';
 import { cmModeFor, defineGenericMode, closeBracketKeys } from './utils/codeEditor.js';
 import { editedLines, shiftRange, shiftWalk, textSha } from './utils/walkthrough.js';
@@ -54,6 +58,13 @@ function rowsOf({ start, end }) {
   return a < 0 ? shownBand : { start: a + 1, end: (z < 0 ? a : z) + 1 };
 }
 let current = null;    // the view the panel last asked for
+let placed = null;     // the rows the band was last drawn over
+
+// Wrap and Preview, kept for the next time the reader opens
+const prefs = (() => { try { return JSON.parse(localStorage.getItem('readerPrefs')) || {}; } catch (e) { return {}; } })();
+const savePrefs = () => { try { localStorage.setItem('readerPrefs', JSON.stringify(prefs)); } catch (e) { /* this session only */ } };
+const isMarkdown = (path) => /\.(md|mdx|markdown)$/i.test(path || '');
+const previewing = (view) => !!prefs.preview && isMarkdown(view?.path) && !view?.diff;
 let editing = null;    // { view, handle, text, modified, cm, clean, saving } while editing
 
 // `top`: the line to scroll to instead of the highlighted lines (leaving the editor)
@@ -61,9 +72,15 @@ function render(view, { top = null } = {}) {
   current = view;
   if (editing) return;   // the editor stays; the latest view shows when you're done
   const has = !!view?.path;
+  const preview = has && previewing(view);
   $('rd-empty').hidden = has;
-  $('rd-code').hidden = !has;
+  $('rd-code').hidden = !has || preview;
+  $('rd-md').hidden = !preview;
   $('rd-edit').hidden = true;
+  $('rd-view').hidden = !has;
+  $('rd-preview').hidden = !has || !isMarkdown(view.path) || !!view.diff;
+  $('rd-preview').setAttribute('aria-pressed', String(preview));
+  $('rd-wrap').hidden = preview;
   if (!has) return;
 
   const { repo, path, content, lines, label } = view;
@@ -91,11 +108,16 @@ function render(view, { top = null } = {}) {
     const file = text.split('\n');
     const marks = $('rd-marks');
     marks.replaceChildren();
+    // One element a row, in the gutter and the code, so a wrapped row's
+    // number keeps to its first line
+    const draw = (numbers, code) => {
+      $('rd-gutter').innerHTML = numbers.map(n => `<div>${n}</div>`).join('');
+      $('rd-text').innerHTML = code.map(h => `<div class="rd-l">${h}</div>`).join('');
+    };
     if (diff) {
       const rows = diffRows(file.length, diff.add, diff.del);
-      $('rd-gutter').innerHTML = rows.map(r => r.kind === 'del' ? '<span class="rd-g-del">−</span>'
-        : r.kind === 'add' ? `<span class="rd-g-add">${r.n}</span>` : r.n).join('\n');
-      $('rd-text').innerHTML = highlight(rows.map(r => r.kind === 'del' ? r.text : file[r.n - 1]).join('\n'), langFromPath(path));
+      draw(rows.map(r => r.kind === 'del' ? '<span class="rd-g-del">−</span>' : r.kind === 'add' ? `<span class="rd-g-add">${r.n}</span>` : r.n),
+        highlightLines(rows.map(r => r.kind === 'del' ? r.text : file[r.n - 1]).join('\n'), langFromPath(path)));
       // One mark per run of added or removed rows, drawn behind the code
       rows.forEach((r, k) => {
         if (!r.kind) return;
@@ -108,42 +130,84 @@ function render(view, { top = null } = {}) {
       shownBand = marked.length ? { start: marked[0] + 1, end: marked.at(-1) + 1 } : null;
       shownRows = rows;
     } else {
-      $('rd-gutter').textContent = file.map((_, i) => i + 1).join('\n');
-      $('rd-text').innerHTML = highlight(text, langFromPath(path));
+      draw(file.map((_, i) => i + 1), highlightLines(text, langFromPath(path)));
       shownBand = null;
     }
+    $('rd-md').innerHTML = isMarkdown(path) ? renderMarkdown(text, { headingShift: 0 }).html : '';
+    $('rd-md').querySelectorAll('[data-md-act="use"]').forEach(b => b.remove());
+    if (preview) $('rd-main').scrollTop = 0;
+    syncGutter();
     drawMarks();
   }
   // In a diff the band is in rows, which the removed lines have moved
   if (diff) band = view.focus && lines ? rowsOf(lines) : partRows(diff.part) || shownBand || null;
   $('rd-band').classList.toggle('is-diff', !!diff);
-  place(band, top == null);
-  if (top != null) $('rd-main').scrollTop = lineTop(top);
+  if (preview) {
+    placed = band;
+    $('rd-explain').hidden = true;
+    // The highlight is in the source; say so rather than hide it silently
+    if (lines) say(`${lines.end > lines.start ? `Lines ${lines.start}-${lines.end} are` : `Line ${lines.start} is`} highlighted in the source: turn Preview off to see them`);
+  } else {
+    place(band, top == null);
+    if (top != null) $('rd-main').scrollTop = lineTop(top);
+  }
   offerEdit(view);
 }
 
-// Where line `n` (0-based) starts in the scrolling area, and the reverse
-function lineHeight() { return parseFloat(getComputedStyle($('rd-src').querySelector('pre')).lineHeight); }
-function codePad() { return parseFloat(getComputedStyle($('rd-src').querySelector('pre')).paddingTop); }
-function lineTop(n) { return $('rd-code').offsetTop + codePad() + n * lineHeight(); }
-function topLine() { return Math.max(0, Math.floor(($('rd-main').scrollTop - $('rd-code').offsetTop - codePad()) / lineHeight())); }
+// Where rows `start` to `end` (1-based) sit in the code, wrapped or not
+function rowsBox(start, end) {
+  const rows = $('rd-text').children;
+  if (!rows.length) return { top: 0, height: 0 };
+  const at = (n) => rows[Math.min(Math.max(n, 1), rows.length) - 1];
+  const a = at(start);
+  const z = at(Math.max(start, end));
+  return { top: a.offsetTop, height: z.offsetTop + z.offsetHeight - a.offsetTop };
+}
+// Where row `n` (0-based) starts in the scrolling area, and the row at the top
+function lineTop(n) { return $('rd-code').offsetTop + rowsBox(n + 1, n + 1).top; }
+function topLine() {
+  const rows = $('rd-text').children;
+  const y = $('rd-main').scrollTop - $('rd-code').offsetTop;
+  let lo = 0;
+  let hi = rows.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (rows[mid].offsetTop <= y) lo = mid; else hi = mid - 1;
+  }
+  return Math.max(0, lo);
+}
+
+// Wrapped, each number's row is as tall as its line (read all, then write)
+function syncGutter() {
+  const wrap = document.body.classList.contains('is-wrap');
+  const heights = wrap ? [...$('rd-text').children].map(r => r.offsetHeight) : [];
+  [...$('rd-gutter').children].forEach((g, k) => { g.style.height = wrap ? `${heights[k]}px` : ''; });
+}
 
 // The added and removed runs, placed by row
 function drawMarks() {
-  const lh = lineHeight();
   for (const m of $('rd-marks').children) {
-    m.style.top = `${codePad() + Number(m.dataset.start) * lh}px`;
-    m.style.height = `${(Number(m.dataset.end) - Number(m.dataset.start) + 1) * lh}px`;
+    const { top, height } = rowsBox(Number(m.dataset.start) + 1, Number(m.dataset.end) + 1);
+    m.style.top = `${top}px`;
+    m.style.height = `${height}px`;
   }
 }
 
+// The rows moved (wrapping turned on or off, a narrower window): everything
+// drawn over them follows, without scrolling or the arrival pulse
+function relayout() {
+  if ($('rd-code').hidden) return;
+  syncGutter();
+  drawMarks();
+  if (placed) place(placed, false, false);
+}
+
 // Draw the highlight behind the lines and, unless `scroll` is false, bring them into view
-function place(lines, scroll = true) {
+function place(lines, scroll = true, pulse = true) {
   const band = $('rd-band');
+  placed = lines;
   if (!lines) { band.hidden = true; $('rd-explain').hidden = true; return; }
-  const lh = lineHeight();
-  const top = codePad() + (lines.start - 1) * lh;
-  const height = (lines.end - lines.start + 1) * lh;
+  const { top, height } = rowsBox(lines.start, lines.end);
   band.hidden = false;
   band.style.top = `${top}px`;
   band.style.height = `${height}px`;
@@ -151,9 +215,11 @@ function place(lines, scroll = true) {
   const back = $('rd-explain');
   back.hidden = !current?.walk;
   back.style.top = `${top}px`;
-  band.classList.remove('is-new');
-  void band.offsetWidth;   // restart the arrival pulse
-  band.classList.add('is-new');
+  if (pulse) {
+    band.classList.remove('is-new');
+    void band.offsetWidth;   // restart the arrival pulse
+    band.classList.add('is-new');
+  }
   if (!scroll) return;
 
   // The block's top sits a quarter of the way down; a tall block starts at the top
@@ -215,9 +281,11 @@ function openEditor(state) {
   host.replaceChildren();
   host.hidden = false;
   $('rd-code').hidden = true;
+  $('rd-md').hidden = true;
+  $('rd-view').hidden = true;
   const cm = CodeMirror(host, {
     value: state.text, mode: cmModeFor(langFromPath(state.view.path)), theme: 'yavar', lineNumbers: true,
-    lineWrapping: false, tabSize: 4, indentUnit: 4, indentWithTabs: false,
+    lineWrapping: !!prefs.wrap, tabSize: 4, indentUnit: 4, indentWithTabs: false,
     extraKeys: { Tab: (ed) => ed.somethingSelected() ? ed.indentSelection('add') : ed.replaceSelection(' '.repeat(ed.getOption('indentUnit'))) }
   });
   cm.addKeyMap(closeBracketKeys(CodeMirror));
@@ -249,6 +317,7 @@ function stopEdit() {
   if (!e) return;
   if (!e.cm.isClean(e.clean) && !confirm(`Discard your changes to ${e.view.path.split('/').pop()}?`)) return;
   const top = e.cm.lineAtHeight(e.cm.getScrollInfo().top, 'local');
+  $('rd-view').hidden = false;
   editing = null;
   $('rd-editor').hidden = true;
   $('rd-editor').replaceChildren();
@@ -324,6 +393,35 @@ function say(text, isError = false) {
 }
 
 $('rd-edit').addEventListener('click', () => { say(''); startEdit(); });
+function setWrap(on) {
+  prefs.wrap = on;
+  savePrefs();
+  document.body.classList.toggle('is-wrap', on);
+  $('rd-wrap').setAttribute('aria-pressed', String(on));
+  // The same code stays at the top of the window
+  const top = $('rd-code').hidden ? null : topLine();
+  relayout();
+  if (top != null) $('rd-main').scrollTop = lineTop(top);
+}
+setWrap(!!prefs.wrap);
+$('rd-wrap').addEventListener('click', () => setWrap(!prefs.wrap));
+$('rd-preview').addEventListener('click', () => {
+  prefs.preview = !previewing(current);
+  savePrefs();
+  say('');
+  render(current);
+  relayout();
+});
+// Wrapped rows grow and shrink with the window
+new ResizeObserver(() => { if (prefs.wrap) relayout(); }).observe($('rd-main'));
+// A rendered code block's Copy, and Show all lines
+$('rd-md').addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-md-act]');
+  if (!btn) return;
+  const block = btn.closest('.md-code');
+  if (btn.dataset.mdAct === 'unfold') { block.classList.remove('is-folded'); btn.remove(); return; }
+  try { await navigator.clipboard.writeText(block.querySelector('code').textContent); say('Copied'); } catch (err) { /* not allowed */ }
+});
 // The walk steps in the panel, which follows readerNav (dir 0: show the
 // highlighted block). The panel opens first, within the click: it may have
 // been closed, and it reopens the walk this view belongs to.
