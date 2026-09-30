@@ -67,6 +67,22 @@ export function highlight(code, lang) {
   return out + esc(code.slice(last));
 }
 
+// highlight(), one line each: a span running across lines (a block comment,
+// a template string) is closed at each line's end and opened again on the next
+export function highlightLines(code, lang) {
+  const out = [];
+  let open = '';
+  for (const line of highlight(code, lang).split('\n')) {
+    let html = open + line;
+    // The tokens' spans don't nest, so the last tag says whether one is still open
+    const last = [...line.matchAll(/<span class="[^"]*">|<\/span>/g)].at(-1)?.[0];
+    if (last) open = last === '</span>' ? '' : last;
+    if (open) html += '</span>';
+    out.push(html);
+  }
+  return out;
+}
+
 // Inline formatting on already-escaped text. Inline code is cut out first so
 // its contents stay literal; so are links, so a bare URL inside one isn't
 // linked twice.
@@ -101,7 +117,8 @@ const splitRow = (line) => line.trim().replace(/^\|/, '').replace(/\|$/, '').spl
 // ":contentReference[oaicite:0]{index=0}"; they mean nothing outside its page.
 export const stripChatArtifacts = (text) => String(text || '').replace(/:?contentReference\[oaicite:\d+\]\{index=\d+\}/g, '');
 
-export function renderMarkdown(md) {
+// headingShift: how many levels headings go down (two in the sidebar, none in a page of its own)
+export function renderMarkdown(md, { headingShift = 2 } = {}) {
   const code = [];
   const lines = esc(stripChatArtifacts(md).replace(/\r\n?/g, '\n')).split('\n');
   const out = [];
@@ -166,7 +183,7 @@ export function renderMarkdown(md) {
     const heading = line.match(/^\s*(#{1,6})\s+(.+?)\s*#*\s*$/);
     if (heading) {
       flush();
-      const level = Math.min(heading[1].length + 2, 6);   // keep headings modest in a sidebar
+      const level = Math.min(heading[1].length + headingShift, 6);
       out.push(`<h${level}>${inline(heading[2])}</h${level}>`);
       continue;
     }

@@ -67,12 +67,12 @@ export class JourneyPart {
     else await this.createJourney();
   }
 
-  // "Read a project folder" or "Review my changes": the folders you opened
+  // "Read a project folder" or "Changes in a project folder": the folders you opened
   // before, or a new one
   async showFolderChoice({ review = this._folderReview } = {}) {
     this._folderReview = review;
     this.walkView = 'folders';
-    document.getElementById('walk-title').textContent = review ? 'Review my changes' : 'Reading';
+    document.getElementById('walk-title').textContent = review ? 'Changes' : 'Reading';
     document.getElementById('walk-sub').textContent = 'A project folder';
     this.walkPanel.classList.remove('hidden');
     let recent = window.showDirectoryPicker ? (await idbGet('recentFolders')) || [] : [];
@@ -105,7 +105,7 @@ export class JourneyPart {
   async openFolderJourney(i) {
     const recent = i == null ? null : this._recentFolders?.[Number(i)];
     if (!(await this.openLocalFolder(recent ? { handle: recent.handle } : {}))) return;
-    if (this._folderReview) return this.showReviewChoice();
+    if (this._folderReview) return this.showChanges();
     this.journey = await this.loadJourney();
     if (this.journey) this.showJourneyMap();
     else await this.createJourney();

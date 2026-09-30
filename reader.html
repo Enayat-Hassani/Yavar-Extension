@@ -24,6 +24,11 @@
     <a id="rd-github" class="rd-github" target="_blank" rel="noopener noreferrer" hidden>Open on GitHub</a>
     <!-- A local file can be edited here and saved back to the folder -->
     <span id="rd-status" class="rd-status" role="status" aria-live="polite"></span>
+    <!-- How the file is shown: long lines wrapped, a Markdown file rendered -->
+    <span id="rd-view" class="rd-view">
+      <button type="button" id="rd-wrap" class="rd-toggle" aria-pressed="false" title="Wrap long lines (the numbers stay the same)">Wrap</button>
+      <button type="button" id="rd-preview" class="rd-toggle" aria-pressed="false" title="Show the Markdown rendered" hidden>Preview</button>
+    </span>
     <button type="button" id="rd-edit" class="rd-btn" title="Edit this file and save it back to the folder" hidden>Edit</button>
     <button type="button" id="rd-done" class="rd-btn" hidden>Done</button>
     <button type="button" id="rd-save" class="rd-btn rd-btn-primary" title="Save to the folder (⌘S)" hidden>Save</button>
@@ -46,6 +51,7 @@
         </div>
       </div>
     </div>
+    <article id="rd-md" class="rd-md" hidden></article>
     <div id="rd-editor" class="rd-editor" hidden></div>
   </main>
   <script src="lib/codemirror/codemirror.min.js"></script>

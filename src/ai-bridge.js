@@ -63,68 +63,6 @@
     return null;
   }
 
-  // Convert a response DOM subtree into readable Markdown. Handles the common
-  // cases (headings, lists, code blocks, inline emphasis/links) and falls back
-  // to text content for anything unrecognised.
-  const SKIP_TAGS = /^(button|svg|img|mat-icon|script|style|yavar-answer-bar|source-footnote|sources-carousel.*|source-inline-chip.*|.*citation.*)$/;
-  const SKIP_CLASS = /\b(citation|source-chip|source-inline|sources-carousel|footnote|code-block-decoration)\b/i;
-
-  function nodeToMarkdown(el) {
-    let out = '';
-    el.childNodes.forEach((node) => {
-      if (node.nodeType === Node.TEXT_NODE) {
-        out += node.textContent;
-        return;
-      }
-      if (node.nodeType !== Node.ELEMENT_NODE) return;
-
-      const tag = node.tagName.toLowerCase();
-      // Buttons, icons and source/citation chips (Gemini's "MD +1") aren't answer text
-      if (SKIP_TAGS.test(tag) || SKIP_CLASS.test(typeof node.className === 'string' ? node.className : '')) return;
-
-      if (tag === 'pre') {
-        const codeEl = node.querySelector('code');
-        const codeText = (codeEl || node).innerText.replace(/\n+$/, '');
-        let lang = '';
-        if (codeEl) {
-          const m = (codeEl.className || '').match(/language-([\w+-]+)/);
-          if (m) lang = m[1];
-        }
-        out += `\n\n\`\`\`${lang}\n${codeText}\n\`\`\`\n\n`;
-      } else if (/^h[1-6]$/.test(tag)) {
-        out += `\n\n${'#'.repeat(Number(tag[1]))} ${node.innerText.trim()}\n\n`;
-      } else if (tag === 'ul' || tag === 'ol') {
-        out += '\n';
-        const ordered = tag === 'ol';
-        let i = 1;
-        node.querySelectorAll(':scope > li').forEach((li) => {
-          const prefix = ordered ? `${i++}. ` : '- ';
-          out += `${prefix}${nodeToMarkdown(li).trim()}\n`;
-        });
-        out += '\n';
-      } else if (tag === 'p' || tag === 'li') {
-        out += `\n\n${nodeToMarkdown(node).trim()}\n\n`;
-      } else if (tag === 'br') {
-        out += '\n';
-      } else if (tag === 'code') {
-        out += '`' + node.innerText + '`';
-      } else if (tag === 'strong' || tag === 'b') {
-        out += '**' + nodeToMarkdown(node).trim() + '**';
-      } else if (tag === 'em' || tag === 'i') {
-        out += '*' + nodeToMarkdown(node).trim() + '*';
-      } else if (tag === 'a') {
-        out += `[${node.innerText}](${node.getAttribute('href') || ''})`;
-      } else {
-        out += nodeToMarkdown(node);
-      }
-    });
-    return out;
-  }
-
-  function cleanMarkdown(s) {
-    return s.replace(/\n{3,}/g, '\n\n').replace(/[ \t]+\n/g, '\n').trim();
-  }
-
   function extractLastAnswer() {
     const platform = detectPlatform();
     if (!platform) return { ok: false, reason: 'unknown-platform' };
@@ -577,7 +515,7 @@
   function answerMarkdown(msgEl) {
     const sel = RESPONSE_SELECTORS[detectPlatform()];
     const contentEl = sel?.content ? (msgEl.querySelector(sel.content) || msgEl) : msgEl;
-    return cleanMarkdown(nodeToMarkdown(contentEl)) || (contentEl.innerText || '').trim();
+    return yavarAnswerMarkdown(contentEl) || (contentEl.innerText || '').trim();
   }
 
   // The user's question that this answer replies to (last one before it)

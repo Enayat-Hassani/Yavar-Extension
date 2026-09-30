@@ -3,8 +3,10 @@
 // AI can ask for more, and the walk ends with a review summary.
 
 import { test } from 'node:test';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import assert from 'node:assert/strict';
-import { launch, makeRepo, filesOf, openFolder, stubChat, wait } from './harness.mjs';
+import { launch, makeRepo, filesOf, openFolder, stubChat, wait, git } from './harness.mjs';
 
 const BEFORE = {
   'README.md': '# Shop\n\nA cart.\n',
@@ -26,7 +28,7 @@ async function reviewUncommitted(page) {
     const p = window.__panel;
     await p.startReview();
     p._folderReview = true;
-    await p.showReviewChoice();
+    await p.showChanges();
     document.querySelector('[data-wk="review"][data-base="head"]').click();
   });
   await page.waitForFunction(() => window.__panel.walk?.blocks && window.__asks?.length);
@@ -140,7 +142,7 @@ test('the project reviewed last opens at its choice, which says how far each wal
       document.querySelector('[data-home="review_last"]').click();
       return names;
     });
-    assert.ok(rows.includes('Review my changes · shop'), rows.join(', '));
+    assert.ok(rows.includes('Changes · shop'), rows.join(', '));
     // The choice, not straight into the walk
     await page.waitForSelector('[data-wk="review"][data-base="head"]');
     const choice = await page.evaluate(() => ({
@@ -148,7 +150,7 @@ test('the project reviewed last opens at its choice, which says how far each wal
       restart: !!document.querySelector('[data-wk="review-restart"][data-base="head"]'),
       walk: !!window.__panel.walk
     }));
-    assert.deepEqual(choice, { status: '3 of 3 files read · Continue', restart: true, walk: false });
+    assert.deepEqual(choice, { status: 'All 3 files read · Continue', restart: true, walk: false });
     // Continue reopens the walk as it was, without asking again
     const asked = await page.evaluate(() => window.__asks.length);
     await page.evaluate(() => document.querySelector('[data-wk="review"][data-base="head"]').click());
@@ -187,7 +189,7 @@ test('changes that moved on are read again, keeping what was said about the part
       const p = window.__panel;
       p.walk = null;
       p._asksBefore = window.__asks.length;
-      await p.showReviewChoice();
+      await p.showChanges();
       document.querySelector('[data-wk="review"][data-base="head"]').click();
     });
     await page.waitForFunction(() => window.__panel.walk?.blocks);
@@ -361,6 +363,89 @@ test('a pull request that gained commits is read again, keeping what was said ab
     await open(diff('two'));
     const r = await page.evaluate(() => ({ notes: Object.keys(window.__panel.walk.notes || {}), asks: window.__asks.length }));
     assert.deepEqual(r, { notes: ['0'], asks });
+    assert.deepEqual(b.errors, []);
+  } finally { await b.close(); }
+});
+
+test('while several parts are explained in one reply, a part shows only its own section as it arrives', async () => {
+  const b = await launch();
+  try {
+    const page = await b.open('sidepanel.html');
+    await openFolder(page, 'shop', filesOf(makeRepo(BEFORE, AFTER)));
+    await page.evaluate(() => {
+      const p = window.__panel;
+      p.showReaderTab = async () => {};
+      window.__seen = [];
+      window.__asks = [];
+      p.askInPanel = async (prompt, { onProgress }) => {
+        window.__asks.push(prompt);
+        const reply = 'The change adds tax to totals.\n\n' +
+          [...prompt.matchAll(/^### Part (\d+)/gm)].map(m => `### Part ${m[1]}\n- **${m[1]}** explained part ${m[1]}`).join('\n\n');
+        // Streamed a few words at a time; what the open part's card shows is recorded after each
+        const words = reply.split(' ');
+        for (let k = 1; k <= words.length; k++) {
+          onProgress?.(words.slice(0, k).join(' '));
+          await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+          const body = document.querySelector('.walk-notes .answer-card .answer-body');
+          if (body) window.__seen.push(body.textContent);
+        }
+        return reply;
+      };
+    });
+    await reviewUncommitted(page);
+    const r = await page.evaluate(() => ({ seen: window.__seen, parts: (window.__asks[0].match(/^### Part \d+/gm) || []).length,
+      shown: document.querySelector('.walk-notes .answer-card .answer-body').textContent }));
+    assert.ok(r.parts > 1, 'several parts in one message');
+    assert.ok(r.seen.length > 5);
+    // Never the overview, and never another part's section
+    assert.ok(r.seen.every(t => !t.includes('adds tax') && !/part [2-9]/.test(t)), r.seen.find(t => t.includes('adds tax') || /part [2-9]/.test(t)));
+    assert.match(r.shown, /explained part 1/);
+    assert.deepEqual(b.errors, []);
+  } finally { await b.close(); }
+});
+
+test('Changes shows your work and the recent commits together, and a commit reads with its files as they were', async () => {
+  const b = await launch();
+  try {
+    const page = await b.open('sidepanel.html');
+    const dir = makeRepo(BEFORE, {});
+    // A second commit, then work on top of it not committed yet
+    writeFileSync(join(dir, 'src/cart.js'), AFTER['src/cart.js']);
+    git(dir, 'commit', '-q', '-am', 'Add tax to the total');
+    writeFileSync(join(dir, 'src/cart.js'), AFTER['src/cart.js'].replace('i.price * i.qty', 'i.price * i.qty * 2'));
+    await openFolder(page, 'shop', filesOf(dir));
+    await stubChat(page, (label, prompt) => [...prompt.matchAll(/^### Part (\d+)/gm)].map(m => `### Part ${m[1]}\n- ok`).join('\n'));
+    await page.evaluate(async () => { const p = window.__panel; p._folderReview = true; p.walkPanel.classList.remove('hidden'); await p.showChanges(); });
+    const sheet = await page.evaluate(() => ({
+      title: document.getElementById('walk-title').textContent,
+      labels: [...document.querySelectorAll('#walk-body .sheet-label')].map(x => x.textContent),
+      work: [...document.querySelectorAll('[data-wk="review"] .jr-folder-name')].map(x => x.textContent),
+      commits: [...document.querySelectorAll('[data-wk="commit"] .jr-folder-name')].map(x => x.textContent)
+    }));
+    assert.deepEqual(sheet, { title: 'Changes', labels: ['Your work on main', 'Recent commits'], work: ['Not committed yet'],
+      commits: ['Add tax to the total', 'one'] });
+    await page.evaluate(() => document.querySelector('[data-wk="commit"]').click());
+    await page.waitForFunction(() => window.__panel.walk?.blocks && window.__asks?.length);
+    const r = await page.evaluate(async () => {
+      const w = window.__panel.walk;
+      const view = (await chrome.storage.session.get('readerView')).readerView;
+      return { label: w.change.label, paths: w.blocks.map(x => x.path), diff: w.blocks[0].diff,
+        reader: view.content, ref: view.repo.ref, editable: view.walkKey, attached: window.__asks[0].attached };
+    });
+    assert.match(r.label, /^Commit [0-9a-f]{7}$/);
+    assert.deepEqual(r.paths, ['src/cart.js']);
+    // The commit's own change, not the work on top of it
+    assert.match(r.diff, /\+.*i\.price \* i\.qty;/);
+    assert.doesNotMatch(r.diff, /\* 2/);
+    // The reader shows the file as the commit left it, and not for editing
+    assert.equal(r.reader, AFTER['src/cart.js']);
+    assert.match(r.ref, /^[0-9a-f]{40}$/);
+    assert.equal(r.editable, null);
+    assert.ok(r.attached.some(f => /^shop-[0-9a-f]{7}-changes\.md$/.test(f)), r.attached.join(', '));
+    // ‹ goes back to Changes, where the commit says how far it was read
+    await page.evaluate(() => document.querySelector('[data-wk="review-back"]').click());
+    await page.waitForSelector('[data-wk="commit"] .rv-done');
+    assert.equal(await page.textContent('[data-wk="commit"] .rv-done'), 'Read');
     assert.deepEqual(b.errors, []);
   } finally { await b.close(); }
 });

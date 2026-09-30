@@ -75,7 +75,8 @@ export class ContextPart {
       const t = this.treeFor(project);
       // A change's file as it is after the change: on disk, or at its commit
       const c = w.change;
-      const content = c && !c.local ? await this.fetchFileAt(c.owner, c.repo, c.ref, path) : await this.readRepoFile(path);
+      const content = c && !c.local ? await this.fetchFileAt(c.owner, c.repo, c.ref, path)
+        : c?.kind === 'commit' ? await this.localFileAt(c.sha, path) : await this.readRepoFile(path);
       const imports = resolveImports(extractImports(content, path), path, t.fileSet)
         .filter(p => p !== path && !sent.has(p) && isReadablePath(p) && !isSecretPath(p));
       const files = [];
@@ -103,7 +104,7 @@ export class ContextPart {
   // An answer that ends with NEED lines gets those files, once, in the same
   // chat, and gives its full answer; that answer is the one kept. Files the
   // chat has already (`chat`, from claimChat) aren't sent again.
-  async answerWithFiles(container, label, text, project, chat) {
+  async answerWithFiles(container, label, text, project, chat, show) {
     const sent = chat.files;
     const t = text && project && this.treeFor(project);
     const paths = t ? neededFiles(text, t.fileSet).filter(p => !sent.has(p)) : [];
@@ -122,7 +123,7 @@ export class ContextPart {
     const more = await this.showAnswerIn(container, `${label} · with ${files.map(f => f.path.split('/').pop()).join(', ')}`,
       `Here ${files.length === 1 ? 'is the file' : 'are the files'} you asked for, attached as "${fname}". ` +
       `Now give your full answer to my last question, in the same shape as before, without asking for more files.`,
-      { via: 'chat', inline: true, topic: chat.topic, attachments: [{ filename: fname, content: this.packFor(files) }] });
+      { via: 'chat', inline: true, topic: chat.topic, attachments: [{ filename: fname, content: this.packFor(files) }], show });
     return more || text;
   }
 

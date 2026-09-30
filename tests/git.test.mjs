@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readdirSync, existsSync, openAsBlob, readFileSync, cpSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { gitRepo, workingDiff, ignoreRules, fileDiff, lineEdits, blobSha } from '../src/utils/git.js';
+import { gitRepo, workingDiff, commitDiff, ignoreRules, fileDiff, lineEdits, blobSha } from '../src/utils/git.js';
 
 const run = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8',
   env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } });
@@ -153,4 +153,57 @@ test('a hunk is named after the declaration above its first change, not an impor
   const before = "import { x } from './x.js';\n\nexport function total(items) {\n  let sum = 0;\n  return sum;\n}\n";
   const diff = fileDiff('f.js', before, before.replace('  return sum;', '  return sum * 2;'));
   assert.match(diff, /^@@ -2,5 \+2,5 @@ export function total\(items\) \{$/m);
+});
+
+for (const pack of [false, true]) {
+  test(`recent commits follow the branch's own line, as git log does (${pack ? 'packed' : 'loose'} objects)`, async () => {
+    const dir = makeRepo({ pack });
+    run(dir, 'stash', '-q', '-u');
+    run(dir, 'checkout', '-q', '-b', 'side', 'HEAD~2');
+    put(dir, 'side.txt', 'side\n');
+    run(dir, 'add', 'side.txt');
+    run(dir, 'commit', '-q', '-m', 'on the side');
+    run(dir, 'checkout', '-q', 'main');
+    run(dir, 'merge', '-q', '--no-ff', 'side', '-m', 'Merge side\n\nWith a body');
+    const repo = gitRepo(gitOf(dir));
+    const log = await repo.log((await repo.state()).sha, 4);
+    const want = run(dir, 'log', '--first-parent', '-n', '4', '--format=%H|%an|%at|%s').trim().split('\n')
+      .map(l => { const [sha, author, at, title] = l.split('|'); return { sha, author, date: new Date(at * 1000).toISOString(), title }; });
+    assert.deepEqual(log.map(({ sha, author, date, title }) => ({ sha, author, date, title })), want);
+    assert.equal(log[0].title, 'Merge side');
+    assert.equal(log[0].parents.length, 2);
+    rmSync(dir, { recursive: true });
+  });
+}
+
+test('a commit\'s diff turns its parent into it: added, changed and deleted files, private ones left out', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'yavar-git-'));
+  run(dir, 'init', '-q', '-b', 'main');
+  put(dir, 'a.js', lines(40, 'a'));
+  put(dir, 'gone.js', 'bye\n');
+  put(dir, '.env', 'SECRET=1\n');
+  run(dir, 'add', '-A');
+  run(dir, 'commit', '-q', '-m', 'one');
+  put(dir, 'a.js', lines(40, 'a').replace('line 3 a', 'line 3 b').replace('line 30 a\n', ''));
+  rmSync(join(dir, 'gone.js'));
+  put(dir, 'dir/new.js', 'export const n = 1;\n');
+  put(dir, '.env', 'SECRET=2\n');
+  run(dir, 'add', '-A');
+  run(dir, 'commit', '-q', '-m', 'two');
+  const repo = gitRepo(gitOf(dir));
+  const [two, one] = await repo.log((await repo.state()).sha, 5);
+  assert.equal(one.parents.length, 0);
+  const diff = await commitDiff(repo, one.sha, two.sha, { isPrivate: (p) => p === '.env' });
+  assert.doesNotMatch(diff, /SECRET/);
+  const copy = mkdtempSync(join(tmpdir(), 'yavar-git-copy-'));
+  run(copy, 'clone', '-q', dir, '.');
+  run(copy, 'checkout', '-q', one.sha);
+  writeFileSync(join(copy, '..', `${one.sha}.diff`), diff);
+  run(copy, 'apply', join(copy, '..', `${one.sha}.diff`));
+  for (const p of ['a.js', 'dir/new.js']) assert.equal(readFileSync(join(copy, p), 'utf8'), readFileSync(join(dir, p), 'utf8'), p);
+  assert.equal(existsSync(join(copy, 'gone.js')), false);
+  // The first commit: everything it added
+  assert.match(await commitDiff(repo, null, one.sha), /new file mode[^]*\+line 1 a/);
+  rmSync(dir, { recursive: true });
+  rmSync(copy, { recursive: true });
 });

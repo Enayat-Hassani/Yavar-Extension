@@ -23,7 +23,7 @@ async function startReview(page) {
     const p = window.__panel;
     await p.startReview();
     p._folderReview = true;
-    await p.showReviewChoice();
+    await p.showChanges();
     document.querySelector('[data-wk="review"][data-base="head"]').click();
   });
   await page.waitForFunction(() => window.__panel.walk?.notes?.[0]);
@@ -86,9 +86,9 @@ test('the reader draws a part as a diff inside the file', async () => {
     await wait(reader, 500);
     const r = await reader.evaluate(() => ({
       label: document.getElementById('rd-label').textContent,
-      gutter: document.getElementById('rd-gutter').textContent.split('\n').slice(0, 9),
+      gutter: [...document.getElementById('rd-gutter').children].slice(0, 9).map(x => x.textContent),
       marks: [...document.querySelectorAll('.rd-mark')].map(m => `${m.dataset.kind} ${m.dataset.start}-${m.dataset.end}`),
-      text: document.getElementById('rd-text').textContent.split('\n').slice(0, 3)
+      text: [...document.getElementById('rd-text').children].slice(0, 3).map(x => x.textContent)
     }));
     // The change starts on the function's own line, so nothing above names it: the file does
     assert.equal(r.label, 'File 1 of 2 · cart.js');
@@ -524,6 +524,54 @@ test('a document in the reading order is summed up, not walked line by line', as
     assert.equal(r.shown, 'plan.md');
     assert.equal(r.lines, null);
     assert.equal(r.finish, 'Finish file');
+    assert.deepEqual(b.errors, []);
+  } finally { await b.close(); }
+});
+
+test('the reader wraps long lines keeping their numbers, and shows Markdown rendered, both remembered', async () => {
+  const b = await launch();
+  try {
+    const reader = await b.open('reader.html', { width: 700, height: 600 });
+    const show = (path, content, lines = null) => reader.evaluate(([path, content, lines]) => chrome.storage.session.set({ readerView: {
+      repo: { source: 'github', owner: 'o', repo: 'r', ref: 'HEAD', name: 'o/r' }, path, content, lines, label: '', ts: Date.now() } }),
+      [path, content, lines]);
+    const long = 'const note = "' + 'word '.repeat(60) + '";';
+    await show('src/a.js', `const a = 1;\n${long}\nconst b = 2;\n`, { start: 3, end: 3 });
+    await reader.waitForFunction(() => document.getElementById('rd-text').children.length === 3);
+    const geo = () => reader.evaluate(() => {
+      const rows = [...document.getElementById('rd-text').children];
+      const nums = [...document.getElementById('rd-gutter').children];
+      const band = document.getElementById('rd-band');
+      return { heights: rows.map(r => r.offsetHeight), numTops: nums.map(n => n.offsetTop), rowTops: rows.map(r => r.offsetTop),
+        numbers: nums.map(n => n.textContent), band: band.offsetTop, scrolls: document.querySelector('.rd-src-scroll').scrollWidth > document.querySelector('.rd-src-scroll').clientWidth };
+    });
+    const flat = await geo();
+    assert.equal(new Set(flat.heights).size, 1);
+    assert.equal(flat.scrolls, true);
+    assert.equal(await reader.isVisible('#rd-preview'), false);   // not Markdown
+    await reader.click('#rd-wrap');
+    await wait(reader, 400);   // the highlight glides to its new place
+    const wrapped = await geo();
+    // The long line takes several rows; its number stays on the first, the next number moves down with the next line
+    assert.ok(wrapped.heights[1] > flat.heights[1] * 2, JSON.stringify(wrapped.heights));
+    assert.equal(wrapped.scrolls, false);
+    assert.deepEqual(wrapped.numbers, ['1', '2', '3']);
+    assert.deepEqual(wrapped.numTops.map(t => t - wrapped.numTops[0]), wrapped.rowTops.map(t => t - wrapped.rowTops[0]));
+    // The highlight follows line 3 to where it now is
+    assert.equal(wrapped.band, wrapped.rowTops[2]);
+    assert.equal(await reader.getAttribute('#rd-wrap', 'aria-pressed'), 'true');
+
+    await show('PLAN.md', '# Plan\n\nFirst **the cart**.\n');
+    await reader.waitForSelector('#rd-preview:not([hidden])');
+    await reader.click('#rd-preview');
+    assert.equal(await reader.innerHTML('#rd-md h1'), 'Plan');
+    assert.equal(await reader.isVisible('#rd-code'), false);
+    // Both choices are kept for next time
+    await reader.reload();
+    await reader.waitForSelector('#rd-md:not([hidden]) h1');
+    assert.equal(await reader.getAttribute('#rd-wrap', 'aria-pressed'), 'true');
+    await reader.click('#rd-preview');
+    assert.equal(await reader.isVisible('#rd-code'), true);
     assert.deepEqual(b.errors, []);
   } finally { await b.close(); }
 });
