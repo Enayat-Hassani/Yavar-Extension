@@ -307,6 +307,13 @@ export class WalkPart {
     await this.createWalk(w.path, partial ? w.range : null);
   }
 
+  // A change opened from Changes goes back there: your own work, or a
+  // commit of the repository or folder loaded
+  changesBack(c) {
+    const t = this.repoTree;
+    return !!c && (c.local || (c.kind === 'commit' && t?.source !== 'local' && t?.owner === c.owner && t?.repo === c.repo));
+  }
+
   // Highlight the current block in the reader
   followWalk() {
     const w = this.walk;
@@ -464,7 +471,7 @@ export class WalkPart {
     const b = w.blocks[w.current];
     if (!w.change) return sliceLines(await this.readRepoFile(w.path), b.start, b.end);
     if (!b.start) return b.removedText;
-    if (w.change.local) return sliceLines(await this.readRepoFile(b.path), b.start, b.end);
+    if (w.change.local) return sliceLines(await (w.change.kind === 'commit' ? this.localFileAt(w.change.sha, b.path) : this.readRepoFile(b.path)), b.start, b.end);
     const { owner, repo, ref } = w.change;
     return sliceLines(await this.fetchFileAt(owner, repo, ref, b.path), b.start, b.end);
   }
@@ -478,7 +485,7 @@ export class WalkPart {
     const w = this.walk;
     const esc = (t) => this.escapeHtml(t || '');
     // The way back: to the reading map, or to the choice of your own changes
-    const toMap = w?.change?.local ? `<button type="button" class="wk-map" data-wk="review-back" aria-label="Back to the choice of changes">‹</button>`
+    const toMap = this.changesBack(w?.change) ? `<button type="button" class="wk-map" data-wk="review-back" aria-label="Back to Changes">‹</button>`
       : this.journey && !w?.change ? `<button type="button" class="wk-map" data-wk="map">‹ Map</button>` : '';
     if (!w?.blocks) {
       this.walkBody.innerHTML = (toMap ? `<div class="wk-bar">${toMap}</div>` : '') + (w?.error
@@ -715,7 +722,9 @@ export class WalkPart {
     // Choosing a folder, the reading map, and moving between files
     if (act === 'folder') return this.openFolderJourney(el.dataset.i);
     if (act === 'review') return this.reviewLocal(el.dataset.base);
-    if (act === 'review-back') return this.showReviewChoice();
+    if (act === 'review-back') return this.showChanges();
+    if (act === 'commit') return this.openCommit(el.dataset.sha);
+    if (act === 'commits-summary') return this.summarizeCommits();
     if (act === 'review-restart') return this.restartReview(el.dataset.base);
     if (act === 'folder-new') return this.openFolderJourney(null);
     if (act === 'folders') return this.showFolderChoice();
@@ -951,7 +960,7 @@ export class WalkPart {
     const n = files.length;
     const found = files.filter(g => this.bugNotes(g).length);
     const unchecked = n - found.length;
-    const back = c.local ? `<button type="button" class="wk-map" data-wk="review-back" aria-label="Back to the choice of changes">‹</button>` : '';
+    const back = this.changesBack(c) ? `<button type="button" class="wk-map" data-wk="review-back" aria-label="Back to Changes">‹</button>` : '';
     this.walkBody.innerHTML =
       this.stepBar({
         act: 'wk', back, context: c.label, where: 'Summary', first: false, pct: 100, next: '',
@@ -986,7 +995,7 @@ export class WalkPart {
     const c = w.change;
     const repo = c.owner ? `${c.owner}/${c.repo}` : c.repo;
     const found = fileGroups(w.blocks).flatMap(g => this.bugNotes(g).map(x => `### \`${g.path}\`\n${x.text.slice(0, 1500)}`));
-    const [before, words] = c.local
+    const [before, words] = c.local && c.kind !== 'commit'
       ? c.base === 'uncommitted'
         ? ['commit', 'Commit message: In a code block, a title line under 60 characters saying what the change does, in the imperative, then a blank line and a short body on what changed and why']
         : ['push', 'Pull request description: In a code block, a title, then what changed, why, and how it was tested']

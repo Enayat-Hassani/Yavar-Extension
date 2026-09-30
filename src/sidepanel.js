@@ -425,12 +425,12 @@ class YavarSidePanel {
     const repoItems = gh ? [
       ...(file ? [{ id: 'walk_file', icon: icon('lines'), name: `Read ${file}`, desc: 'Block by block, beside the code' }] : []),
       { id: 'explain_repo', icon: icon('compass'), name: 'Read this repository', desc: this._tabCtx.journey || 'The big picture, then file by file' },
-      { id: 'changes', icon: icon('commit'), name: 'Recent changes', desc: 'What the latest commits are about' }
+      { id: 'changes', icon: icon('commit'), name: 'Changes', desc: 'Recent commits, part by part' }
     ] : [];
     return [
       ...repoItems,
       { id: 'read_folder', icon: icon('folder'), name: 'Read a project folder', desc: 'A project on this computer', divider: repoItems.length > 0 },
-      { id: 'review_changes', icon: icon('diff'), name: 'Review my changes', desc: 'Before you commit or push' },
+      { id: 'review_changes', icon: icon('diff'), name: 'Changes in a folder', desc: 'Your work and recent commits' },
       { id: 'library', icon: icon('bookmark'), name: 'Library', desc: 'Your saved answers and notes', divider: true },
       ...(this._morfiaOn && this._tabCtx?.usable && !this._tabCtx.video
         ? [{ id: 'save_morfia', icon: icon('forward'), name: 'Add to Morfia', desc: 'Add this article to your Morfia library' }] : []),
@@ -500,7 +500,7 @@ class YavarSidePanel {
     }
     if (id === 'answer:api') { this.useApi(); return; }
     const tools = {
-      changes: () => this.showRecentChanges(),
+      changes: () => this.openChanges(),
       add_page: () => this.attachActivePage(),
       attach_page: () => this.attachActivePage(),
       attach_file: () => this.quickAddActiveFile('add'),
@@ -687,7 +687,7 @@ class YavarSidePanel {
           ? row('walk_diff', icon('diff'), gh.kind === 'pull' ? `Read pull request #${gh.number}` : 'Read this commit', 'Part by part, beside the code') : '') +
         (file ? row('walk_file', icon('lines'), `Read ${file}`, 'Block by block, beside the code') : '') +
         row('explain_repo', icon('compass'), 'Read this repository', this._tabCtx.journey || 'The big picture first, then file by file') +
-        row('changes', icon('commit'), 'Recent changes', 'What the latest commits are about') +
+        row('changes', icon('commit'), 'Changes', 'Recent commits, part by part') +
         `</div>`;
     } else if (usable) {
       let host = '';
@@ -703,13 +703,13 @@ class YavarSidePanel {
       hero = { kicker: 'Yavar', title: 'Ask anything' };
       ctx = `<div class="home-group">` +
         row('read_folder', icon('folder'), 'Read a project folder', 'The big picture first, then file by file') +
-        row('review_changes', icon('diff'), 'Review my changes', 'What changed before you commit or push, line by line') +
+        row('review_changes', icon('diff'), 'Changes in a project folder', 'Your work before you commit or push, and recent commits') +
         `</div>`;
     }
     // The project reviewed last, whatever the tab shows
     const review = this._reviewFolder
-      ? `<div class="home-group">${row('review_last', icon('diff'), `Review my changes · ${this._reviewFolder.name}`, 'Not committed or not pushed yet, line by line')}</div>` : '';
-    if (review) ctx = ctx.replace(row('review_changes', icon('diff'), 'Review my changes', 'What changed before you commit or push, line by line'), '');
+      ? `<div class="home-group">${row('review_last', icon('diff'), `Changes · ${this._reviewFolder.name}`, 'Your work and recent commits, line by line')}</div>` : '';
+    if (review) ctx = ctx.replace(row('review_changes', icon('diff'), 'Changes in a project folder', 'Your work before you commit or push, and recent commits'), '');
     this.threadBody.innerHTML =
       `<div class="home">` +
         `<div class="home-hero"><span class="home-kicker">${this.escapeHtml(hero.kicker)}</span><h2>${this.escapeHtml(hero.title)}</h2></div>` +

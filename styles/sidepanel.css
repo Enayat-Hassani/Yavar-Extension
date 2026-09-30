@@ -134,7 +134,7 @@ html, body {
 }
 :where(button, summary, [role="button"]):not(:disabled):active { opacity: 0.7; transition-duration: 0ms; }
 /* Rows and filled buttons show a press as a deeper fill instead of fading */
-:is(.lens-item, .pk-row, .commit-row, .jr-folder, .wk-blocks li button, .sheet-steps li):not(.is-disabled):active {
+:is(.lens-item, .pk-row, .jr-folder, .wk-blocks li button, .sheet-steps li):not(.is-disabled):active {
   background: var(--fill-press);
   opacity: 1;
 }
@@ -1363,60 +1363,6 @@ button.lens-item:focus-visible {
   border: none;
 }
 
-/* Recent changes: commits as rows; each one explains itself */
-.commit-list {
-  display: flex;
-  flex-direction: column;
-  margin: 8px 0;
-}
-
-.commit-summary {
-  align-self: flex-start;
-  margin-bottom: 6px;
-  padding: 6px 12px;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--accent);
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: var(--r-pill);
-  cursor: pointer;
-}
-
-.commit-summary:hover { background: var(--fill-hover); }
-
-.commit-row {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 8px 10px;
-  margin: 0 -10px;
-  font: inherit;
-  text-align: left;
-  color: var(--text-primary);
-  background: none;
-  border: none;
-  border-radius: var(--r-md);
-  cursor: pointer;
-}
-
-.commit-row:hover { background: var(--fill-hover); }
-
-.commit-title {
-  font-size: 13px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.commit-meta {
-  font-size: 11px;
-  color: var(--text-secondary);
-}
-
-.commit-meta code { font-size: 11px; }
-
 .thread-form {
   display: flex;
   align-items: flex-end;
@@ -2493,6 +2439,12 @@ button.lens-item:focus-visible {
 .rv-option:has(.rv-restart) .jr-folder { column-gap: 96px; }   /* room for Start over, left of the chevron */
 .rv-restart { position: absolute; top: 50%; right: 30px; margin: 0; font-size: 12px; transform: translateY(-50%); }
 .rv-restart:hover { color: var(--text-primary); }
+/* Changes: the recent commits, one line of title each */
+.rv-commits .jr-folder-name { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.rv-commits .jr-folder-status code { font-size: 11px; }
+.rv-done { color: var(--success); }
+.sheet-label code { text-transform: none; letter-spacing: 0; }
+.jr-folders + .jr-head { margin-top: var(--sp-4); }
 
 /* How the files connect: an indented tree, lines drawn on the left */
 .jr-connections:empty { display: none; }

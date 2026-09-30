@@ -187,6 +187,33 @@ export function gitRepo(git) {
     return files;
   }
 
+  // A commit's parents, author, date (ISO) and title
+  async function commit(sha) {
+    const text = dec.decode((await read(sha)).data);
+    const at = text.indexOf('\n\n');
+    const head = at < 0 ? text : text.slice(0, at);
+    const author = /^author (.*) <[^>]*> (\d+) [+-]\d{4}$/m.exec(head);
+    return {
+      sha,
+      parents: [...head.matchAll(/^parent ([0-9a-f]{40})$/gm)].map(m => m[1]),
+      author: author?.[1] || '',
+      date: author ? new Date(Number(author[2]) * 1000).toISOString() : '',
+      title: (at < 0 ? '' : text.slice(at + 2)).split('\n')[0].trim()
+    };
+  }
+
+  // The latest `max` commits from `sha`, following first parents (the
+  // branch's own line, a merge counting as one)
+  async function log(sha, max = 20) {
+    const out = [];
+    for (let at = sha; at && out.length < max;) {
+      const c = await commit(at);
+      out.push(c);
+      at = c.parents[0];
+    }
+    return out;
+  }
+
   // The branch checked out, HEAD's sha, and the remote branch it pushes to
   async function state() {
     const head = await text('HEAD');
@@ -206,7 +233,7 @@ export function gitRepo(git) {
     return { branch, sha, upstream };
   }
 
-  return { read, resolve, commitFiles, state };
+  return { read, resolve, commitFiles, commit, log, state };
 }
 
 // ---- Diffs ----
@@ -334,6 +361,28 @@ export function ignoreRules(sources) {
 // changed or went missing, and new files .gitignore doesn't exclude. A
 // private file (a key, an .env) is never read, tracked or not. Returns
 // { diff, files } where files counts what changed.
+// What a commit changed against its parent (none for the first commit), as
+// one diff. Private files are left out; binary files are named, not shown.
+export async function commitDiff(repo, parentSha, sha, { isPrivate = () => false } = {}) {
+  const before = parentSha ? await repo.commitFiles(parentSha) : new Map();
+  const after = await repo.commitFiles(sha);
+  const load = async (blob) => (blob ? (await repo.read(blob)).data : null);
+  const out = [];
+  for (const path of [...new Set([...before.keys(), ...after.keys()])].sort()) {
+    const a = before.get(path);
+    const b = after.get(path);
+    if (a === b || isPrivate(path)) continue;
+    const [x, y] = [await load(a), await load(b)];
+    if ((x && (x.length > MAX_FILE || isBinary(x))) || (y && (y.length > MAX_FILE || isBinary(y)))) {
+      out.push(`diff --git a/${path} b/${path}\n${!a ? 'new file mode 100644\n' : !b ? 'deleted file mode 100644\n' : ''}` +
+        `Binary files ${a ? `a/${path}` : '/dev/null'} and ${b ? `b/${path}` : '/dev/null'} differ\n`);
+      continue;
+    }
+    out.push(fileDiff(path, x && dec.decode(x), y && dec.decode(y), !a ? 'added' : !b ? 'deleted' : 'modified'));
+  }
+  return out.join('');
+}
+
 export async function workingDiff(repo, baseSha, work, { isIgnored = () => false, isPrivate = () => false } = {}) {
   const base = await repo.commitFiles(baseSha);
   const onDisk = new Set(await work.paths());

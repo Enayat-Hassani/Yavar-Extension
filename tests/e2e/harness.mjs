@@ -56,7 +56,7 @@ export async function launch() {
   return { ctx, id, open, errors, close: async () => { await ctx.close(); rmSync(profile, { recursive: true, force: true }); } };
 }
 
-const git = (cwd, ...args) => execFileSync('git', args, {
+export const git = (cwd, ...args) => execFileSync('git', args, {
   cwd, encoding: 'utf8',
   env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' }
 });

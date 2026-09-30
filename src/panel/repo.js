@@ -19,7 +19,6 @@ import {
   fencedFile,
   parseCommitsAtom,
   commitsFromApi,
-  timeAgo,
   LOCAL_SKIP_DIRS,
   isSecretPath,
   parseFileRef,
@@ -309,12 +308,14 @@ export class RepoPart {
       const loaded = t && t.repo === repo && (t.owner || '') === (owner || '') && (t.ref || '') === (ref || '');
       let content;
       if (loaded) content = await this.readRepoFile(path);
+      // A folder's file at a commit comes from its .git
+      else if (source === 'local' && t?.source === 'local' && t.repo === repo && ref) content = await this.localFileAt(ref, path);
       else if (source === 'local') throw new Error('open that folder again first');
       else content = await this.fetchFileAt(owner, repo, ref, path);
       if (seq !== this._readerSeq) return;
       await chrome.storage.session.set({ readerView: {
         repo: { source, owner, repo, ref, name: owner ? `${owner}/${repo}` : repo },
-        path, content, lines, label, diff, focus, nav, walk, walkKey: source === 'local' ? this.walkKey(path) : null, ts: Date.now()
+        path, content, lines, label, diff, focus, nav, walk, walkKey: source === 'local' && !ref ? this.walkKey(path) : null, ts: Date.now()
       } });
       await this.showReaderTab();
     } catch (e) {
@@ -573,54 +574,6 @@ export class RepoPart {
     }
     this._commitsCache.set(key, { ts: Date.now(), list });
     return list;
-  }
-
-  // Recent changes: the latest commits as a list in the thread. Each one can
-  // be explained; "What's been happening?" summarizes them all.
-  async showRecentChanges() {
-    try {
-      if (!(await this.ensureRepoTree())) { this.showNotification('Open a GitHub repository first'); return; }
-    } catch (e) {
-      this.showNotification(e.message);
-      return;
-    }
-    const { owner, repo, ref } = this.repoTree;
-    let commits;
-    try {
-      commits = await this.fetchRecentCommits();
-    } catch (e) {
-      this.showNotification("Couldn't load the commits: " + e.message);
-      return;
-    }
-    if (!commits.length) { this.showNotification(`No commits found on ${this.refLabel(ref)}`); return; }
-    this.openThread({ title: `${owner}/${repo}` });
-    this.addThreadQuestion(`Recent changes on ${this.refLabel(ref)}`);
-    const list = document.createElement('div');
-    list.className = 'commit-list';
-    list.innerHTML =
-      `<button type="button" class="commit-summary" data-act="summarize">What's been happening?</button>` +
-      commits.map(c =>
-        `<button type="button" class="commit-row" data-sha="${this.escapeHtml(c.sha)}" title="Read this commit part by part">` +
-          `<span class="commit-title">${this.escapeHtml(c.title)}</span>` +
-          `<span class="commit-meta"><code>${this.escapeHtml(c.sha.slice(0, 7))}</code> ` +
-          `${this.escapeHtml(c.author)}${c.date ? ' · ' + this.escapeHtml(timeAgo(c.date)) : ''}</span>` +
-        `</button>`).join('');
-    list.addEventListener('click', (e) => {
-      if (e.target.closest('[data-act="summarize"]')) {
-        const lines = commits.map(c => `- ${c.sha.slice(0, 7)} ${c.date ? c.date.slice(0, 10) : ''} ${c.author}: ${c.title}`).join('\n');
-        this._readingContext = { label: `${owner}/${repo}`, ts: Date.now() };
-        this.askInThread({
-          title: `${owner}/${repo}`, sub: 'Recent changes', label: `What's been happening? (${commits.length} commits)`,
-          prompt: `Here are the latest ${commits.length} commits on ${this.refLabel(ref)} of ${owner}/${repo}:\n\n${lines}\n\n` +
-            'Explain what the project has been working on lately: group related commits into themes, say what each theme ' +
-            'means for the code or users, and point out any commit worth reading closely to learn from (and why).'
-        });
-        return;
-      }
-      const sha = e.target.closest('[data-sha]')?.dataset.sha;
-      if (sha) this.walkChange({ owner, repo, kind: 'commit', sha, title: commits.find(c => c.sha === sha)?.title || '' });
-    });
-    this.threadBody.appendChild(list);
   }
 
   async fetchRepoFilesMany(paths) {

@@ -181,10 +181,11 @@ async function fileIn(dir, path) {
   return dir.getFileHandle(parts.at(-1));
 }
 
-// Edit shows only for a file of a folder Yavar still has a handle for; a
-// folder read without the folder picker can't be written back
+// Edit shows only for a file of a folder Yavar still has a handle for, as
+// it is on disk (not at a past commit); a folder read without the folder
+// picker can't be written back
 async function offerEdit(view) {
-  if (view.repo.source !== 'local' || !window.FileSystemFileHandle?.prototype.createWritable) return;
+  if (view.repo.source !== 'local' || view.repo.ref || !window.FileSystemFileHandle?.prototype.createWritable) return;
   const dir = await folderFor(view.repo.repo);
   if (view === current && !editing) $('rd-edit').hidden = !dir;
 }

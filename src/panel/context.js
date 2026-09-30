@@ -75,7 +75,8 @@ export class ContextPart {
       const t = this.treeFor(project);
       // A change's file as it is after the change: on disk, or at its commit
       const c = w.change;
-      const content = c && !c.local ? await this.fetchFileAt(c.owner, c.repo, c.ref, path) : await this.readRepoFile(path);
+      const content = c && !c.local ? await this.fetchFileAt(c.owner, c.repo, c.ref, path)
+        : c?.kind === 'commit' ? await this.localFileAt(c.sha, path) : await this.readRepoFile(path);
       const imports = resolveImports(extractImports(content, path), path, t.fileSet)
         .filter(p => p !== path && !sent.has(p) && isReadablePath(p) && !isSecretPath(p));
       const files = [];

@@ -23,7 +23,7 @@ async function startReview(page) {
     const p = window.__panel;
     await p.startReview();
     p._folderReview = true;
-    await p.showReviewChoice();
+    await p.showChanges();
     document.querySelector('[data-wk="review"][data-base="head"]').click();
   });
   await page.waitForFunction(() => window.__panel.walk?.notes?.[0]);
