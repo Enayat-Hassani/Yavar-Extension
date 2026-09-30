@@ -6,7 +6,7 @@
 import { renderMarkdown } from '../utils/markdown.js';
 import { icon } from '../utils/icons.js';
 import { walkPrompt, parseWalkthrough, compareTyped, quizPrompt, parseQuiz, textSha } from '../utils/walkthrough.js';
-import { nextCandidates, nextPrompt, parseNext } from '../utils/journey.js';
+import { nextCandidates, nextPrompt, parseNext, isDocPath, moveInPath } from '../utils/journey.js';
 import {
   parseDiff,
   changeBlocks,
@@ -132,6 +132,7 @@ export class WalkPart {
   }
 
   async createWalk(path, lines = null, startAt = null) {
+    if (isDocPath(path)) return this.createDocWalk(path);
     if (this._walkPending) return;
     const MAX_LINES = 400;
     this._walkPending = true;
@@ -167,6 +168,39 @@ export class WalkPart {
       this.followWalk();
     } catch (e) {
       this.walk = { path, lines, startAt, error: e.message };
+    } finally {
+      this._walkPending = false;
+      this.renderWalk();
+    }
+  }
+
+  // A document (the README, a plan, design notes) is summed up in prose, not
+  // split into blocks: its walk is one block, the whole file, whose
+  // explanation is the summary. Questions, Quiz me and Finish file work as
+  // they do for code.
+  async createDocWalk(path) {
+    if (this._walkPending) return;
+    this._walkPending = true;
+    this._walkRaw = '';
+    this.walk = { path, doc: true, pending: true };
+    this.renderWalk();
+    try {
+      const content = (await this.readRepoFile(path)).replace(/\n$/, '');
+      const total = content.split('\n').length;
+      const repo = this.repoDisplayName();
+      const name = path.split('/').pop();
+      const fname = /\.md$/i.test(name) ? name : `${name}.md`;
+      const summary = await this.askInPanel(
+        `I'm reading ${repo}, starting from the big picture. The attached "${fname}" is its document \`${path}\`. ${intentText(this._promptEdits, 'doc')}`,
+        { via: 'chat', topic: this.readTopic(), attachments: [{ filename: fname, content }] });
+      if (!summary?.trim()) throw new Error('the chat gave no summary');
+      await this.saveWalk({ path, doc: true, range: { start: 1, end: total }, total, summary: '', current: 0, typed: {}, created: Date.now(),
+        blocks: [{ start: 1, end: total, title: name, explain: summary }], sha: await textSha(content) });
+      await this.markRead([path]);
+      this._readingContext = { label: repo, ts: Date.now() };
+      this.followWalk();
+    } catch (e) {
+      this.walk = { path, doc: true, error: e.message };
     } finally {
       this._walkPending = false;
       this.renderWalk();
@@ -285,7 +319,8 @@ export class WalkPart {
       return;
     }
     if (!this.repoTree) return;
-    this.openRepoFile({ ...this.fileRefFor(w.path, { start: b.start, end: b.end }),
+    // A document is shown whole, with nothing highlighted
+    this.openRepoFile({ ...this.fileRefFor(w.path, w.doc ? null : { start: b.start, end: b.end }),
       label: `Block ${w.current + 1} of ${w.blocks.length} · ${b.title}`, nav: this.walkNav(), walk: this.walkRef() });
   }
 
@@ -447,11 +482,12 @@ export class WalkPart {
       : this.journey && !w?.change ? `<button type="button" class="wk-map" data-wk="map">‹ Map</button>` : '';
     if (!w?.blocks) {
       this.walkBody.innerHTML = (toMap ? `<div class="wk-bar">${toMap}</div>` : '') + (w?.error
-        ? `<div class="sheet-intro"><p>⚠️ Could not make the walkthrough: ${esc(w.error)}.</p>` +
+        ? `<div class="sheet-intro"><p>⚠️ Could not ${w.doc ? 'sum up the document' : 'make the walkthrough'}: ${esc(w.error)}.</p>` +
           `<button type="button" class="files-send jr-primary" data-wk="retry">Ask again</button></div>` +
           this.replyDisclosure(this._walkRaw)
         : `<div class="sheet-wait"><span class="files-spinner"></span>${w?.change ? `Reading the diff of ${esc(w.change.label.toLowerCase())}…`
-          : `The AI is splitting ${esc(w?.path?.split('/').pop())} into blocks…`}<div class="sheet-live"></div></div>`);
+          : w?.doc ? `The AI is reading ${esc(w.path.split('/').pop())}…`
+            : `The AI is splitting ${esc(w?.path?.split('/').pop())} into blocks…`}<div class="sheet-live"></div></div>`);
       return;
     }
     if (w.change) return w.summaryOpen ? this.renderReviewSummary() : this.renderChangeWalk(toMap);
@@ -466,19 +502,19 @@ export class WalkPart {
     this.walkBody.innerHTML =
       this.stepBar({
         act: 'wk', back: toMap, context: w.path.split('/').pop(),
-        where: `Block ${i + 1} of ${n}${range.start > 1 || range.end < total ? ` · lines ${range.start}-${range.end} of ${total}` : ''}`,
+        where: w.doc ? 'Summary' : `Block ${i + 1} of ${n}${range.start > 1 || range.end < total ? ` · lines ${range.start}-${range.end} of ${total}` : ''}`,
         first: i === 0, pct: Math.round(((i + 1) / n) * 100),
         next: !last ? `<button type="button" class="wk-step" data-wk="next" aria-label="Next">›</button>`
           : more ? `<button type="button" class="wk-step wk-step-text" data-wk="continue">Next lines ›</button>`
             : `<button type="button" class="wk-step wk-step-text" data-wk="finish">Finish file</button>`,
         items: blocks.map((x, k) => ({ i: k, current: k === i, mark: practised(k) ? '✓' : k + 1, title: esc(x.title), meta: `${x.start}-${x.end}` })),
-        extra: `<button type="button" class="files-link-btn wk-redo" data-wk="redo">Ask for a new walkthrough of this file</button>`
+        extra: `<button type="button" class="files-link-btn wk-redo" data-wk="redo">Ask for a new ${w.doc ? 'summary' : 'walkthrough'} of this file</button>`
       }) +
       (this._walkStale && this._walkStale === this.walkKey(w.path)
         ? `<p class="wk-stale" role="status">${esc(w.path.split('/').pop())} changed since this walk, so its blocks may sit on the wrong lines. ` +
           `<button type="button" class="files-link-btn" data-wk="rewalk">Walk it again</button></p>` : '') +
       (i === 0 && w.summary ? `<div class="wk-summary md">${renderMarkdown(w.summary).html}</div>` : '') +
-      `<div class="wk-meta"><span>Lines ${b.start}-${b.end}${b.edited ? ' · edited after this was explained' : ''}</span>` +
+      `<div class="wk-meta"><span>${w.doc ? `Document · ${total} line${total === 1 ? '' : 's'}` : `Lines ${b.start}-${b.end}`}${b.edited ? ' · edited after this was explained' : ''}</span>` +
         `<button type="button" class="files-link-btn wk-show" data-wk="show">Show in reader</button></div>` +
       `<h3 class="wk-title">${esc(b.title)}</h3>` +
       (b.explain ? `<div class="wk-explain md">${renderMarkdown(b.explain).html}</div>` : `<p class="wk-explain is-empty">The AI didn't explain these lines. Ask with Explain more.</p>`) +
@@ -488,16 +524,15 @@ export class WalkPart {
       // Pinned to the bottom of the sheet, so answers never push them away
       `<div class="wk-dock">` + this.askBox('data-wk', `Ask about lines ${b.start}–${b.end}…`,
         // The block is already explained line by line, so learning it comes first
-        `<button type="button" class="run-ask is-key" data-wk="more">Explain more</button>` +
-        `<button type="button" class="run-ask is-key" data-wk="type" aria-expanded="false" title="Practise typing these lines">Type it${best ? ` · ${best}%` : ''}</button>` +
-        `<button type="button" class="run-ask is-key" data-wk="quiz">Quiz me</button>` +
-        `<button type="button" class="wk-more-toggle" data-wk="moreacts" aria-haspopup="menu" aria-expanded="false" title="More actions" aria-label="More actions">${icon('more', 18)}</button>` +
-        `<span class="wk-extra" role="menu" hidden>` +
-          `<button type="button" class="run-ask" data-wk="lines">Line by line</button>` +
-          `<button type="button" class="run-ask" data-wk="bugs">Find bugs</button>` +
-          `<button type="button" class="run-ask" data-wk="better">Better ways</button>` +
-          `<button type="button" class="run-ask" data-wk="tests">How to test it</button>` +
-        `</span>`) +
+        this.dockActs(w.doc ? [{ act: 'quiz', short: 'Quiz', full: 'Quiz me' }] : [
+          { act: 'more', short: 'Explain', full: 'Explain more' },
+          { act: 'type', short: `Type${best ? ` · ${best}%` : ''}`, full: `Practise typing${best ? ` · best ${best}%` : ''}`, expands: true },
+          { act: 'quiz', short: 'Quiz', full: 'Quiz me' },
+          { act: 'lines', short: 'Lines', full: 'Line by line' },
+          { act: 'bugs', short: 'Bugs', full: 'Find bugs' },
+          { act: 'better', short: 'Improve', full: 'Better ways' },
+          { act: 'tests', short: 'Tests', full: 'How to test it' }
+        ])) +
       `</div>`;
 
     // Earlier answers for this block, folded except the latest
@@ -505,6 +540,7 @@ export class WalkPart {
     const notes = w.notes?.[i] || [];
     notes.forEach((note, k) => this.renderWalkNote(notesEl, note, k < notes.length - 1));
     this._walkCode = null;   // the practice editor is made when practice opens
+    this.fitActs();
   }
 
   // Typing a block (or a change's new lines) yourself, hidden until asked for
@@ -593,16 +629,15 @@ export class WalkPart {
       // Pinned to the bottom of the sheet, so answers never push them away
       `<div class="wk-dock">` + this.askBox('data-wk', `Ask about ${esc(name(f.path))}…`,
         // Each change is explained line by line as it opens, so judging it comes first
-        `<button type="button" class="run-ask is-key" data-wk="bugs">Find bugs</button>` +
-        `<button type="button" class="run-ask is-key" data-wk="better">Better ways</button>` +
-        `<button type="button" class="run-ask is-key" data-wk="more">Explain more</button>` +
-        `<button type="button" class="wk-more-toggle" data-wk="moreacts" aria-haspopup="menu" aria-expanded="false" title="More actions" aria-label="More actions">${icon('more', 18)}</button>` +
-        `<span class="wk-extra" role="menu" hidden>` +
-          `<button type="button" class="run-ask" data-wk="lines">${prose ? 'In brief' : 'Line by line'}</button>` +
-          `<button type="button" class="run-ask" data-wk="tests">How to test it</button>` +
-          `<button type="button" class="run-ask" data-wk="quiz">Quiz me</button>` +
-          (b.added ? `<button type="button" class="run-ask" data-wk="type" aria-expanded="false">Write it yourself${best ? ` · best ${best}%` : ''}</button>` : '') +
-        `</span>`) +
+        this.dockActs([
+          { act: 'bugs', short: 'Bugs', full: 'Find bugs' },
+          { act: 'better', short: 'Improve', full: 'Better ways' },
+          { act: 'more', short: 'Explain', full: 'Explain more' },
+          prose ? { act: 'lines', short: 'In brief', full: 'In brief' } : { act: 'lines', short: 'Lines', full: 'Line by line' },
+          { act: 'tests', short: 'Tests', full: 'How to test it' },
+          { act: 'quiz', short: 'Quiz', full: 'Quiz me' },
+          b.added && { act: 'type', short: `Write${best ? ` · ${best}%` : ''}`, full: `Write it yourself${best ? ` · best ${best}%` : ''}`, expands: true }
+        ])) +
       `</div>`;
 
     // This change's answers, then the file's (Find bugs, questions), folded except the latest
@@ -612,6 +647,7 @@ export class WalkPart {
     const fileNotes = w.fileNotes?.[f.path] || [];
     fileNotes.forEach((note, k) => this.renderWalkNote(fileEl, note, k < fileNotes.length - 1 || notes.length > 0));
     this._walkCode = null;
+    this.fitActs();
     this.autoLines();
   }
 
@@ -624,7 +660,39 @@ export class WalkPart {
     this.walkBody.querySelector('[data-wk="lines"]:not(:disabled)')?.click();
   }
 
-  // The dock's ⋯ menu: the actions a walk needs less often, opened above it
+  // A dock's actions, most used first. They start in the bar, where fitActs
+  // leaves as many as its width holds and moves the rest under ⋯.
+  dockActs(acts) {
+    const esc = (t) => this.escapeHtml(t);
+    return acts.filter(Boolean).map(a =>
+      `<button type="button" class="run-ask is-key" data-wk="${a.act}" data-short="${esc(a.short)}" data-full="${esc(a.full)}" title="${esc(a.full)}"` +
+        `${a.expands ? ' aria-expanded="false"' : ''}>${esc(a.short)}</button>`).join('') +
+      `<button type="button" class="wk-more-toggle" data-wk="moreacts" aria-haspopup="menu" aria-expanded="false" title="More actions" aria-label="More actions" hidden>${icon('more', 18)}</button>` +
+      `<span class="wk-extra" role="menu" hidden></span>`;
+  }
+
+  // Fills the bar from the top of the list and puts what doesn't fit under ⋯,
+  // so widening the panel brings actions out and narrowing it tucks them away
+  fitActs() {
+    const acts = this.walkBody.querySelector('.wk-acts');
+    const more = acts?.querySelector('.wk-more-toggle');
+    if (!more) return;
+    const menu = more.nextElementSibling;
+    // Bar first, then the menu: document order is the list's order
+    const all = [...acts.querySelectorAll('[data-short]')];
+    const place = (el, inBar) => {
+      el.classList.toggle('is-key', inBar);
+      el.textContent = inBar ? el.dataset.short : el.dataset.full;
+      if (inBar) el.removeAttribute('role'); else el.setAttribute('role', 'menuitem');
+    };
+    for (const el of all) { more.before(el); place(el, true); }
+    const over = () => acts.scrollWidth > acts.clientWidth;
+    more.hidden = !over();
+    for (let k = all.length - 1; k >= 0 && over(); k--) { menu.prepend(all[k]); place(all[k], false); }
+    if (more.hidden) this.toggleMoreActs(false);
+  }
+
+  // The dock's ⋯ menu: the actions that didn't fit the bar, opened above it
   toggleMoreActs(open) {
     const menu = this.walkBody.querySelector('.wk-extra');
     if (!menu || menu.hidden === !open) return false;
@@ -656,6 +724,11 @@ export class WalkPart {
     if (act === 'open') return this.openRepoFile(this.fileRefFor(el.dataset.path));
     if (act === 'journey-create') return this.createJourney();
     if (act === 'journey-reset') return this.resetJourney();
+    if (act === 'journey-delete') return this.deleteJourney();
+    if (act === 'jr-edit') { this._journeyEditing = !this._journeyEditing; return this.renderJourney(); }
+    if (act === 'jr-move') return this.editOrder(path => moveInPath(path, Number(el.dataset.k), Number(el.dataset.to)));
+    if (act === 'jr-remove') return this.editOrder(path => path.filter((_, k) => k !== Number(el.dataset.k)));
+    if (act === 'folder-forget') return this.forgetFolderReading(el.dataset.i);
     if (act === 'retry') return w.change ? this.createChangeWalk(w.change) : this.createWalk(w.path, w.lines, w.startAt);
     if (act === 'reveal') {
       const a = el.nextElementSibling;
@@ -743,7 +816,12 @@ export class WalkPart {
         `${accuracy < 100 ? ' <span>Highlighted lines are in the original but weren\'t matched in yours; faded ones are only in yours.</span>' : ''}</div>` +
         (accuracy < 100 ? `<pre class="walk-diff">${ops.map(o =>
           `<span class="is-${o.type}">${this.escapeHtml(o.text)}</span>`).join('')}</pre>` : '');
-      this.walkBody.querySelector('[data-wk="type"]').textContent = w.change ? `Write it yourself${bestSoFar ? ` · best ${bestSoFar}%` : ''}` : `Type it${bestSoFar ? ` · ${bestSoFar}%` : ''}`;
+      const typeBtn = this.walkBody.querySelector('[data-wk="type"]');
+      const pct = bestSoFar ? ` · ${bestSoFar}%` : '', best = bestSoFar ? ` · best ${bestSoFar}%` : '';
+      Object.assign(typeBtn.dataset, w.change
+        ? { short: `Write${pct}`, full: `Write it yourself${best}` }
+        : { short: `Type${pct}`, full: `Practise typing${best}` });
+      this.fitActs();
       if (bestSoFar >= 90 && !w.change) {
         const n = this.walkBody.querySelector(`.wk-blocks [data-i="${i}"] .wk-n`);
         if (n) n.textContent = '✓';

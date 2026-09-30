@@ -51,6 +51,12 @@ export const INTENTS = [
       'from and goes. Name the related files, and suggest which one to read next and why.'
   },
   {
+    id: 'doc', name: 'Sum up the document',
+    body: 'Sum up this document for someone about to read the code: what it is for in one or two sentences, then its ' +
+      'main points as short bullets, then what to keep in mind while reading the code (names, decisions, plans, what is ' +
+      'not built yet). Name the files it points to.'
+  },
+  {
     id: 'quiz', name: 'Quiz me',
     body: 'Quiz me on this. Ask 5 questions, one at a time, from what a part does to why it is written this way or what ' +
       'would break if it changed. Wait for my answer before giving feedback and the next question.'

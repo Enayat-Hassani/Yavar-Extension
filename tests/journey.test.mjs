@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { journeyPrompt, parseJourney, nextCandidates, nextPrompt, parseNext } from '../src/utils/journey.js';
+import { journeyPrompt, parseJourney, nextCandidates, nextPrompt, parseNext, isDocPath, moveInPath } from '../src/utils/journey.js';
 
 const files = new Set(['README.md', 'src/index.js', 'src/net.js', 'src/utils/parse.js', 'lib/parse.js', 'src/app.js']);
 
@@ -118,4 +118,21 @@ test('the core files for the reading map: docs and shallow source within budget,
     { path: 'src', type: 'tree' }
   ];
   assert.deepEqual(pickCoreFiles(items, 20000), ['README.md', 'package.json', 'src/index.ts', 'src/core/engine.ts']);
+});
+
+test('a project\'s documents are summed up, its code walked', () => {
+  assert.deepEqual(['README.md', 'docs/plan.MD', 'notes.txt', 'src/app.js', 'src/md.js', 'Makefile'].map(isDocPath),
+    [true, true, true, false, false, false]);
+});
+
+test('a file moves to its new place in the reading order, the rest keeping theirs', () => {
+  const path = ['a', 'b', 'c', 'd'].map(file => ({ file }));
+  const files = (p) => p.map(x => x.file).join('');
+  assert.equal(files(moveInPath(path, 0, 2)), 'bcad');
+  assert.equal(files(moveInPath(path, 3, 0)), 'dabc');
+  assert.equal(files(moveInPath(path, 1, 2)), 'acbd');
+  // Off either end: unchanged
+  assert.equal(moveInPath(path, 0, -1), path);
+  assert.equal(moveInPath(path, 3, 4), path);
+  assert.equal(files(path), 'abcd');
 });
