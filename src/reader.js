@@ -24,6 +24,8 @@
 // A local file can be edited here and saved back to its folder. Saving moves
 // the lines after the edit, so the file's walk, the highlighted lines and the
 // panel's cached copy are brought up to date (afterSave).
+// Changed in another editor, the file is shown again and the same follows
+// (checkDisk).
 
 import { highlightLines, renderMarkdown } from './utils/markdown.js';
 import { langFromPath, blobUrl } from './utils/github.js';
@@ -448,7 +450,49 @@ window.addEventListener('beforeunload', (e) => {
   if (editing && !editing.cm.isClean(editing.clean)) e.preventDefault();
 });
 
-chrome.storage.session.get('readerView').then(({ readerView }) => render(readerView));
+// ----- Following the file on disk -----
+
+// A local file shown as it is on disk may be changed in another editor. The
+// reader looks at its modified time every few seconds while the tab is
+// showing, and as soon as you come back to it. A new version replaces the one
+// shown and moves the walk's lines, as saving here does (afterSave), so the
+// panel's next question sends the file as it is now.
+let watched = null;    // { id, modified }: the file shown, as last seen on disk
+let checking = false;
+async function checkDisk() {
+  const view = current;
+  if (checking || editing || document.hidden || view?.repo?.source !== 'local' || view.repo.ref || view.diff) return;
+  checking = true;
+  try {
+    const dir = await folderFor(view.repo.repo);
+    if (!dir || await dir.queryPermission({ mode: 'read' }) !== 'granted') return;
+    const file = await (await fileIn(dir, view.path)).getFile();
+    const id = `${view.repo.repo}:${view.path}`;
+    if (watched?.id === id && watched.modified === file.lastModified) return;
+    watched = { id, modified: file.lastModified };
+    if (file.size > 2000000) return;   // the panel only holds the start of it
+    const text = await file.text();
+    if (view !== current || editing || text === view.content) return;
+    const top = $('rd-code').hidden ? null : topLine();
+    await afterSave(view, editedLines(view.content, text), text);
+    shown = '';
+    render(current, { top });
+    say(`${view.path.split('/').pop()} changed on disk: showing the new version`);
+  } catch (e) {
+    // moved, deleted or no longer allowed: the reader keeps what it shows
+  } finally {
+    checking = false;
+  }
+}
+setInterval(checkDisk, 2000);
+document.addEventListener('visibilitychange', checkDisk);
+window.addEventListener('focus', checkDisk);
+
+chrome.storage.session.get('readerView').then(({ readerView }) => { render(readerView); checkDisk(); });
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === 'session' && changes.readerView) render(changes.readerView.newValue);
+  const view = changes.readerView?.newValue;
+  // The view the reader wrote itself (afterSave) is already showing
+  if (area !== 'session' || !changes.readerView || (view && view.ts === current?.ts && view.path === current?.path)) return;
+  render(view);
+  checkDisk();
 });
