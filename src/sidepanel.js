@@ -201,6 +201,11 @@ class YavarSidePanel {
       else if (!this.closeStepList(this.walkBody, true)) this.walkPanel.classList.add('hidden');
     });
     this.walkBody?.addEventListener('click', (e) => this.onWalkClick(e));
+    // A wider or narrower panel shows more or fewer of the dock's actions
+    let actsWidth = 0;
+    if (this.walkBody) new ResizeObserver(([e]) => {
+      if (e.contentRect.width !== actsWidth) { actsWidth = e.contentRect.width; this.fitActs(); }
+    }).observe(this.walkBody);
     for (const body of [this.walkBody]) {
       body?.addEventListener('click', (e) => {
         if (e.target.closest('.wk-ask-open')) this.toggleAsk(body, true);

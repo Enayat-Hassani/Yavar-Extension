@@ -79,6 +79,20 @@ export function checkPrompt(plan, i, code, attached) {
     `Don't rewrite everything for me; show only small snippets where needed.`;
 }
 
+// A project's own writing (README, plans, design notes): summed up in prose
+// when it comes up in the reading order, not walked line by line
+export function isDocPath(path) {
+  return /\.(md|mdx|markdown|txt|rst|adoc)$/i.test(path);
+}
+
+// The reading order with the entry at `from` moved to `to`
+export function moveInPath(path, from, to) {
+  if (from === to || !path[from] || to < 0 || to >= path.length) return path;
+  const out = [...path];
+  out.splice(to, 0, ...out.splice(from, 1));
+  return out;
+}
+
 export function journeyPrompt(name, fname) {
   return `The attached "${fname}" has the README and core files of ${name}, starting with a map of the repository. ` +
     `I'm new to this codebase and want to understand it by reading it, starting from the big picture.\n\n` +
@@ -89,8 +103,10 @@ export function journeyPrompt(name, fname) {
     ` "path": [{"file": "path/in/repo", "why": "one sentence: what I will learn by reading it now"}]}\n` +
     '```\n\n' +
     `- "parts": the 3 to 6 main parts of the project.\n` +
-    `- "path": 5 to 8 files in the order to read them: start where the program starts (the entry point), ` +
-    `then follow what it calls, so each file builds on the ones before. Skip config, tests and generated files.\n` +
+    `- "path": 5 to 10 files in the order to read them. First the project's own documents that explain it ` +
+    `(the README, and plans, design or architecture notes in the map), then the code: start where the program ` +
+    `starts (the entry point), then follow what it calls, so each file builds on the ones before. ` +
+    `Skip config, tests, generated files and documents that don't explain the project (licences, changelogs).\n` +
     `- Use only paths that appear in the repository map.`;
 }
 

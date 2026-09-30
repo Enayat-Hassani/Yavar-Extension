@@ -30,7 +30,7 @@ async function startReview(page) {
   await wait(page, 300);
 }
 
-test('a change leads with judging it, with the rest in the ⋯ menu', async () => {
+test('a change leads with judging it, and what the bar has no room for waits in the ⋯ menu', async () => {
   const b = await launch();
   try {
     const page = await b.open('sidepanel.html');
@@ -43,9 +43,9 @@ test('a change leads with judging it, with the rest in the ⋯ menu', async () =
       document.querySelector('[data-wk="moreacts"]').click();
       return { dock, more: shown() };
     });
-    // Each change is explained line by line as it opens, so Line by line waits under More
-    assert.deepEqual(r.dock, ['Bugs', 'Improve', 'Explain']);
-    assert.deepEqual(r.more, ['Bugs', 'Improve', 'Explain', 'Line by line', 'How to test it', 'Quiz me', 'Write it yourself']);
+    // Each change is explained line by line as it opens, so Lines comes after judging it
+    assert.deepEqual(r.dock, ['Bugs', 'Improve', 'Explain', 'Lines']);
+    assert.deepEqual(r.more, ['Bugs', 'Improve', 'Explain', 'Lines', 'How to test it', 'Quiz me', 'Write it yourself']);
     assert.deepEqual(b.errors, []);
   } finally { await b.close(); }
 });
@@ -129,7 +129,7 @@ test('a file walk offers the same help as a change, and typing practice compares
         score: document.querySelector('.walk-score')?.textContent || '', best: p.walk.typed?.[0]?.best };
     });
     // A block is already explained line by line, so learning it leads
-    assert.deepEqual(r.dock, ['Explain', 'Type', 'Quiz']);
+    assert.deepEqual(r.dock, ['Explain', 'Type', 'Quiz', 'Lines', 'Bugs']);
     assert.deepEqual(r.asked, ['Find bugs']);
     // A one-line gap joins the block before it (walkthrough.js)
     assert.match(r.bugsPrompt, /^I'm reading lines 1-6 of `src\/cart\.js` from shop\. Review this code for bugs/);
@@ -392,6 +392,138 @@ test('the chat button unrolls a field that names the lines, and Escape rolls it 
     assert.equal(await open(), true);
     await page.keyboard.press('Escape');
     assert.equal(await open(), false);
+    assert.deepEqual(b.errors, []);
+  } finally { await b.close(); }
+});
+
+test('the bar shows as many actions as the panel is wide, and ⋯ holds the rest', async () => {
+  const b = await launch();
+  try {
+    const page = await b.open('sidepanel.html', { width: 340, height: 700 });
+    await openFolder(page, 'shop', filesOf(makeRepo(BEFORE, AFTER)));
+    await stubChat(page, () => 'ok');
+    await page.evaluate(async () => {
+      const p = window.__panel;
+      const fence = '`'.repeat(3);
+      p.askForJson = async (prompt, o) => ({ value: o.parse(`${fence}json\n{"summary":"Cart totals.","blocks":[{"start":1,"end":5,"title":"total()","explain":"Adds up."}]}\n${fence}`), text: '', tried: 1 });
+      await p.startWalk('src/cart.js');
+    });
+    const split = () => page.evaluate(() => ({
+      bar: [...document.querySelectorAll('.wk-acts > .run-ask')].map(x => x.textContent),
+      menu: [...document.querySelectorAll('.wk-extra .run-ask')].map(x => x.textContent),
+      more: !document.querySelector('.wk-more-toggle').hidden
+    }));
+    const narrow = await split();
+    assert.deepEqual(narrow.bar, ['Explain', 'Type', 'Quiz', 'Lines']);
+    assert.deepEqual(narrow.menu, ['Find bugs', 'Better ways', 'How to test it']);
+    assert.equal(narrow.more, true);
+    // Wide enough for all of them: no ⋯
+    await page.setViewportSize({ width: 800, height: 700 });
+    await page.waitForFunction(() => document.querySelector('.wk-more-toggle').hidden);
+    assert.deepEqual(await split(), { bar: ['Explain', 'Type', 'Quiz', 'Lines', 'Bugs', 'Improve', 'Tests'], menu: [], more: false });
+    await page.setViewportSize({ width: 340, height: 700 });
+    await page.waitForFunction(() => !document.querySelector('.wk-more-toggle').hidden);
+    assert.deepEqual(await split(), narrow);
+    assert.deepEqual(b.errors, []);
+  } finally { await b.close(); }
+});
+
+test('a saved reading can be deleted, with its file walks but not the walks of its changes', async () => {
+  const b = await launch();
+  try {
+    const page = await b.open('sidepanel.html');
+    await openFolder(page, 'shop', filesOf(makeRepo(BEFORE, AFTER)));
+    await stubChat(page, () => 'ok');
+    const left = await page.evaluate(async () => {
+      const p = window.__panel;
+      await p.saveJourney({ summary: 'A cart.', path: [{ file: 'src/cart.js', why: '' }], parts: [], done: ['src/cart.js'] });
+      await chrome.storage.local.set({ 'readMarks:local/shop': ['src/cart.js'], 'walk:local/shop:src/cart.js': { blocks: [] },
+        'walk:local/shop:@uncommitted': { blocks: [] }, 'walk:local/other:src/a.js': { blocks: [] } });
+      p.walkPanel.classList.remove('hidden');
+      p.showJourneyMap();
+      const del = () => p.walkBody.querySelector('[data-wk="journey-delete"]').click();
+      del();
+      await new Promise(x => setTimeout(x, 100));
+      const kept = !!(await chrome.storage.local.get('journey:local/shop'))['journey:local/shop'];
+      del();   // asks twice
+      for (let t = 0; t < 30 && p.walkView !== 'folders'; t++) await new Promise(x => setTimeout(x, 100));
+      return { kept, view: p.walkView, journey: p.journey, keys: Object.keys(await chrome.storage.local.get(null)).filter(k => /^(journey|readMarks|walk):/.test(k)).sort() };
+    });
+    assert.equal(left.kept, true);
+    assert.equal(left.view, 'folders');
+    assert.equal(left.journey, null);
+    assert.deepEqual(left.keys, ['walk:local/other:src/a.js', 'walk:local/shop:@uncommitted']);
+    assert.deepEqual(b.errors, []);
+  } finally { await b.close(); }
+});
+
+test('the reading order can be edited: moved, dragged, taken out and added to', async () => {
+  const b = await launch();
+  try {
+    const page = await b.open('sidepanel.html');
+    await openFolder(page, 'shop', filesOf(makeRepo({ ...BEFORE, 'README.md': '# Shop\n', 'plan.md': '# Plan\n' }, AFTER)));
+    await stubChat(page, () => 'ok');
+    await page.evaluate(async () => {
+      const p = window.__panel;
+      await p.saveJourney({ summary: 'A cart.', path: ['src/cart.js', 'src/tax.js', 'README.md'].map(file => ({ file, why: '' })), parts: [], done: [] });
+      p.walkPanel.classList.remove('hidden');
+      p.showJourneyMap();
+    });
+    const order = () => page.evaluate(async () => (await window.__panel.loadJourney()).path.map(p => p.file));
+    await page.click('[data-wk="jr-edit"]');
+    // README.md up twice: first
+    await page.click('[aria-label="Move README.md up"]');
+    await page.click('[aria-label="Move README.md up"]');
+    assert.deepEqual(await order(), ['README.md', 'src/cart.js', 'src/tax.js']);
+    await page.dragAndDrop('.jr-path li[data-k="2"]', '.jr-path li[data-k="1"]');
+    assert.deepEqual(await order(), ['README.md', 'src/tax.js', 'src/cart.js']);
+    await page.click('[aria-label="Take src/tax.js out of the order"]');
+    await page.fill('.jr-add-input', 'plan.md');
+    await page.press('.jr-add-input', 'Enter');
+    await page.waitForFunction(() => document.querySelectorAll('.jr-path li').length === 3);
+    assert.deepEqual(await order(), ['README.md', 'src/cart.js', 'plan.md']);
+    // Only files of the project can be added
+    await page.fill('.jr-add-input', 'nope.js');
+    await page.press('.jr-add-input', 'Enter');
+    assert.deepEqual(await order(), ['README.md', 'src/cart.js', 'plan.md']);
+    // Done: the order is the way to read, starting with the README
+    await page.click('[data-wk="jr-edit"]');
+    assert.equal(await page.textContent('.jr-actions .jr-primary'), 'Start with README.md →');
+    assert.deepEqual(b.errors, []);
+  } finally { await b.close(); }
+});
+
+test('a document in the reading order is summed up, not walked line by line', async () => {
+  const b = await launch();
+  try {
+    const page = await b.open('sidepanel.html');
+    await openFolder(page, 'shop', filesOf(makeRepo({ ...BEFORE, 'plan.md': '# Plan\n\nFirst the cart, then tax.\n' }, AFTER)));
+    await stubChat(page, () => 'ok');
+    const r = await page.evaluate(async () => {
+      const p = window.__panel;
+      const asked = [];
+      p.askForJson = async () => { asked.push('blocks'); return { value: null, text: '', tried: 1 }; };
+      p.askInPanel = async (prompt, o) => { asked.push({ prompt, files: o.attachments.map(a => a.filename) }); return '**A plan.** Cart first, then tax.'; };
+      await p.saveJourney({ summary: 'A cart.', path: [{ file: 'plan.md', why: '' }, { file: 'src/cart.js', why: '' }], parts: [], done: [] });
+      await p.startWalk('plan.md');
+      const view = (await chrome.storage.session.get('readerView')).readerView;
+      return {
+        asked,
+        explain: document.querySelector('.wk-explain').innerHTML,
+        dock: [...document.querySelectorAll('.wk-acts > .run-ask, .wk-extra .run-ask')].map(x => x.textContent),
+        shown: view?.path, lines: view?.lines || null,
+        finish: document.querySelector('[data-wk="finish"]')?.textContent
+      };
+    });
+    assert.equal(r.asked.length, 1);
+    assert.match(r.asked[0].prompt, /its document `plan\.md`\. Sum up this document/);
+    assert.deepEqual(r.asked[0].files, ['plan.md']);
+    assert.match(r.explain, /<strong>A plan\.<\/strong>/);
+    assert.deepEqual(r.dock, ['Quiz']);
+    // The reader shows the whole document, nothing highlighted
+    assert.equal(r.shown, 'plan.md');
+    assert.equal(r.lines, null);
+    assert.equal(r.finish, 'Finish file');
     assert.deepEqual(b.errors, []);
   } finally { await b.close(); }
 });
