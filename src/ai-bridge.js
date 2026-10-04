@@ -6,8 +6,8 @@
 
   const SELECTORS = {
     chatgpt: {
-      input: '#prompt-textarea, textarea[data-id="root"], div[contenteditable="true"][id="prompt-textarea"]',
-      button: 'button[data-testid="send-button"], #composer-submit-button, button[aria-label="Send prompt" i]'
+      input: '#prompt-textarea, textarea[name="prompt"], textarea[data-id="root"], div[contenteditable="true"][id="prompt-textarea"]',
+      button: 'button[data-testid="send-button"], #composer-submit-button, button[data-composer-submit], button[aria-label="Send prompt" i]'
     },
     claude: {
       input: 'div[contenteditable="true"].ProseMirror, div[contenteditable="true"]',
@@ -23,8 +23,8 @@
   // These are best-effort and may need updating as the AI sites change their DOM.
   const RESPONSE_SELECTORS = {
     chatgpt: {
-      message: 'div[data-message-author-role="assistant"]',
-      content: '.markdown, .prose'
+      message: 'div[data-message-author-role="assistant"], li[data-message-role="assistant"]',
+      content: '.markdown, .prose, [data-assistant-markdown]'
     },
     claude: {
       message: 'div.font-claude-message, [data-testid="assistant-message"]',
@@ -455,7 +455,7 @@
   // Settings. Everything else lives in the Yavar view.
 
   const USER_SELECTORS = {
-    chatgpt: 'div[data-message-author-role="user"]',
+    chatgpt: 'div[data-message-author-role="user"], li[data-message-role="user"] [data-user-message-bubble]',
     claude: '[data-testid="user-message"]',
     gemini: 'user-query'
   };
