@@ -68,3 +68,29 @@ test('an answer read back from the chat keeps its tables, quotes and nested list
     assert.deepEqual(b.errors, []);
   } finally { await b.close(); }
 });
+
+// Shaped like ChatGPT's code block since October 2026: no <pre>, a header
+// with the language and buttons that copies leave out
+const CODE_BLOCK = `
+  <ul dir="auto"><li><span>First item</span></li></ul>
+  <div><div data-markdown-copy="code-block">
+    <div data-markdown-copy="exclude"><svg></svg><div>JavaScript</div><div><button aria-label="Copy">Copy</button></div></div>
+    <div dir="ltr" style="white-space: pre"><code><span>const a = 1;
+console.log(a);</span></code></div>
+  </div></div>`;
+
+test("an answer's code block is read from ChatGPT's newer layout", async () => {
+  const b = await launch();
+  try {
+    const page = await b.open('reader.html');
+    await page.addScriptTag({ url: 'src/bridge-markdown.js' });
+    const md = await page.evaluate((html) => {
+      const el = document.createElement('div');
+      el.innerHTML = html;
+      document.body.append(el);
+      return window.yavarAnswerMarkdown(el);
+    }, CODE_BLOCK);
+    assert.equal(md, '- First item\n\n```javascript\nconst a = 1;\nconsole.log(a);\n```');
+    assert.deepEqual(b.errors, []);
+  } finally { await b.close(); }
+});

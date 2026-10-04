@@ -26,14 +26,21 @@
 
       const tag = node.tagName.toLowerCase();
       if (SKIP_TAGS.test(tag) || SKIP_CLASS.test(typeof node.className === 'string' ? node.className : '')) return;
+      // ChatGPT marks a code block's header (language, Copy) as left out of copies
+      const copy = node.getAttribute('data-markdown-copy');
+      if (copy === 'exclude') return;
 
-      if (tag === 'pre') {
+      if (tag === 'pre' || copy === 'code-block') {
         const codeEl = node.querySelector('code');
         const codeText = (codeEl || node).innerText.replace(/\n+$/, '');
         let lang = '';
         if (codeEl) {
           const m = (codeEl.className || '').match(/language-([\w+-]+)/);
           if (m) lang = m[1];
+        }
+        // ChatGPT names the language in that header instead
+        if (!lang && copy === 'code-block') {
+          lang = (node.querySelector('[data-markdown-copy="exclude"]')?.innerText || '').trim().split('\n')[0].trim().toLowerCase().replace(/\s+/g, '-');
         }
         out += `\n\n\`\`\`${lang}\n${codeText}\n\`\`\`\n\n`;
       } else if (/^h[1-6]$/.test(tag)) {
