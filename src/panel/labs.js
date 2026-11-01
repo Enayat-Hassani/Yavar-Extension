@@ -3,7 +3,7 @@
 
 import { coachSteps, loadCoach, coachPrompt } from '../utils/coach.js';
 import { materialFile, addToMorfia } from '../utils/material.js';
-import { IDEA_STEPS, ideasPrompt } from '../utils/ideas.js';
+import { ideaSteps, loadIdeas, ideasPrompt } from '../utils/ideas.js';
 
 export class LabsPart {
   // IELTS coach: the article goes with the first step as a file; each send
@@ -43,8 +43,8 @@ export class LabsPart {
 
   // Ideas: each send runs the current round, then any rounds that follow on
   // their own, and waits for you at the next round that asks something
-  startIdeas() {
-    this._ideas = { i: 0 };
+  async startIdeas() {
+    this._ideas = { i: 0, steps: ideaSteps((await loadIdeas()).prompts) };
     this.composerTool = 'ideas';
     this.renderComposer();
     this.setView('app');
@@ -57,7 +57,7 @@ export class LabsPart {
     this.composerTool = 'ideas';
     if (s.i === 0) s.topic = text;
     do {
-      const step = IDEA_STEPS[s.i];
+      const step = s.steps[s.i];
       const answer = await this.askInThread({
         title: `Ideas · ${s.topic.slice(0, 50)}`, label: step.auto ? `${step.name} (next round)` : text,
         prompt: ideasPrompt(step, text)
@@ -67,8 +67,8 @@ export class LabsPart {
       if (answer == null) break;
       s.i++;
       this.renderComposer();
-    } while (s.i < IDEA_STEPS.length && IDEA_STEPS[s.i].auto);
-    if (s.i >= IDEA_STEPS.length) { this._ideas = null; this.composerTool = null; }
+    } while (s.i < s.steps.length && s.steps[s.i].auto);
+    if (s.i >= s.steps.length) { this._ideas = null; this.composerTool = null; }
     this.renderComposer();
   }
 

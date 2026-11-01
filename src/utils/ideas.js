@@ -42,6 +42,25 @@ For each one, search the web to check whether it, or something close, already ex
   }
 ];
 
+// Settings stores only the rounds a user changed (chrome.storage.sync, key
+// `ideas`: { prompts: { [stepId]: body } }), so an improved default still
+// reaches every round nobody edited.
+export const IDEAS_KEY = 'ideas';
+
+// The rounds with a user's edits applied; `edited` marks the ones changed
+export function ideaSteps(edits = {}) {
+  return IDEA_STEPS.map(s => (typeof edits[s.id] === 'string' && edits[s.id].trim()
+    ? { ...s, body: edits[s.id], edited: true } : { ...s, edited: false }));
+}
+
+// A round you answer must carry what you typed; a round that runs on its own needs none
+export const lacksText = (step, body) => !step.auto && !/\{\{\s*text\s*\}\}/.test(body);
+
+export async function loadIdeas() {
+  const { [IDEAS_KEY]: saved } = await chrome.storage.sync.get(IDEAS_KEY);
+  return { prompts: saved?.prompts || {} };
+}
+
 // The prompt for one step, with what you typed in place of {{text}}
 export function ideasPrompt(step, text = '') {
   // A function, so a $ in what you typed is not read as a replacement pattern

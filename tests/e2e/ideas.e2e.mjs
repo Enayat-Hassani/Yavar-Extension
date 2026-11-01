@@ -19,6 +19,7 @@ test('Ideas scans, makes ideas, waits for your pick, then critiques and deepens'
       const send = async (text) => { p.threadInput.value = text; p.sendComposer(); await pause(200); };
       document.getElementById('app-more').click();
       document.querySelector('#tool-menu-list [data-tool="ideas"]').click();
+      await pause(200);
       const start = { chip: chip(), placeholder: p.threadInput.placeholder };
       await send('cheaper bus tickets');
       const paused = { chip: chip(), placeholder: p.threadInput.placeholder, asked: asks.length };
@@ -33,6 +34,30 @@ test('Ideas scans, makes ideas, waits for your pick, then critiques and deepens'
     assert.deepEqual(r.prompts, ['I want genuinely new ideas for: cheaper bus tickets', 'Now make ideas with these methods, 2 or 3 ideas each:',
       'Develop these: I2 and I5', 'Take the three strongest that survived. For each:']);
     assert.deepEqual(r.labels, ['cheaper bus tickets', 'Diverge (next round)', 'I2 and I5', 'Deepen (next round)']);
+    assert.deepEqual(b.errors, []);
+  } finally { await b.close(); }
+});
+
+test('a round edited in Settings is the text Ideas sends', async () => {
+  const b = await launch();
+  try {
+    const page = await b.open('sidepanel.html');
+    const r = await page.evaluate(async () => {
+      const p = window.__panel;
+      const pause = (ms) => new Promise(x => setTimeout(x, ms));
+      await chrome.storage.sync.set({ ideas: { prompts: { scan: 'Only look at prices for: {{text}}', diverge: 'Two wild ideas, no more.' } } });
+      const asks = [];
+      p.askInThread = async (o) => { asks.push(o); return 'ok'; };
+      document.getElementById('app-more').click();
+      document.querySelector('#tool-menu-list [data-tool="ideas"]').click();
+      await pause(200);
+      p.threadInput.value = 'bus tickets';
+      p.sendComposer();
+      await pause(200);
+      return asks.map(a => a.prompt);
+    });
+    // The edited rounds are sent; the round nobody edited keeps its default
+    assert.deepEqual(r, ['Only look at prices for: bus tickets', 'Two wild ideas, no more.']);
     assert.deepEqual(b.errors, []);
   } finally { await b.close(); }
 });

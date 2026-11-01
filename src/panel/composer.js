@@ -4,7 +4,6 @@
 
 import { suggestActions, actionPrompt } from '../utils/actions.js';
 import { icon } from '../utils/icons.js';
-import { IDEA_STEPS } from '../utils/ideas.js';
 import {
   isReadablePath,
   estimateTokens,
@@ -150,11 +149,11 @@ export class ComposerPart {
   composerTools() {
     const c = this._coach;
     const step = c?.steps[c.i];
-    const idea = this._ideas && IDEA_STEPS[this._ideas.i];
+    const idea = this._ideas?.steps[this._ideas.i];
     return {
       ...(step ? { coach: { icon: icon('pen', 13), name: `IELTS ${c.i + 1}/${c.steps.length} · ${step.name}`, placeholder: step.ask, run: (t) => this.coachSend(t) } } : {}),
       // A round that runs on its own only waits here when it failed
-      ...(idea ? { ideas: { icon: icon('sparkle', 13), name: `Ideas ${this._ideas.i + 1}/${IDEA_STEPS.length} · ${idea.name}`,
+      ...(idea ? { ideas: { icon: icon('sparkle', 13), name: `Ideas ${this._ideas.i + 1}/${this._ideas.steps.length} · ${idea.name}`,
         placeholder: idea.ask || 'Send anything to run this round again', run: (t) => this.ideasSend(t) } } : {})
     };
   }

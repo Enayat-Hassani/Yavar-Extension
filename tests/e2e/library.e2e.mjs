@@ -60,6 +60,31 @@ test('a review prompt edited in Settings is kept alone, and can be reset', async
   } finally { await b.close(); }
 });
 
+test('an Ideas round edited in Settings is kept alone, can be reset, and keeps {{text}} when you answer it', async () => {
+  const b = await launch();
+  try {
+    const page = await b.open('options.html#prompts', { width: 900, height: 800 });
+    await wait(page, 800);
+    const names = (await page.locator('#ideas-steps .coach-step-name').allInnerTexts()).map(t => t.replace(/\s+/g, ' ').trim());
+    assert.deepEqual(names, ['1. Scan', '2. Diverge runs on its own', '3. Critique', '4. Deepen runs on its own']);
+    const stored = () => page.evaluate(async () => (await chrome.storage.sync.get('ideas')).ideas);
+    // A round you answer without {{text}} is refused, and nothing is saved
+    await page.locator('[data-idea="critique"]').fill('Develop these, whatever they are.');
+    await wait(page, 700);
+    assert.equal(await page.locator('#ideas-steps .coach-step-error').nth(2).isVisible(), true);
+    assert.equal(await stored(), undefined);
+    await page.locator('[data-idea="critique"]').fill('Develop these: {{text}}. Be brief.');
+    // A round that runs on its own needs no {{text}}
+    await page.locator('[data-idea="diverge"]').fill('Two ideas.');
+    await wait(page, 700);
+    assert.deepEqual(await stored(), { prompts: { critique: 'Develop these: {{text}}. Be brief.', diverge: 'Two ideas.' } });
+    await page.locator('[data-reset-idea="diverge"]').click();
+    await wait(page, 700);
+    assert.deepEqual(await stored(), { prompts: { critique: 'Develop these: {{text}}. Be brief.' } });
+    assert.deepEqual(b.errors, []);
+  } finally { await b.close(); }
+});
+
 test('the extras live on the Labs page, off until turned on', async () => {
   const b = await launch();
   try {

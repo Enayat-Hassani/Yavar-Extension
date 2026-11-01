@@ -3,6 +3,7 @@
 import { loadTemplates, saveTemplates, DEFAULT_TEMPLATES } from './utils/templates.js';
 import { loadModels } from './utils/models.js';
 import { COACH_KEY, coachSteps, lacksAttempt, loadCoach } from './utils/coach.js';
+import { IDEAS_KEY, ideaSteps, lacksText, loadIdeas } from './utils/ideas.js';
 import { PROMPTS_KEY, editableIntents, loadEdits } from './utils/intents.js';
 import { pingMorfia } from './utils/material.js';
 import { OPENROUTER_BASE, DEFAULT_MONTHLY_CAP, isFreeModel, loadApiConfig, buildRoute, askWithBudget, loadSpend, spentThisMonth } from './utils/llm.js';
@@ -59,6 +60,8 @@ class OptionsPage {
     this.renderCoach();
     this.review = await loadEdits();
     this.renderReview();
+    this.ideas = await loadIdeas();
+    this.renderIdeas();
     this.showPage();
     window.addEventListener('hashchange', () => this.showPage());
     // Wrapping changes with the width: fit the open page's prompts again
@@ -162,6 +165,12 @@ class OptionsPage {
     this.reviewList?.addEventListener('click', (e) => {
       const id = e.target.closest('[data-reset-review]')?.dataset.resetReview;
       if (id) { delete this.review[id]; this.persistReview(); this.renderReview(); }
+    });
+    this.ideasList = document.getElementById('ideas-steps');
+    this.ideasList?.addEventListener('input', (e) => this.handleIdeasEdit(e));
+    this.ideasList?.addEventListener('click', (e) => {
+      const id = e.target.closest('[data-reset-idea]')?.dataset.resetIdea;
+      if (id) { delete this.ideas.prompts[id]; this.persistIdeas(); this.renderIdeas(); }
     });
     this.coachAbout?.addEventListener('input', () => {
       this.coach.about = this.coachAbout.value;
@@ -496,6 +505,7 @@ class OptionsPage {
       promptTemplates: this.templates,
       coach: this.coach,
       review: this.review,
+      ideas: this.ideas,
       aiModels: Array.isArray(aiModels) ? aiModels : undefined
     };
     const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
@@ -561,6 +571,17 @@ class OptionsPage {
         this.coach = { about: typeof parsed.coach.about === 'string' ? parsed.coach.about : '', prompts };
         await this.persistCoach();
         this.renderCoach();
+      }
+
+      if (parsed.yavarExport && parsed.ideas && typeof parsed.ideas === 'object') {
+        const prompts = {};
+        for (const s of ideaSteps()) {
+          const body = parsed.ideas.prompts?.[s.id];
+          if (typeof body === 'string' && body.trim() && !lacksText(s, body)) prompts[s.id] = body;
+        }
+        this.ideas = { prompts };
+        await this.persistIdeas();
+        this.renderIdeas();
       }
 
       if (parsed.yavarExport && parsed.review && typeof parsed.review === 'object') {
@@ -743,6 +764,53 @@ class OptionsPage {
         } catch (error) {
           console.error('[Yavar] Failed to save the prompts:', error);
           this.showToast('Could not save the prompts', true);
+        }
+        resolve();
+      }, 400);
+    });
+  }
+
+  // ===== Ideas rounds =====
+  // Only edited rounds are stored, as with the coach's steps
+  renderIdeas() {
+    if (!this.ideasList) return;
+    this.ideasList.innerHTML = ideaSteps(this.ideas.prompts).map((s, i) => `
+      <div class="template-card">
+        <div class="template-row">
+          <span class="coach-step-name">${i + 1}. ${this.escapeHtml(s.name)}${s.auto ? ' <span class="help-text">runs on its own</span>' : ''}</span>
+          <button type="button" class="btn-secondary btn-small" data-reset-idea="${s.id}" ${s.edited ? '' : 'hidden'}>Reset</button>
+        </div>
+        <textarea class="template-body-input" data-idea="${s.id}" rows="1" aria-label="Prompt for round ${i + 1}, ${this.escapeHtml(s.name)}">${this.escapeHtml(s.body)}</textarea>
+        <p class="coach-step-error" role="alert" hidden>Keep {{text}}: it carries what you type for this round.</p>
+      </div>`).join('');
+    this.ideasList.querySelectorAll('textarea').forEach(fitHeight);
+  }
+
+  handleIdeasEdit(e) {
+    const el = e.target.closest('[data-idea]');
+    if (!el) return;
+    fitHeight(el);
+    const card = el.closest('.template-card');
+    const id = el.dataset.idea;
+    const step = ideaSteps().find(s => s.id === id);
+    const invalid = lacksText(step, el.value);
+    card.querySelector('.coach-step-error').hidden = !invalid;
+    if (invalid) return;
+    if (el.value.trim() && el.value !== step.body) this.ideas.prompts[id] = el.value;
+    else delete this.ideas.prompts[id];
+    card.querySelector('[data-reset-idea]').hidden = !this.ideas.prompts[id];
+    this.persistIdeas();
+  }
+
+  persistIdeas() {
+    clearTimeout(this._ideasTimer);
+    return new Promise((resolve) => {
+      this._ideasTimer = setTimeout(async () => {
+        try {
+          await chrome.storage.sync.set({ [IDEAS_KEY]: this.ideas });
+        } catch (error) {
+          console.error('[Yavar] Failed to save the Ideas prompts:', error);
+          this.showToast(/quota/i.test(error.message) ? 'Ideas prompts too large to sync - shorten one' : 'Could not save the Ideas prompts', true);
         }
         resolve();
       }, 400);
