@@ -14,8 +14,9 @@
 // `focus` the lines an explanation named. `nav` shows ‹ › to step the walk,
 // which the panel follows through `readerNav`. `walk` names the walk the
 // highlight belongs to (its storage key) and its block: a small sign beside
-// the highlight, and ‹ ›, open the panel on that walk, even after the panel
-// was closed or moved on to something else.
+// the highlight, "Open in Yavar" in the header and ‹ › open the panel on that
+// walk, even after the panel was closed or moved on to something else. A view
+// with no walk (opened from a citation) offers to walk its lines instead.
 //
 // Wrap folds long lines onto the rows under them, which have no number of
 // their own, so line numbers (and Yavar's path:12-15) stay the same. A
@@ -72,6 +73,7 @@ let editing = null;    // { view, handle, text, modified, cm, clean, saving } wh
 // `top`: the line to scroll to instead of the highlighted lines (leaving the editor)
 function render(view, { top = null } = {}) {
   current = view;
+  syncOpen();
   if (editing) return;   // the editor stays; the latest view shows when you're done
   const has = !!view?.path;
   const preview = has && previewing(view);
@@ -156,6 +158,18 @@ function render(view, { top = null } = {}) {
   offerEdit(view);
 }
 
+// The way into the panel from here, named for what it will do: show what
+// Yavar said about this view's lines, or walk them when it said nothing yet
+function syncOpen() {
+  const v = current?.path ? current : null;
+  const btn = $('rd-open');
+  // A file at a past commit, read without a walk, can't be walked as it was
+  btn.hidden = !!v && !v.walk && v.repo.source === 'local' && !!v.repo.ref;
+  btn.textContent = !v ? 'Open Yavar' : v.walk ? 'Open in Yavar' : v.lines ? 'Walk these lines' : 'Walk this file';
+  btn.title = !v ? 'Open the Yavar panel' : v.walk ? 'Show what Yavar said about this in the panel, even if it was closed'
+    : 'Ask Yavar to walk through ' + (v.lines ? 'these lines' : 'this file') + ' in the panel';
+}
+
 // Where rows `start` to `end` (1-based) sit in the code, wrapped or not
 function rowsBox(start, end) {
   const rows = $('rd-text').children;
@@ -208,6 +222,9 @@ function relayout() {
 function place(lines, scroll = true, pulse = true) {
   const band = $('rd-band');
   placed = lines;
+  const gutter = $('rd-gutter').children;
+  for (const g of $('rd-gutter').querySelectorAll('.is-lit')) g.classList.remove('is-lit');
+  if (lines) for (let n = lines.start; n <= Math.min(lines.end, gutter.length); n++) gutter[n - 1].classList.add('is-lit');
   if (!lines) { band.hidden = true; $('rd-explain').hidden = true; return; }
   const { top, height } = rowsBox(lines.start, lines.end);
   band.hidden = false;
@@ -429,9 +446,10 @@ $('rd-md').addEventListener('click', async (e) => {
 // been closed, and it reopens the walk this view belongs to.
 const step = (dir) => {
   openPanel({ windowId });
-  chrome.storage.session.set({ readerNav: { dir, walk: current?.walk || null, repo: current?.repo || null, ts: Date.now() } });
+  chrome.storage.session.set({ readerNav: { dir, walk: current?.walk || null, repo: current?.repo || null, path: current?.path || null, lines: current?.lines || null, ts: Date.now() } });
 };
 $('rd-explain').addEventListener('click', () => step(0));
+$('rd-open').addEventListener('click', () => step(0));
 $('rd-prev').addEventListener('click', () => step(-1));
 $('rd-next').addEventListener('click', () => step(1));
 document.addEventListener('keydown', (e) => {

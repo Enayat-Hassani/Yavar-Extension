@@ -169,6 +169,8 @@ body {
 .rd-btn-primary { color: var(--on-accent); background: var(--accent); }
 .rd-btn-primary:hover { background: color-mix(in srgb, var(--accent) 86%, black); }
 .rd-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.rd-open { color: var(--text-primary); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text-primary) 16%, transparent); }
+.rd-open:hover { background: color-mix(in srgb, var(--text-primary) 7%, transparent); }
 .rd-btn[hidden] { display: none; }
 
 /* Wrap and Preview: small toggles, lit while on */
@@ -251,10 +253,11 @@ body {
   padding-right: 12px !important;
   text-align: right;
   color: var(--text-secondary);
-  opacity: 0.6;
   user-select: none;
   border-right: 1px solid var(--border);
 }
+/* The numbers of the lines under discussion: the ones Yavar's answers cite */
+.rd-gutter > div.is-lit { color: var(--text-primary); }
 
 .rd-src-scroll { flex: 1; min-width: 0; overflow-x: auto; }
 .rd-src { position: relative; width: max-content; min-width: 100%; }

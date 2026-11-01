@@ -770,3 +770,75 @@ test('a new file walk starts with the big picture, then its syntax, then block b
     assert.deepEqual(b.errors, []);
   } finally { await b.close(); }
 });
+
+test('a narrow walk bar keeps the name whole on its row, and the block shows its own lines above its explanation', async () => {
+  const b = await launch();
+  try {
+    const page = await b.open('sidepanel.html');   // 420px
+    await openFolder(page, 'shop', filesOf(makeRepo(BEFORE, AFTER)));
+    await stubChat(page, LINES);
+    await startReview(page);
+    await page.waitForFunction(() => document.querySelector('.wk-code:not([hidden])'));
+    const r = await page.evaluate(() => {
+      const box = (s) => document.querySelector(s).getBoundingClientRect();
+      const ctx = document.querySelector('.wk-ctx');
+      const code = document.querySelector('.wk-code');
+      return {
+        cut: ctx.scrollWidth > ctx.clientWidth,
+        posBelowName: box('.wk-pos').top > box('.wk-ctx').bottom - 2,
+        stepsWithPos: Math.abs(box('.wk-steps').top - box('.wk-where').top) < 6,
+        numbers: [...code.querySelectorAll('i')].map(i => i.textContent),
+        code: code.querySelector('code').textContent.split('\n').length > 0 && code.textContent.includes('i.price * i.qty'),
+        codeAboveNotes: code.getBoundingClientRect().bottom <= box('.walk-notes').top + 1
+      };
+    });
+    assert.equal(r.cut, false);
+    assert.equal(r.posBelowName, true);
+    assert.equal(r.stepsWithPos, true);
+    // The lines the part covers, numbered as in the file
+    assert.deepEqual(r.numbers.slice(0, 2), ['1', '2']);
+    assert.equal(r.code, true);
+    assert.equal(r.codeAboveNotes, true);
+    assert.deepEqual(b.errors, []);
+  } finally { await b.close(); }
+});
+
+test('the reader offers the way into the panel: Open in Yavar on a walk, a walk of the lines on a citation', async () => {
+  const b = await launch();
+  try {
+    const page = await b.open('sidepanel.html');
+    await openFolder(page, 'shop', filesOf(makeRepo(BEFORE, AFTER)));
+    await stubChat(page, LINES);
+    await startReview(page);
+    const reader = await b.open('reader.html', { width: 1000, height: 500 });
+    await wait(reader, 500);
+    const walking = await reader.evaluate(() => ({
+      open: document.getElementById('rd-open').textContent,
+      lit: [...document.getElementById('rd-gutter').children].map((g, k) => g.classList.contains('is-lit') ? k + 1 : 0).filter(Boolean)
+    }));
+    assert.equal(walking.open, 'Open in Yavar');
+    // The numbers of the highlighted rows stand out from the rest
+    assert.ok(walking.lit.length >= 2, 'the highlighted rows have lit numbers');
+
+    // The same lines opened from a citation: no walk, so the button offers one
+    await reader.evaluate(async () => {
+      const { readerView } = await chrome.storage.session.get('readerView');
+      await chrome.storage.session.set({ readerView: { ...readerView, walk: null, nav: null, label: '', diff: null, lines: { start: 1, end: 3 }, ts: Date.now() } });
+    });
+    await reader.waitForFunction(() => document.getElementById('rd-open').textContent === 'Walk these lines');
+
+    // The panel, opened by that click, walks them (followReader is what it runs)
+    await page.evaluate(async () => {
+      const p = window.__panel;
+      const fence = '`'.repeat(3);
+      p.askForJson = async (prompt, o) => ({ value: o.parse(`${fence}json\n{"summary":"","blocks":[{"start":1,"end":3,"title":"total()","explain":"Adds up."}]}\n${fence}`), text: '', tried: 1 });
+      p.askLevel = async () => {};
+      await p.followReader({ dir: 0, walk: null, repo: { source: 'local', repo: 'shop', name: 'shop' }, path: 'src/cart.js', lines: { start: 1, end: 3 } });
+    });
+    await page.waitForFunction(() => window.__panel.walk?.blocks);
+    const w = await page.evaluate(() => ({ path: window.__panel.walk.path, range: window.__panel.walk.range }));
+    assert.equal(w.path, 'src/cart.js');
+    assert.deepEqual(w.range, { start: 1, end: 3 });
+    assert.deepEqual(b.errors, []);
+  } finally { await b.close(); }
+});

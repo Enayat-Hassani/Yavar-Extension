@@ -42,16 +42,18 @@ export class SheetsPart {
     return q;
   }
 
-  // Pinned at the top of the sheet: a way back, what you're reading and where
+  // Pinned at the top of the sheet: a way back, what you're reading, where
   // you are in it (the step list opens from it), Previous, a forward control
-  // and ✕, over a thin progress line. It stands in for the sheet's header, so
+  // and ✕, over a thin progress line. In a narrow panel the position and the
+  // steps drop to a second row, so the name is never cut to a few letters. It stands in for the sheet's header, so
   // the answer gets the height. `act` names the sheet's data attribute (wk,
   // rb); `context` is text, the other titles are markup.
   stepBar({ act, back = '', context, where, first, next, pct, items, extra = '' }) {
     const a = `data-${act}`;
     return `<div class="wk-bar"><div class="wk-row">${back}` +
+        `<span class="wk-ctx" title="${this.escapeHtml(context)}">${this.escapeHtml(context)}</span>` +
         `<button type="button" class="wk-where" ${a}="list" aria-expanded="false">` +
-          `<span class="wk-ctx">${this.escapeHtml(context)}</span><span class="wk-pos">${where}</span><span class="wk-chev" aria-hidden="true"></span></button>` +
+          `<span class="wk-pos">${where}</span><span class="wk-chev" aria-hidden="true"></span></button>` +
         `<span class="wk-steps"><button type="button" class="wk-step" ${a}="prev" aria-label="Previous"${first ? ' disabled' : ''}>‹</button>${next}</span>` +
         `<button type="button" class="wk-close" ${a}="close" title="Close (Esc)" aria-label="Close">✕</button>` +
       `</div>` +

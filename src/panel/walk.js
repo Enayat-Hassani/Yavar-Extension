@@ -3,7 +3,7 @@
 // the end.
 // Its methods join YavarSidePanel's (see the end of sidepanel.js), so `this` is the panel.
 
-import { renderMarkdown } from '../utils/markdown.js';
+import { renderMarkdown, highlightLines } from '../utils/markdown.js';
 import { icon } from '../utils/icons.js';
 import { walkPrompt, parseWalkthrough, compareTyped, quizPrompt, parseQuiz, textSha } from '../utils/walkthrough.js';
 import { nextCandidates, nextPrompt, parseNext, isDocPath, moveInPath } from '../utils/journey.js';
@@ -370,9 +370,20 @@ export class WalkPart {
 
   // The reader asked: step the walk (`dir`), or show its highlighted block
   // (dir 0). Its walk is reopened when the panel shows something else, or
-  // was closed, so the reader never steps a walk it isn't showing.
-  async followReader({ dir = 0, walk: ref, repo }) {
-    if (!ref?.id) return;
+  // was closed, so the reader never steps a walk it isn't showing. With no
+  // walk, it asks to walk the file or lines the reader shows.
+  async followReader({ dir = 0, walk: ref, repo, path = null, lines = null }) {
+    // A view with no walk (opened from an answer's citation): "Walk these lines"
+    if (!ref?.id) {
+      if (!path || !repo) return;
+      try {
+        if (await this.restoreSource(repo)) await this.startWalk(path, lines);
+        else this.showNotification(`Open the ${repo.repo} folder again to walk ${path.split('/').pop()}`);
+      } catch (e) {
+        this.showNotification(`⚠️ Could not load ${repo.name}: ${e.message}`);
+      }
+      return;
+    }
     const w = this.walk;
     const showing = !this.walkPanel.classList.contains('hidden') && this.walkView === 'file' && w?.blocks;
     if (!showing || (w.key || this.walkKey(w.path)) !== ref.id) {
@@ -490,6 +501,29 @@ export class WalkPart {
     return sliceLines(await this.fetchFileAt(owner, repo, ref, b.path), b.start, b.end);
   }
 
+  // The block's own lines, numbered as in the file, under its title: its
+  // explanation is read next to the code it names, and the reader tab holds
+  // the whole file. Long blocks start folded. A block whose code can't be
+  // fetched just has no snippet; the reader still shows it.
+  async fillBlockCode() {
+    const host = this.walkBody.querySelector('.wk-code');
+    if (!host) return;
+    const w = this.walk;
+    const b = w.blocks[w.current];
+    let text;
+    try { text = await this.walkBlockCode(); } catch (e) { return; }
+    if (!host.isConnected || !text) return;
+    const lang = langFromPath(b.path || w.path);
+    const lines = highlightLines(text.replace(/\n$/, ''), lang);
+    const fold = lines.length > 12;
+    host.classList.toggle('is-folded', fold);
+    host.innerHTML = `<div class="md-code-bar"><span>${this.escapeHtml(lang) || 'code'}</span></div>` +
+      `<pre><code>${lines.map((h, k) => `<span class="wk-cl"><i>${b.start + k}</i>${h}</span>`).join('')}</code></pre>` +
+      (fold ? `<button type="button" class="md-code-more">Show all ${lines.length} lines</button>` : '');
+    host.querySelector('.md-code-more')?.addEventListener('click', (e) => { host.classList.remove('is-folded'); e.currentTarget.remove(); });
+    host.hidden = false;
+  }
+
   // The code itself is in the reader tab; the panel holds what's said about
   // it. A bar that stays at the top holds the way back to the map, where you
   // are (the block list opens from it) and the steps, so a long answer never
@@ -499,7 +533,7 @@ export class WalkPart {
     const w = this.walk;
     const esc = (t) => this.escapeHtml(t || '');
     // The way back: to the reading map, or to the choice of your own changes
-    const toMap = this.changesBack(w?.change) ? `<button type="button" class="wk-map" data-wk="review-back" aria-label="Back to Changes">‹</button>`
+    const toMap = this.changesBack(w?.change) ? `<button type="button" class="wk-map" data-wk="review-back" aria-label="Back to Changes">‹<span class="wk-map-text"> Changes</span></button>`
       : this.journey && !w?.change ? `<button type="button" class="wk-map" data-wk="map">‹ Map</button>` : '';
     if (!w?.blocks) {
       this.walkBody.innerHTML = (toMap ? `<div class="wk-bar">${toMap}</div>` : '') + (w?.error
@@ -547,6 +581,7 @@ export class WalkPart {
       `<div class="wk-meta"><span>${w.doc ? `Document · ${total} line${total === 1 ? '' : 's'}` : `Lines ${b.start}-${b.end}`}</span>` +
         `<button type="button" class="files-link-btn wk-show" data-wk="show">Show in reader</button></div>` +
       `<h3 class="wk-title">${esc(b.title)}</h3>` +
+      (w.doc ? '' : `<div class="md-code wk-code" hidden></div>`) +
       (b.explain ? `<div class="wk-explain md">${renderMarkdown(b.explain).html}</div>` : `<p class="wk-explain is-empty">The AI didn't explain these lines. Ask with Explain more.</p>`) +
       this.typeBox(b) +
       `<div class="walk-notes"></div>` +
@@ -570,6 +605,7 @@ export class WalkPart {
     const notes = w.notes?.[i] || [];
     notes.forEach((note, k) => this.renderWalkNote(notesEl, note, k < notes.length - 1));
     this._walkCode = null;   // the practice editor is made when practice opens
+    this.fillBlockCode();
     this.fitActs();
   }
 
@@ -729,6 +765,7 @@ export class WalkPart {
         : '') +
       `<div class="wk-change"${enter}>` +
         (title !== name(b.path) ? `<h3 class="wk-title">${esc(title)}</h3>` : '') +
+        (b.start && !prose ? `<div class="md-code wk-code" hidden></div>` : '') +
         // The reader shows what was taken out, in place; a deleted file shows it here
         (b.removed && !b.start ? `<details class="raw-reply wk-removed" open><summary>The deleted lines (${b.removed} line${b.removed === 1 ? '' : 's'})</summary>` +
           `<pre>${esc(b.removedText)}</pre></details>` : '') +
@@ -758,6 +795,7 @@ export class WalkPart {
     const fileNotes = w.fileNotes?.[f.path] || [];
     fileNotes.forEach((note, k) => this.renderWalkNote(fileEl, note, k < fileNotes.length - 1 || notes.length > 0));
     this._walkCode = null;
+    this.fillBlockCode();
     this.fitActs();
     this.autoLines();
   }
@@ -1079,7 +1117,7 @@ export class WalkPart {
     const n = files.length;
     const found = files.filter(g => this.bugNotes(g).length);
     const unchecked = n - found.length;
-    const back = this.changesBack(c) ? `<button type="button" class="wk-map" data-wk="review-back" aria-label="Back to Changes">‹</button>` : '';
+    const back = this.changesBack(c) ? `<button type="button" class="wk-map" data-wk="review-back" aria-label="Back to Changes">‹<span class="wk-map-text"> Changes</span></button>` : '';
     this.walkBody.innerHTML =
       this.stepBar({
         act: 'wk', back, context: c.label, where: 'Summary', first: false, pct: 100, next: '',
