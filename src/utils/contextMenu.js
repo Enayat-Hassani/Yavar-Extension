@@ -16,20 +16,20 @@ export const ContextMenuHandler = {
 
     chrome.contextMenus.create({
       id: 'yavar-copy-page',
-      title: 'Add this page to the Yavar chat',
+      title: 'Send page to Yavar',
       contexts: ['page']
     });
 
     chrome.contextMenus.create({
       id: 'yavar-screenshot',
-      title: 'Capture screenshot for Yavar',
+      title: 'Send screenshot to Yavar',
       contexts: ['page']
     });
 
     // GitHub-specific: Explain code with Guided Study mode
     chrome.contextMenus.create({
       id: 'yavar-explain-code',
-      title: '🎓 Explain Code with Yavar',
+      title: 'Explain code with Yavar',
       contexts: ['selection'],
       documentUrlPatterns: ['https://github.com/*']
     });

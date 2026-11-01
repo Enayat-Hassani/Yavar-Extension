@@ -145,6 +145,7 @@ export class ReviewPart {
         `<span class="home-chev" aria-hidden="true">›</span></button></li>`;
     };
     this.walkBody.innerHTML =
+      (local ? `<div class="jr-actions"><button type="button" class="files-link-btn jr-link" data-wk="folders">Change folder</button></div>` : '') +
       (local
         ? `<div class="sheet-label">Your work${st.branch ? ` on <code>${esc(st.branch)}</code>` : ''}</div>` +
           `<ul class="jr-folders">` +
@@ -154,8 +155,7 @@ export class ReviewPart {
         : '') +
       `<div class="jr-head"><span class="sheet-label">Recent commits${local ? '' : ` on ${esc(this.refLabel(t.ref))}`}</span>` +
         (commits.length ? `<button type="button" class="files-link-btn jr-link" data-wk="commits-summary">What's been happening?</button>` : '') + `</div>` +
-      (commits.length ? `<ul class="jr-folders rv-commits">${commits.map(commitRow).join('')}</ul>` : `<p class="wk-summary">No commits found.</p>`) +
-      (local ? `<div class="jr-actions"><button type="button" class="files-link-btn jr-link" data-wk="folders">Another folder</button></div>` : '');
+      (commits.length ? `<ul class="jr-folders rv-commits">${commits.map(commitRow).join('')}</ul>` : `<p class="wk-summary">No commits found.</p>`);
   }
 
   // A recent commit, read part by part like your own changes

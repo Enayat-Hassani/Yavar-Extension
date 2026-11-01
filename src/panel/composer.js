@@ -31,7 +31,7 @@ export class ComposerPart {
     const pool = kind === 'slash'
       ? [
           { id: 'new', icon: icon('pen'), name: 'New conversation' },
-          { id: 'chat', icon: icon('chat'), name: 'Show the chat' },
+          { id: 'chat', icon: icon('window'), name: 'Show the chat' },
           ...this.toolMenuItems('more'),
           ...this.toolMenuItems('prompts'),
           ...this.toolMenuItems('models').filter(t => (t.id.startsWith('model:') || t.id === 'answer:api') && !t.checked)

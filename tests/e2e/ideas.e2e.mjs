@@ -17,8 +17,7 @@ test('Ideas scans, makes ideas, waits for your pick, then critiques and deepens'
       p.askInThread = async (o) => { asks.push(o); return 'ok'; };
       const chip = () => document.querySelector('.composer-tool .composer-item-name')?.textContent || '';
       const send = async (text) => { p.threadInput.value = text; p.sendComposer(); await pause(200); };
-      document.getElementById('app-more').click();
-      document.querySelector('#tool-menu-list [data-tool="ideas"]').click();
+      document.querySelector('.home [data-home="ideas"]').click();
       await pause(200);
       const start = { chip: chip(), placeholder: p.threadInput.placeholder };
       await send('cheaper bus tickets');
@@ -48,8 +47,7 @@ test('a round edited in Settings is the text Ideas sends', async () => {
       await chrome.storage.sync.set({ ideas: { prompts: { scan: 'Only look at prices for: {{text}}', diverge: 'Two wild ideas, no more.' } } });
       const asks = [];
       p.askInThread = async (o) => { asks.push(o); return 'ok'; };
-      document.getElementById('app-more').click();
-      document.querySelector('#tool-menu-list [data-tool="ideas"]').click();
+      document.querySelector('.home [data-home="ideas"]').click();
       await pause(200);
       p.threadInput.value = 'bus tickets';
       p.sendComposer();

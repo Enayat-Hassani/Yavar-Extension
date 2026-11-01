@@ -94,7 +94,7 @@ export class JourneyPart {
             return `<li class="rv-option"><button type="button" class="jr-folder" data-wk="folder" data-i="${k}">` +
               `<span class="jr-folder-name">${esc(r.name)}</span>${status ? `<span class="jr-folder-status">${esc(status)}</span>` : ''}` +
               `<span class="home-chev" aria-hidden="true">›</span></button>` +
-              (status && !review ? `<button type="button" class="files-link-btn rv-restart" data-wk="folder-forget" data-i="${k}" aria-label="Delete the reading of ${esc(r.name)}">Delete</button>` : '') +
+              (status && !review ? `<button type="button" class="files-link-btn rv-restart is-danger" data-wk="folder-forget" data-i="${k}" aria-label="Delete the reading of ${esc(r.name)}">Delete</button>` : '') +
               `</li>`;
           }).join('')}</ul>`
         : `<p class="wk-summary">${review
@@ -277,7 +277,7 @@ export class JourneyPart {
       (read && !editing ? parts + syntax : '') +
       `<div class="jr-connections"></div>` +
       `<div class="jr-foot">${other}<button type="button" class="files-link-btn jr-link" data-wk="journey-reset">Start over with a new overview</button>` +
-        `<button type="button" class="files-link-btn jr-link jr-delete" data-wk="journey-delete">Delete this reading</button></div>`;
+        `<button type="button" class="files-link-btn jr-link jr-delete is-danger" data-wk="journey-delete">Delete this reading</button></div>`;
     if (editing) return this.wireOrderEditing();
     const box = this.walkBody.querySelector('.jr-syntax');
     box.addEventListener('toggle', () => {

@@ -22,6 +22,9 @@ import { HistoryPart } from './panel/history.js';
 import { NotesPart } from './panel/notes.js';
 import { LabsPart } from './panel/labs.js';
 
+// One name for it wherever it is offered (start page, ⋯, the / list)
+const REVIEW_NAME = 'Changes in a folder';
+
 // Session-storage keys other parts of the extension use to hand work to the panel
 const PENDING_KEYS = ['pendingAutoSubmit', 'pendingPromptLabel', 'lastSubmitTime', 'pendingText', 'pendingAction',
   'pendingScreenshot', 'pendingScreenshotRect', 'pendingCapture', 'pendingSelection', 'readerNav'];
@@ -164,7 +167,6 @@ class YavarSidePanel {
   }
 
   bindEvents() {
-    document.getElementById('btn-save-current')?.addEventListener('click', () => this.captureLastAnswer());
     this.toolMenu?.addEventListener('click', (e) => {
       const item = e.target.closest('[data-tool]');
       if (!item) return;
@@ -396,11 +398,10 @@ class YavarSidePanel {
       const file = gh?.kind === 'blob' && gh.rest.length > 1 ? gh.rest[gh.rest.length - 1] : '';
       return [
         ...(file ? [{ id: 'attach_file', icon: icon('file'), name: file, desc: 'Open in your tab' }] : []),
-        { id: 'pick_repo', icon: icon('book'), name: 'Files from this repository', desc: repo || 'Open a GitHub repository in your tab', disabled: !gh },
+        { id: 'pick_repo', icon: icon('book'), name: 'Files from this repository', desc: repo, disabled: !gh },
         { id: 'pick_local', icon: icon('folder'), name: 'Files from a folder', desc: 'A project on this computer' },
-        { id: 'attach_page', icon: icon(video ? 'video' : 'file'), name: video ? "This video's transcript" : 'This page', desc: usable ? (video ? 'The captions of the video in your tab' : 'The text of the page in your tab') : 'Open a web page in your tab', disabled: !usable },
-        { id: 'screenshot_attach', icon: icon('shot'), name: 'Screenshot', desc: usable ? 'Select an area of the page' : 'Open a web page in your tab', disabled: !usable },
-        { id: 'prompts', icon: icon('sparkle'), name: 'Use a prompt', desc: 'Wrap your message in one of your templates' }
+        { id: 'attach_page', icon: icon(video ? 'video' : 'file'), name: video ? "This video's transcript" : 'This page', desc: video ? 'The captions of the video in your tab' : 'The text of the page in your tab', disabled: !usable },
+        { id: 'screenshot_attach', icon: icon('shot'), name: 'Screenshot', desc: 'Select an area of the page', disabled: !usable }
       ];
     }
     if (kind === 'prompts') {
@@ -427,16 +428,18 @@ class YavarSidePanel {
       { id: 'explain_repo', icon: icon('compass'), name: 'Read this repository', desc: this._tabCtx.journey || 'The big picture, then file by file' },
       { id: 'changes', icon: icon('commit'), name: 'Changes', desc: 'Recent commits, part by part' }
     ] : [];
+    const pageItems = usable && !gh ? [{ id: 'summarize_page', icon: icon('lines'), name: 'Summarize this page', desc: 'The main point and key details' }] : [];
     return [
+      ...pageItems,
       ...repoItems,
       { id: 'read_folder', icon: icon('folder'), name: 'Read a project folder', desc: 'A project on this computer', divider: repoItems.length > 0 },
-      { id: 'review_changes', icon: icon('diff'), name: 'Changes in a folder', desc: 'Your work and recent commits' },
+      { id: 'review_changes', icon: icon('diff'), name: REVIEW_NAME, desc: 'Your work and recent commits' },
       { id: 'ideas', icon: icon('sparkle'), name: 'Ideas', desc: 'Research widely, then ideas in rounds', divider: true },
       { id: 'library', icon: icon('bookmark'), name: 'Library', desc: 'Your saved answers and notes' },
       ...(this._morfiaOn && this._tabCtx?.usable && !this._tabCtx.video
         ? [{ id: 'save_morfia', icon: icon('forward'), name: 'Add to Morfia', desc: 'Add this article to your Morfia library' }] : []),
-      { id: 'carry_over', icon: icon('forward'), name: 'Continue in a fresh chat', desc: 'Summarize this chat into a new one', divider: true },
-      { id: 'settings', icon: icon('settings'), name: 'Settings' }
+      ...(this.threadTurns().length ? [{ id: 'carry_over', icon: icon('forward'), name: 'Continue in a fresh chat', desc: 'Summarize this chat into a new one', divider: true }] : []),
+      { id: 'settings', icon: icon('settings'), name: 'Settings', divider: true }
     ];
   }
 
@@ -465,7 +468,17 @@ class YavarSidePanel {
     const head = document.getElementById('tool-menu-title');
     head.textContent = title;
     head.hidden = !title;
-    document.getElementById('tool-menu-list').innerHTML = this.menuItemsHtml(this.toolMenuItems(kind));
+    let items = this.toolMenuItems(kind);
+    if (kind === 'more') {
+      // ⋯ holds what is not already on screen: the start page's rows are not repeated
+      const shown = new Set([...document.querySelectorAll('.home [data-home]')].map(b => b.dataset.home));
+      if (shown.has('review_last')) shown.add('review_changes');
+      items = items.filter(t => !shown.has(t.id)).map((t, i) => (i === 0 ? { ...t, divider: false } : t));
+    }
+    // + lists what can be added now; one line says what else a tab would add
+    const addable = kind === 'add' ? items.filter(t => !t.disabled) : items;
+    document.getElementById('tool-menu-list').innerHTML = this.menuItemsHtml(addable) +
+      (addable.length < items.length ? '<div class="lens-note">Open a web page or a GitHub repository in your tab to add from it.</div>' : '');
     menu.classList.remove('hidden');
     const r = anchor.getBoundingClientRect();
     if (kind === 'models') {
@@ -516,7 +529,7 @@ class YavarSidePanel {
       history: () => this.openLibrary('answers'),
       notes: () => this.toggleNotes(),
       settings: () => chrome.runtime.openOptionsPage(),
-      manage_models: () => chrome.runtime.openOptionsPage(),
+      manage_models: () => chrome.tabs.create({ url: chrome.runtime.getURL('options.html#models') }),
       new: () => this.newConversation(),
       chat: () => this.setView('chat'),
       pick_repo: () => this.openPicker('repo'),
@@ -679,6 +692,7 @@ class YavarSidePanel {
       `<button type="button" class="home-row" data-home="${id}"><span class="home-ico" aria-hidden="true">${icon}</span>` +
       `<span class="home-text"><span class="home-name">${this.escapeHtml(name)}</span>` +
       (desc ? `<span class="home-desc">${this.escapeHtml(desc)}</span>` : '') + `</span><span class="home-chev" aria-hidden="true">›</span></button>`;
+    const REVIEW_ROW = () => row('review_changes', icon('diff'), REVIEW_NAME, 'Your work before you commit or push, and recent commits');
     let hero;
     let ctx = '';
     if (gh) {
@@ -705,14 +719,14 @@ class YavarSidePanel {
       hero = { kicker: 'Yavar', title: 'Ask anything' };
       ctx = `<div class="home-group">` +
         row('read_folder', icon('folder'), 'Read a project folder', 'The big picture first, then file by file') +
-        row('review_changes', icon('diff'), 'Changes in a project folder', 'Your work before you commit or push, and recent commits') +
+        REVIEW_ROW() +
         row('ideas', icon('sparkle'), 'Ideas', 'Research widely, then ideas in rounds with proven methods') +
         `</div>`;
     }
     // The project reviewed last, whatever the tab shows
     const review = this._reviewFolder
       ? `<div class="home-group">${row('review_last', icon('diff'), `Changes · ${this._reviewFolder.name}`, 'Your work and recent commits, line by line')}</div>` : '';
-    if (review) ctx = ctx.replace(row('review_changes', icon('diff'), 'Changes in a project folder', 'Your work before you commit or push, and recent commits'), '');
+    if (review) ctx = ctx.replace(REVIEW_ROW(), '');
     this.threadBody.innerHTML =
       `<div class="home">` +
         `<div class="home-hero"><span class="home-kicker">${this.escapeHtml(hero.kicker)}</span><h2>${this.escapeHtml(hero.title)}</h2></div>` +

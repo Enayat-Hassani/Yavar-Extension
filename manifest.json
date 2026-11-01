@@ -39,7 +39,7 @@
     "default_icon": "icons/icon48.png"
   },
   "action": {
-    "default_title": "Open AI Sidebar",
+    "default_title": "Open Yavar",
     "default_icon": {
       "16": "icons/icon16.png",
       "32": "icons/icon32.png",
