@@ -34,4 +34,4 @@ Decisions made without an answer from Enayat (asked, not answered): pause after 
 
 ## Resume point
 
-§1 and §2 built on branch `reading-levels-ideas`, not committed. `npm run ci` (163) and `npm run e2e` (35) pass; new journeys: `reading.e2e.mjs` (levels), `ideas.e2e.mjs`. Ideas is in ⋯ everywhere and on the start page only when no page is open. A walk made again keeps its tab. Follow-up: questions on Overview/Syntax (`levelNotes`), an edited-file notice on them (`levelsEdited`), README updated. Not yet tried in real Chrome against real ChatGPT.
+§1 and §2 built and committed on branch `reading-levels-ideas` (6a953ff, d4a169f). `npm run ci` (164) and `npm run e2e` (35) pass; new journeys: `reading.e2e.mjs` (levels), `ideas.e2e.mjs`. Ideas is in ⋯ everywhere and on the start page only when no page is open. A walk made again keeps its tab. Follow-up: questions on Overview/Syntax (`levelNotes`), an edited-file notice on them (`levelsEdited`), README updated. Not yet tried in real Chrome against real ChatGPT.
