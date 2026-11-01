@@ -567,32 +567,42 @@ export class WalkPart {
   }
 
   // Overview or Syntax: one answer on the whole walked range, asked the first
-  // time the tab opens (unless the chat is busy) and kept with the walk
+  // time the tab opens (unless the chat is busy) and kept with the walk, with
+  // your questions on it under it (`levelNotes`, the last four)
   renderLevel(bar, level) {
     const w = this.walk;
     const saved = w.levels?.[level];
     const pending = this._levelPending === level;
     this.walkBody.innerHTML = bar +
+      (saved && w.levelsEdited ? `<p class="wk-stale" role="status">${this.escapeHtml(w.path.split('/').pop())} was edited after this ${level}. ` +
+        `Questions send it as it is now. <button type="button" class="files-link-btn" data-wk="level-ask">Ask for it again</button></p>` : '') +
       `<div class="walk-notes wk-level-notes"></div>` +
-      `<div class="wk-dock"><div class="wk-acts">` +
+      `<div class="wk-dock">` + this.askBox('data-wk', `Ask about the ${level} of ${this.escapeHtml(w.path.split('/').pop())}…`,
         (!pending ? `<button type="button" class="run-ask" data-wk="level-ask">${saved ? 'Ask again' : `Ask for the ${level}`}</button>` : '') +
-        `<button type="button" class="run-ask is-key" data-wk="level" data-level="lines">Block by block ›</button>` +
-      `</div></div>`;
+        `<button type="button" class="run-ask is-key" data-wk="level" data-level="lines">Block by block ›</button>`) +
+      `</div>`;
     const notesEl = this.walkBody.querySelector('.wk-level-notes');
-    if (saved) this.renderWalkNote(notesEl, { label: LEVEL_NAMES[level], text: saved }, false);
-    else if (pending) notesEl.innerHTML = `<div class="sheet-wait"><span class="files-spinner"></span>Writing the ${level}…</div>`;
+    const notes = w.levelNotes?.[level] || [];
+    if (saved) this.renderWalkNote(notesEl, { label: LEVEL_NAMES[level], text: saved }, notes.length > 0);
+    notes.forEach((note, k) => this.renderWalkNote(notesEl, note, k < notes.length - 1));
+    if (saved) return;
+    if (pending) notesEl.innerHTML = `<div class="sheet-wait"><span class="files-spinner"></span>Writing the ${level}…</div>`;
     else if (!this._panelAsk) this.askLevel(level);
   }
 
-  async askLevel(level) {
+  // The level's answer, or with `q` your question on it (which keeps the
+  // answer and adds a note under it)
+  async askLevel(level, q = '') {
     const w = this.walk;
     if (this._levelPending || !w?.blocks) return;
     this._levelPending = level;
-    this.walkBody.querySelector('[data-wk="level-ask"]')?.remove();
     const notesEl = this.walkBody.querySelector('.wk-level-notes');
-    notesEl.innerHTML = '';
+    if (q) notesEl.querySelectorAll('.answer-card').forEach(c => c.classList.add('collapsed'));
+    else notesEl.innerHTML = '';
+    this.walkBody.querySelector('[data-wk="level-ask"]')?.remove();
     let text = null;
     const { path, range } = w;
+    const label = q ? (q.length > 80 ? q.slice(0, 79) + '…' : q) : LEVEL_NAMES[level];
     try {
       const content = sliceLines(await this.readRepoFile(path), range.start, range.end);
       const file = { path, content, lines: range };
@@ -600,9 +610,12 @@ export class WalkPart {
       // Short files go inline, longer ones as one attachment, as createWalk does
       const inline = content.length <= 4000;
       const fname = path.split('/').pop() + '.md';
-      const prompt = `${inline ? 'Below is' : `The attached "${fname}" is`} \`${path}\`${repo ? ` from ${repo}` : ''} (lines ${range.start}-${range.end}). ` +
-        `${intentText(this._promptEdits, level)}${inline ? `\n\n${LINE_NUMBER_NOTE}\n\n${fencedFile(file)}` : ''}\n\n${CITE_RULE}`;
-      text = await this.showAnswerIn(notesEl, LEVEL_NAMES[level], prompt, { via: 'chat', inline: true, topic: this.readTopic(),
+      const what = `${inline ? 'Below is' : `The attached "${fname}" is`} \`${path}\`${repo ? ` from ${repo}` : ''} (lines ${range.start}-${range.end}).`;
+      // A question carries what was said on this level, so it makes sense in any chat
+      const earlier = q ? earlierAnswers([{ label: LEVEL_NAMES[level], text: w.levels?.[level] || '' }, ...(w.levelNotes?.[level] || [])], { max: 3 }) : '';
+      const ask = q ? `I'm reading it from the big picture (its ${level}) before going line by line. My question: ${q}` : intentText(this._promptEdits, level);
+      const prompt = `${what} ${ask}${inline ? `\n\n${LINE_NUMBER_NOTE}\n\n${fencedFile(file)}` : ''}${earlier ? `\n\n${earlier}` : ''}\n\n${CITE_RULE}`;
+      text = await this.showAnswerIn(notesEl, label, prompt, { via: 'chat', inline: true, topic: this.readTopic(),
         attachments: inline ? [] : [{ filename: fname, content: this.packFor([file]) }] });
       this.markLineRefs(notesEl);
     } finally {
@@ -610,7 +623,9 @@ export class WalkPart {
     }
     const now = this.walk;
     if (!text || now?.path !== path || now.change) return;
-    await this.saveWalk({ ...now, levels: { ...(now.levels || {}), [level]: text } });
+    await this.saveWalk(q
+      ? { ...now, levelNotes: { ...(now.levelNotes || {}), [level]: [...(now.levelNotes?.[level] || []), { label, text }].slice(-4) } }
+      : { ...now, levels: { ...(now.levels || {}), [level]: text }, levelsEdited: false });
     if (now.level === level && !this.walkPanel.classList.contains('hidden') && this.walkView === 'file') this.renderWalk();
   }
 
@@ -823,6 +838,11 @@ export class WalkPart {
       return;
     }
     if (act === 'level-ask') return this.askLevel(w.level);
+    // A question on the Overview or Syntax tab is about the whole file
+    if (act === 'ask' && !w.doc && !w.change && (w.level || 'lines') !== 'lines') {
+      const q = this.takeQuestion(this.walkBody);
+      return q && this.askLevel(w.level, q);
+    }
     if (act === 'goto') return go(Number(el.dataset.i));
     if (act === 'prev') return go(w.summaryOpen ? i : Math.max(0, i - 1));
     if (act === 'summary') {

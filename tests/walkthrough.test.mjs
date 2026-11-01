@@ -147,6 +147,13 @@ test('a saved walk follows the edit', () => {
   assert.equal(shiftWalk({ change: {}, blocks: [] }, edit).blocks.length, 0);
 });
 
+test('an edit dates the overview and syntax of a walk that has them', () => {
+  const walk = { path: 'a.py', total: 3, range: { start: 1, end: 3 }, blocks: [{ start: 1, end: 3, title: 'A' }] };
+  const edit = editedLines('a\nb\nc', 'a\nB\nc');
+  assert.equal(shiftWalk({ ...walk, levels: { overview: 'Big picture.' } }, edit).levelsEdited, true);
+  assert.equal(shiftWalk(walk, edit).levelsEdited, undefined);
+});
+
 test('a document\'s walk still covers the whole file when lines are added after its end', () => {
   const doc = { path: 'PLAN.md', doc: true, total: 3, range: { start: 1, end: 3 }, blocks: [{ start: 1, end: 3, title: 'PLAN.md', explain: 'A plan.' }] };
   const w = shiftWalk(doc, editedLines('# Plan\n\nCart.\n', '# Plan\n\nCart.\nTax.\n'));

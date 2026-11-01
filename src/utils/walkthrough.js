@@ -190,5 +190,7 @@ export function shiftWalk(walk, edit) {
   const total = walk.total + edit.endAfter - edit.endBefore;
   if (walk.doc) return { ...walk, blocks: [{ ...walk.blocks[0], start: 1, end: total, edited: true }], range: { start: 1, end: total }, total };
   const { start, end } = shiftRange(walk.range, edit);
-  return { ...walk, blocks: walk.blocks.map(b => shiftRange(b, edit)), range: { start, end }, total };
+  // The Overview and Syntax answers were about the whole file, so any edit dates them
+  return { ...walk, blocks: walk.blocks.map(b => shiftRange(b, edit)), range: { start, end }, total,
+    ...(walk.levels ? { levelsEdited: true } : {}) };
 }

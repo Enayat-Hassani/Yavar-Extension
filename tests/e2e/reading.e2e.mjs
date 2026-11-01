@@ -661,16 +661,25 @@ test('a new file walk starts with the big picture, then its syntax, then block b
       document.querySelector('[data-level="overview"]').click();
       await new Promise(x => setTimeout(x, 200));
       const kept = document.querySelector('.wk-level-notes')?.textContent || '';
+      // A question on the overview is about the whole file, and kept under it
+      document.querySelector('.wk-ask-input').value = 'Why two functions?';
+      document.querySelector('.wk-ask-send').click();
+      for (let t = 0; t < 50 && !p.walk.levelNotes?.overview; t++) await new Promise(x => setTimeout(x, 100));
+      const question = window.__asks[2]?.prompt || '';
       // Stepping the blocks is reading line by line
       document.querySelector('[data-wk="next"]').click();
       await new Promise(x => setTimeout(x, 200));
       return { first, kept, after: tabs(), title: document.querySelector('.wk-title')?.textContent,
+        question, notes: p.walk.levelNotes?.overview?.map(n => n.label),
         asked: window.__asks.map(a => a.label), overviewPrompt: window.__asks[0].prompt, syntaxPrompt: window.__asks[1]?.prompt || '' };
     });
     assert.deepEqual(r.first.tabs, ['Overview*', 'Syntax', 'Lines']);
     assert.match(r.first.text, /Two functions/);
     assert.equal(r.first.refs, 2);
-    assert.deepEqual(r.asked, ['Overview', 'Syntax']);
+    assert.deepEqual(r.asked, ['Overview', 'Syntax', 'Why two functions?']);
+    assert.match(r.question, /^Below is `src\/cart\.js` from shop \(lines 1-9\)\. I'm reading it from the big picture \(its overview\).*My question: Why two functions\?/);
+    assert.match(r.question, /What you told me about this earlier:\n\n### Overview\n\nTwo functions/);
+    assert.deepEqual(r.notes, ['Why two functions?']);
     assert.match(r.overviewPrompt, /^Below is `src\/cart\.js` from shop \(lines 1-9\)\. Give me the big picture/);
     assert.match(r.overviewPrompt, /total\(items, tax = 0\)/);
     assert.match(r.syntaxPrompt, /language features and syntax/);
