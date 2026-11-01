@@ -88,7 +88,7 @@ bump on the branch; the release commit does that when it reaches `main`.
 ## Order and resume point
 
 Build A, then B, then C; commit each separately (the repo's commit style: a plain title, a body saying what was
-wrong and what changed, the Co-Authored-By line). A done (commit below in git log, 165 unit? no: 164 unit, 36 journeys). Resume at B.
+wrong and what changed, the Co-Authored-By line). A and B done and committed (165 unit, 37 journeys). Resume at C.
 
 Still open from the first spec: the reading levels and Ideas have not been tried in real Chrome against real
 ChatGPT (only e2e with the chat stubbed), and whether the bridge can switch on ChatGPT's web search is unknown;

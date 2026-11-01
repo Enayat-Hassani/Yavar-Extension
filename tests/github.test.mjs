@@ -181,3 +181,15 @@ test('the files an answer asks for are real, readable and not secret', async () 
   assert.match(all, /lib\/\n\s+c\.js/);
   assert.doesNotMatch(outlineTree(['src/a.js', 'lib/c.js'], ['src/a.js'], 50), /c\.js/);
 });
+
+test('fileOutline lists the definitions of Python and JavaScript files, and nothing for other languages', async () => {
+  const { fileOutline } = await import('../src/utils/github.js');
+  const py = 'import os\n\nclass Cart:\n    def total(self):\n        return 1\n\nasync def fetch():\n    pass\n';
+  assert.deepEqual(fileOutline(py, 'a/cart.py'), [
+    { line: 3, kind: 'class', name: 'Cart' }, { line: 4, kind: 'def', name: 'total' }, { line: 7, kind: 'def', name: 'fetch' }
+  ]);
+  const js = 'import x from "y";\nexport function a() {}\nexport default class B {}\nconst c = (n) => n;\nexport const d = async x => x;\nconst notFn = 5;\nexport async function* e() {}\n';
+  assert.deepEqual(fileOutline(js, 'src/a.js').map(o => `${o.line} ${o.kind} ${o.name}`),
+    ['2 function a', '3 class B', '4 function c', '5 function d', '7 function e']);
+  assert.deepEqual(fileOutline('fn main() {}', 'src/main.rs'), []);
+});

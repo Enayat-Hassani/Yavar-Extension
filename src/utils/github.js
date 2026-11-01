@@ -187,6 +187,31 @@ export function extractImports(content, path) {
   return [...specs];
 }
 
+// The definitions in a file, as [{ line, kind, name }], for a long file whose
+// later part is not sent. shortcut: Python and the JS/TS family only (regexes,
+// not a parser; nested JS functions are missed); other languages return [], add
+// them here when a long file in one needs it.
+export function fileOutline(content, path) {
+  const ext = (path.split('.').pop() || '').toLowerCase();
+  const found = [];
+  const add = (i, kind, name) => found.push({ line: i + 1, kind, name });
+  const lines = content.split('\n');
+  if (ext === 'py') {
+    lines.forEach((l, i) => {
+      const m = /^\s*(?:async\s+)?(def|class)\s+(\w+)/.exec(l);
+      if (m) add(i, m[1], m[2]);
+    });
+  } else if (['js', 'mjs', 'cjs', 'jsx', 'ts', 'tsx'].includes(ext)) {
+    lines.forEach((l, i) => {
+      let m = /^(?:export\s+(?:default\s+)?)?(?:async\s+)?(function|class)\s*\*?\s*(\w+)/.exec(l);
+      if (m) return add(i, m[1], m[2]);
+      m = /^(?:export\s+)?(?:const|let|var)\s+(\w+)\s*(?::[^=]+)?=\s*(?:async\s*)?(?:\([^)]*\)|\w+)\s*(?::[^=]+)?=>/.exec(l);
+      if (m) add(i, 'function', m[1]);
+    });
+  }
+  return found;
+}
+
 function joinPath(dir, rel) {
   const parts = dir ? dir.split('/') : [];
   for (const p of rel.split('/')) {

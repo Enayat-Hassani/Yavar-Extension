@@ -32,6 +32,7 @@ import {
   extractImports,
   resolveImports,
   fencedFile,
+  fileOutline,
   CITE_RULE,
   LINE_NUMBER_NOTE,
   langFromPath
@@ -41,6 +42,8 @@ import {
 // A code file's reading levels, in order (the tabs of its walk)
 const LEVELS = [['overview', 'Overview'], ['syntax', 'Syntax'], ['lines', 'Lines']];
 const LEVEL_NAMES = Object.fromEntries(LEVELS);
+// The most of a file Overview and Syntax send (the budget pickCoreFiles uses)
+const LEVEL_MAX_CHARS = 120000;
 
 const STORE_FULL = 7 * 1024 * 1024;
 const STORE_AFTER = 5 * 1024 * 1024;
@@ -140,7 +143,8 @@ export class WalkPart {
     if (this._walkPending) return;
     const MAX_LINES = 400;
     // A file walked for the first time opens on its overview; one made again keeps its tab
-    const level = this.walk?.path === path && this.walk.blocks ? this.walk.level || 'lines' : 'overview';
+    const prev = this.walk?.path === path && this.walk.blocks ? this.walk : null;
+    const level = prev ? prev.level || 'lines' : 'overview';
     this._walkPending = true;
     this._walkRaw = '';
     this.walk = { path, pending: true };
@@ -167,8 +171,11 @@ export class WalkPart {
         this._walkRaw = text;
         throw new Error(`couldn't find the blocks in the replies (asked ${tried})`);
       }
+      const sha = await textSha(content);
+      // The levels are about the file, not the lines walked: kept for the next lines of the same file
+      const kept = prev?.sha === sha ? { levels: prev.levels, levelNotes: prev.levelNotes, levelsEdited: prev.levelsEdited } : {};
       await this.saveWalk({ path, range, total, summary: parsed.summary, blocks: parsed.blocks, current: 0, typed: {}, created: Date.now(),
-        sha: await textSha(content), level });
+        sha, level, ...kept });
       await this.markRead([path]);
       this._readingContext = { label: repo, ts: Date.now() };
       this.followWalk();
@@ -601,16 +608,29 @@ export class WalkPart {
     else notesEl.innerHTML = '';
     this.walkBody.querySelector('[data-wk="level-ask"]')?.remove();
     let text = null;
-    const { path, range } = w;
+    const { path } = w;
     const label = q ? (q.length > 80 ? q.slice(0, 79) + '…' : q) : LEVEL_NAMES[level];
     try {
-      const content = sliceLines(await this.readRepoFile(path), range.start, range.end);
+      // The levels are about the whole file, whatever part the walk's blocks cover
+      const whole = (await this.readRepoFile(path)).replace(/\n$/, '');
+      const total = whole.split('\n').length;
+      let content = whole;
+      let outline = '';
+      if (whole.length > LEVEL_MAX_CHARS) {
+        content = whole.slice(0, whole.lastIndexOf('\n', LEVEL_MAX_CHARS));
+        const rest = fileOutline(whole, path).filter(o => o.line > content.split('\n').length);
+        const cap = 400;
+        outline = rest.length ? `\n\nOutline of the definitions after them${rest.length > cap ? ` (the first ${cap} of ${rest.length})` : ''}:\n` +
+          rest.slice(0, cap).map(o => `- line ${o.line}: ${o.kind} ${o.name}`).join('\n') : '';
+      }
+      const range = { start: 1, end: content.split('\n').length };
       const file = { path, content, lines: range };
       const repo = this.repoDisplayName();
       // Short files go inline, longer ones as one attachment, as createWalk does
       const inline = content.length <= 4000;
       const fname = path.split('/').pop() + '.md';
-      const what = `${inline ? 'Below is' : `The attached "${fname}" is`} \`${path}\`${repo ? ` from ${repo}` : ''} (lines ${range.start}-${range.end}).`;
+      const where = range.end < total ? `The file has ${total} lines; lines 1-${range.end} are shown.` : `(lines 1-${total}).`;
+      const what = `${inline ? 'Below is' : `The attached "${fname}" is`} \`${path}\`${repo ? ` from ${repo}` : ''} ${where}`;
       // A question carries what was said on this level, so it makes sense in any chat
       let earlier = q ? earlierAnswers([{ label: LEVEL_NAMES[level], text: w.levels?.[level] || '' }, ...(w.levelNotes?.[level] || [])], { max: 3 }) : '';
       let ask = q ? `I'm reading it from the big picture (its ${level}) before going line by line. My question: ${q}` : intentText(this._promptEdits, level);
@@ -619,7 +639,7 @@ export class WalkPart {
         ask += ' I have already been shown the syntax the whole project uses (below): mark which features are new in this file, and keep the ones I know to one line.';
         earlier = earlierAnswers([{ label: 'Syntax across the project', text: this.journey.syntax }]);
       }
-      const prompt = `${what} ${ask}${inline ? `\n\n${LINE_NUMBER_NOTE}\n\n${fencedFile(file)}` : ''}${earlier ? `\n\n${earlier}` : ''}\n\n${CITE_RULE}`;
+      const prompt = `${what} ${ask}${inline ? `\n\n${LINE_NUMBER_NOTE}\n\n${fencedFile(file)}` : ''}${outline}${earlier ? `\n\n${earlier}` : ''}\n\n${CITE_RULE}`;
       text = await this.showAnswerIn(notesEl, label, prompt, { via: 'chat', inline: true, topic: this.readTopic(),
         attachments: inline ? [] : [{ filename: fname, content: this.packFor([file]) }] });
       this.markLineRefs(notesEl);

@@ -349,6 +349,44 @@ test('the reading map asks for the syntax of the whole project once, and a file\
   } finally { await b.close(); }
 });
 
+test('Overview and Syntax cover a long file whole, outline what is cut, and stay through Next lines', async () => {
+  const b = await launch();
+  try {
+    const page = await b.open('sidepanel.html');
+    const long = (n) => Array.from({ length: n }, (_, i) => `export function f${i + 1}() { return ${i + 1}; }`).join('\n') + '\n';
+    const extra = { 'src/big.js': long(1000), 'src/huge.js': long(5000) };
+    await openFolder(page, 'shop', filesOf(makeRepo({ ...BEFORE, ...extra }, { ...AFTER, ...extra })));
+    await stubChat(page, (label) => label === 'Overview' ? 'Many small functions.' : 'ok');
+    const r = await page.evaluate(async () => {
+      const p = window.__panel;
+      const wait = async (f) => { for (let t = 0; t < 50 && !f(); t++) await new Promise(x => setTimeout(x, 100)); };
+      const fence = '`'.repeat(3);
+      p.askForJson = async (prompt, o) => {
+        const [, start, end] = /lines (\d+)-(\d+)/.exec(prompt);
+        return { value: o.parse(`${fence}json\n{"summary":"Many.","blocks":[{"start":${start},"end":${end},"title":"all","explain":"Adds."}]}\n${fence}`), text: '', tried: 1 };
+      };
+      await p.startWalk('src/big.js');
+      await wait(() => p.walk?.levels?.overview);
+      const range = p.walk.range;
+      const bigPrompt = window.__asks[0].prompt;
+      await p.createWalk('src/big.js', null, 401);   // Next lines
+      const next = { start: p.walk.range.start, overview: p.walk.levels?.overview, asks: window.__asks.length };
+      await p.startWalk('src/huge.js');
+      await wait(() => p.walk?.levels?.overview && p.walk.path === 'src/huge.js');
+      return { range, bigPrompt, next, hugePrompt: window.__asks.at(-1).prompt };
+    });
+    assert.equal(r.range.end, 400);   // the blocks cover 400 lines; the overview covers all of them
+    assert.match(r.bigPrompt, /^The attached "big\.js\.md" is `src\/big\.js` from shop \(lines 1-1000\)\./);
+    assert.equal(r.next.start, 401);
+    assert.equal(r.next.overview, 'Many small functions.');
+    assert.equal(r.next.asks, 1);
+    assert.match(r.hugePrompt, /The file has 5000 lines; lines 1-\d+ are shown\./);
+    assert.match(r.hugePrompt, /Outline of the definitions after them \(the first 400 of \d+\):\n- line \d+: function f\d+/);
+    assert.doesNotMatch(r.hugePrompt, /line 1: function f1\b/);
+    assert.deepEqual(b.errors, []);
+  } finally { await b.close(); }
+});
+
 test('in a file walk, Explain more studies the block and Line by line waits in the ⋯ menu', async () => {
   const b = await launch();
   try {
