@@ -25,6 +25,9 @@ import { LabsPart } from './panel/labs.js';
 // One name for it wherever it is offered (start page, ⋯, the / list)
 const REVIEW_NAME = 'Changes in a folder';
 
+// Queued actions that work on the chat itself, so they leave the chat view showing
+const CHAT_VIEW_ACTIONS = new Set(['add_page', 'attach_page', 'screenshot', 'screenshot_attach']);
+
 // Session-storage keys other parts of the extension use to hand work to the panel
 const PENDING_KEYS = ['pendingAutoSubmit', 'pendingPromptLabel', 'lastSubmitTime', 'pendingText', 'pendingAction',
   'pendingScreenshot', 'pendingScreenshotRect', 'pendingCapture', 'pendingSelection', 'readerNav'];
@@ -579,7 +582,8 @@ class YavarSidePanel {
     if (!this.appView) return;
     document.getElementById('app-to-chat')?.addEventListener('click', () => this.setView('chat'));
     document.getElementById('back-to-yavar')?.addEventListener('click', () => this.setView('app'));
-    document.getElementById('chat-screenshot')?.addEventListener('click', () => this.captureScreenshot('chat'));
+    document.getElementById('chat-add-page')?.addEventListener('click', () => this.attachActivePage());
+    document.getElementById('chat-screenshot')?.addEventListener('click', () => this.captureScreenshot());
     document.getElementById('app-new')?.addEventListener('click', () => this.newConversation());
     document.getElementById('app-model')?.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -890,7 +894,7 @@ class YavarSidePanel {
 
   // A request queued by the context menu or a shortcut before the panel was open
   runPendingAction(action) {
-    this.setView('app');
+    if (!(this._view === 'chat' && CHAT_VIEW_ACTIONS.has(action))) this.setView('app');
     this.runTool(action);
   }
 
@@ -901,6 +905,7 @@ class YavarSidePanel {
   }
 
   fillComposer(text) {
+    if (this._view === 'chat') { this.forwardToIframe({ prompt: text }); return; }
     this.setView('app');
     const input = this.threadInput;
     if (!input) return;
@@ -973,6 +978,7 @@ class YavarSidePanel {
       this.fillComposer(prompt);
       return;
     }
+    if (this._view === 'chat') { this.forwardToIframe({ prompt, autoSubmit: true }); return; }
     this.askInThread({ title: 'Yavar', label: label || prompt.slice(0, 120), prompt });
   }
 

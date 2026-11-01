@@ -6,8 +6,7 @@ import { captureLabel, captureMarkdown, hasCaptureText } from '../utils/capture.
 export class CapturePart {
   // From the chat view the screenshot goes straight into the chat you're
   // looking at; from the Yavar view it joins the message you're writing
-  async captureScreenshot(target = 'composer') {
-    this._shotTarget = target;
+  async captureScreenshot() {
     try {
       // Ask background to inject area selection overlay on the active tab
       chrome.runtime.sendMessage({ action: 'start_area_select' });
@@ -39,11 +38,6 @@ export class CapturePart {
         this.showNotification('Could not crop the screenshot');
         return;
       }
-    }
-    if (this._shotTarget === 'chat' && this._view === 'chat') {
-      this._shotTarget = null;
-      this.forwardScreenshotToIframe(image);
-      return;
     }
     if (hasCaptureText(capture)) {
       const label = captureLabel(capture);

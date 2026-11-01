@@ -132,10 +132,20 @@ export class ComposerPart {
     this.threadInput?.focus();
   }
 
+  // In the chat view, what you add goes straight into the chat you are
+  // looking at; otherwise it joins the message you're writing in the Yavar view
   addComposerItem(item) {
+    if (this._view === 'chat') { this.sendItemToChat(item); return; }
     this.composerItems.push(item);
     this.renderComposer();
     this.setView('app');
+  }
+
+  sendItemToChat(item) {
+    if (item.kind === 'selection') this.forwardToIframe({ prompt: `Here is ${item.what}:\n\n${item.content}\n\n` });
+    else if (item.content) this.forwardAttachToIframe(item.filename, item.content, item.mime || 'text/markdown');
+    if (item.image) this.forwardScreenshotToIframe(item.image);
+    this.showNotification('Added to the chat');
   }
 
   // The send button is only prominent when there is something to send
