@@ -110,7 +110,10 @@ test('a file walk offers the same help as a change, and typing practice compares
       const p = window.__panel;
       const fence = '`'.repeat(3);
       p.askForJson = async (prompt, o) => ({ value: o.parse(`${fence}json\n{"summary":"Cart totals.","blocks":[{"start":1,"end":5,"title":"total()","explain":"Adds up the items."},{"start":7,"end":9,"title":"count()","explain":"Counts them."}]}\n${fence}`), text: '', tried: 1 });
+      p.askLevel = async () => {};   // these journeys read block by block
       await p.startWalk('src/cart.js');
+      await p.saveWalk({ ...p.walk, level: 'lines' });
+      await p.renderWalk();
     });
     await page.waitForFunction(() => window.__panel.walk?.blocks);
     const r = await page.evaluate(async () => {
@@ -149,7 +152,10 @@ test('the reader brings back the walk its highlight belongs to, even after the p
       const p = window.__panel;
       const fence = '`'.repeat(3);
       p.askForJson = async (prompt, o) => ({ value: o.parse(`${fence}json\n{"summary":"Cart totals.","blocks":[{"start":1,"end":5,"title":"total()","explain":"Adds up the items."},{"start":7,"end":9,"title":"count()","explain":"Counts them."}]}\n${fence}`), text: '', tried: 1 });
+      p.askLevel = async () => {};   // these journeys read block by block
       await p.startWalk('src/cart.js');
+      await p.saveWalk({ ...p.walk, level: 'lines' });
+      await p.renderWalk();
     });
     await page.waitForFunction(() => window.__panel.walk?.blocks);
     const reader = await b.open('reader.html', { width: 1000, height: 500 });
@@ -189,7 +195,10 @@ test('a file walk says so when its file changed since, and can be walked again',
       const fence = '`'.repeat(3);
       window.__walks = 0;
       p.askForJson = async (prompt, o) => (window.__walks++, { value: o.parse(`${fence}json\n{"summary":"Cart totals.","blocks":[{"start":1,"end":5,"title":"total()","explain":"Adds up the items."},{"start":7,"end":9,"title":"count()","explain":"Counts them."}]}\n${fence}`), text: '', tried: 1 });
+      p.askLevel = async () => {};   // these journeys read block by block
       await p.startWalk('src/cart.js');
+      await p.saveWalk({ ...p.walk, level: 'lines' });
+      await p.renderWalk();
     });
     await page.waitForFunction(() => window.__panel.walk?.blocks);
     // Opened again unchanged: no notice
@@ -260,7 +269,10 @@ test('reaching the last block of a file marks it read on the reading map', async
       await p.saveJourney({ summary: 'A cart.', path: [{ file: 'src/cart.js', why: '' }, { file: 'src/tax.js', why: '' }], parts: [], done: [] });
       const fence = '`'.repeat(3);
       p.askForJson = async (prompt, o) => ({ value: o.parse(`${fence}json\n{"summary":"Cart totals.","blocks":[{"start":1,"end":5,"title":"total()","explain":"a"},{"start":7,"end":9,"title":"count()","explain":"b"}]}\n${fence}`), text: '', tried: 1 });
+      p.askLevel = async () => {};   // these journeys read block by block
       await p.startWalk('src/cart.js');
+      await p.saveWalk({ ...p.walk, level: 'lines' });
+      await p.renderWalk();
       const before = [...(p.journey.done || [])];
       await p.gotoWalk(1);
       return { before, after: (await p.loadJourney()).done };
@@ -304,7 +316,10 @@ test('in a file walk, Explain more studies the block and Line by line waits in t
       const p = window.__panel;
       const fence = '`'.repeat(3);
       p.askForJson = async (prompt, o) => ({ value: o.parse(`${fence}json\n{"summary":"Cart totals.","blocks":[{"start":1,"end":5,"title":"total()","explain":"Adds up the items."},{"start":7,"end":9,"title":"count()","explain":"Counts them."}]}\n${fence}`), text: '', tried: 1 });
+      p.askLevel = async () => {};   // these journeys read block by block
       await p.startWalk('src/cart.js');
+      await p.saveWalk({ ...p.walk, level: 'lines' });
+      await p.renderWalk();
       const ask = async (act) => {
         const n = window.__asks.length;
         document.querySelector(`.wk-dock [data-wk="${act}"]`).click();
@@ -334,7 +349,10 @@ test('the ⋯ menu keeps the bar one row, and closes on a choice, a click elsewh
       const p = window.__panel;
       const fence = '`'.repeat(3);
       p.askForJson = async (prompt, o) => ({ value: o.parse(`${fence}json\n{"summary":"Cart totals.","blocks":[{"start":1,"end":5,"title":"total()","explain":"Adds up."},{"start":7,"end":9,"title":"count()","explain":"Counts."}]}\n${fence}`), text: '', tried: 1 });
+      p.askLevel = async () => {};   // these journeys read block by block
       await p.startWalk('src/cart.js');
+      await p.saveWalk({ ...p.walk, level: 'lines' });
+      await p.renderWalk();
     });
     const menuOpen = () => page.evaluate(() => !document.querySelector('.wk-extra').hidden);
     // Every control of the bar sits on one row, even this narrow
@@ -367,7 +385,10 @@ test('the chat button unrolls a field that names the lines, and Escape rolls it 
       const p = window.__panel;
       const fence = '`'.repeat(3);
       p.askForJson = async (prompt, o) => ({ value: o.parse(`${fence}json\n{"summary":"Cart totals.","blocks":[{"start":1,"end":5,"title":"total()","explain":"Adds up."},{"start":7,"end":9,"title":"count()","explain":"Counts."}]}\n${fence}`), text: '', tried: 1 });
+      p.askLevel = async () => {};   // these journeys read block by block
       await p.startWalk('src/cart.js');
+      await p.saveWalk({ ...p.walk, level: 'lines' });
+      await p.renderWalk();
     });
     const fieldOpen = () => page.evaluate(() => !document.querySelector('.wk-ask').hidden);
     const dockHeight = () => page.evaluate(() => document.querySelector('.wk-dock').offsetHeight);
@@ -406,7 +427,10 @@ test('the bar shows as many actions as the panel is wide, and ⋯ holds the rest
       const p = window.__panel;
       const fence = '`'.repeat(3);
       p.askForJson = async (prompt, o) => ({ value: o.parse(`${fence}json\n{"summary":"Cart totals.","blocks":[{"start":1,"end":5,"title":"total()","explain":"Adds up."}]}\n${fence}`), text: '', tried: 1 });
+      p.askLevel = async () => {};   // these journeys read block by block
       await p.startWalk('src/cart.js');
+      await p.saveWalk({ ...p.walk, level: 'lines' });
+      await p.renderWalk();
     });
     const split = () => page.evaluate(() => ({
       bar: [...document.querySelectorAll('.wk-acts > .run-ask')].map(x => x.textContent),
@@ -610,6 +634,49 @@ test('the reader wraps long lines keeping their numbers, and shows Markdown rend
     assert.equal(await reader.getAttribute('#rd-wrap', 'aria-pressed'), 'true');
     await reader.click('#rd-preview');
     assert.equal(await reader.isVisible('#rd-code'), true);
+    assert.deepEqual(b.errors, []);
+  } finally { await b.close(); }
+});
+
+test('a new file walk starts with the big picture, then its syntax, then block by block', async () => {
+  const b = await launch();
+  try {
+    const page = await b.open('sidepanel.html');
+    await openFolder(page, 'shop', filesOf(makeRepo(BEFORE, AFTER)));
+    await stubChat(page, (label) => label === 'Overview' ? 'Two functions, **1-5** and **7-9**.' : 'Default parameters on **1**.');
+    await page.evaluate(async () => {
+      const p = window.__panel;
+      const fence = '`'.repeat(3);
+      p.askForJson = async (prompt, o) => ({ value: o.parse(`${fence}json\n{"summary":"Cart totals.","blocks":[{"start":1,"end":5,"title":"total()","explain":"Adds up the items."},{"start":7,"end":9,"title":"count()","explain":"Counts them."}]}\n${fence}`), text: '', tried: 1 });
+      await p.startWalk('src/cart.js');
+    });
+    await page.waitForFunction(() => window.__panel.walk?.levels?.overview);
+    const r = await page.evaluate(async () => {
+      const p = window.__panel;
+      const tabs = () => [...document.querySelectorAll('.wk-levels [role="tab"]')].map(t => `${t.textContent}${t.getAttribute('aria-selected') === 'true' ? '*' : ''}`);
+      const first = { tabs: tabs(), text: document.querySelector('.wk-level-notes')?.textContent || '', refs: document.querySelectorAll('.wk-level-notes .line-ref').length };
+      document.querySelector('[data-level="syntax"]').click();
+      for (let t = 0; t < 50 && !p.walk.levels?.syntax; t++) await new Promise(x => setTimeout(x, 100));
+      // Back to the overview: kept, not asked again
+      document.querySelector('[data-level="overview"]').click();
+      await new Promise(x => setTimeout(x, 200));
+      const kept = document.querySelector('.wk-level-notes')?.textContent || '';
+      // Stepping the blocks is reading line by line
+      document.querySelector('[data-wk="next"]').click();
+      await new Promise(x => setTimeout(x, 200));
+      return { first, kept, after: tabs(), title: document.querySelector('.wk-title')?.textContent,
+        asked: window.__asks.map(a => a.label), overviewPrompt: window.__asks[0].prompt, syntaxPrompt: window.__asks[1]?.prompt || '' };
+    });
+    assert.deepEqual(r.first.tabs, ['Overview*', 'Syntax', 'Lines']);
+    assert.match(r.first.text, /Two functions/);
+    assert.equal(r.first.refs, 2);
+    assert.deepEqual(r.asked, ['Overview', 'Syntax']);
+    assert.match(r.overviewPrompt, /^Below is `src\/cart\.js` from shop \(lines 1-9\)\. Give me the big picture/);
+    assert.match(r.overviewPrompt, /total\(items, tax = 0\)/);
+    assert.match(r.syntaxPrompt, /language features and syntax/);
+    assert.match(r.kept, /Two functions/);
+    assert.deepEqual(r.after, ['Overview', 'Syntax', 'Lines*']);
+    assert.equal(r.title, 'count()');
     assert.deepEqual(b.errors, []);
   } finally { await b.close(); }
 });

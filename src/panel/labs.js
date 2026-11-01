@@ -1,8 +1,9 @@
-// The extras under Settings → Labs: IELTS practice and Add to Morfia.
+// The extras: IELTS practice and Add to Morfia (under Settings → Labs), and Ideas.
 // Its methods join YavarSidePanel's (see the end of sidepanel.js), so `this` is the panel.
 
 import { coachSteps, loadCoach, coachPrompt } from '../utils/coach.js';
 import { materialFile, addToMorfia } from '../utils/material.js';
+import { IDEA_STEPS, ideasPrompt } from '../utils/ideas.js';
 
 export class LabsPart {
   // IELTS coach: the article goes with the first step as a file; each send
@@ -37,6 +38,37 @@ export class LabsPart {
     // A failed answer keeps the step, so the attempt can be sent again
     if (answer != null) c.i++;
     if (c.i >= c.steps.length) { this._coach = null; this.composerTool = null; }
+    this.renderComposer();
+  }
+
+  // Ideas: each send runs the current round, then any rounds that follow on
+  // their own, and waits for you at the next round that asks something
+  startIdeas() {
+    this._ideas = { i: 0 };
+    this.composerTool = 'ideas';
+    this.renderComposer();
+    this.setView('app');
+    this.threadInput.focus();
+  }
+
+  async ideasSend(text) {
+    const s = this._ideas;
+    if (!s) return;
+    this.composerTool = 'ideas';
+    if (s.i === 0) s.topic = text;
+    do {
+      const step = IDEA_STEPS[s.i];
+      const answer = await this.askInThread({
+        title: `Ideas · ${s.topic.slice(0, 50)}`, label: step.auto ? `${step.name} (next round)` : text,
+        prompt: ideasPrompt(step, text)
+      });
+      if (this._ideas !== s) return;   // ended or restarted while waiting
+      // A failed answer keeps the round, so it can be sent again
+      if (answer == null) break;
+      s.i++;
+      this.renderComposer();
+    } while (s.i < IDEA_STEPS.length && IDEA_STEPS[s.i].auto);
+    if (s.i >= IDEA_STEPS.length) { this._ideas = null; this.composerTool = null; }
     this.renderComposer();
   }
 

@@ -48,7 +48,7 @@ test('a review prompt edited in Settings is kept alone, and can be reset', async
     const page = await b.open('options.html#prompts', { width: 900, height: 800 });
     await wait(page, 800);
     const names = await page.locator('#review-steps .coach-step-name').allInnerTexts();
-    assert.deepEqual(names, ['Explain', 'Line by line', 'Find bugs', 'Better ways', 'How to test it']);
+    assert.deepEqual(names, ['Explain', 'Overview', 'Syntax', 'Line by line', 'Find bugs', 'Better ways', 'How to test it']);
     await page.locator('[data-review="bugs"]').fill('Only security problems, please.');
     await wait(page, 700);
     const saved = await page.evaluate(async () => (await chrome.storage.sync.get('review')).review);

@@ -431,7 +431,8 @@ class YavarSidePanel {
       ...repoItems,
       { id: 'read_folder', icon: icon('folder'), name: 'Read a project folder', desc: 'A project on this computer', divider: repoItems.length > 0 },
       { id: 'review_changes', icon: icon('diff'), name: 'Changes in a folder', desc: 'Your work and recent commits' },
-      { id: 'library', icon: icon('bookmark'), name: 'Library', desc: 'Your saved answers and notes', divider: true },
+      { id: 'ideas', icon: icon('sparkle'), name: 'Ideas', desc: 'Research widely, then ideas in rounds', divider: true },
+      { id: 'library', icon: icon('bookmark'), name: 'Library', desc: 'Your saved answers and notes' },
       ...(this._morfiaOn && this._tabCtx?.usable && !this._tabCtx.video
         ? [{ id: 'save_morfia', icon: icon('forward'), name: 'Add to Morfia', desc: 'Add this article to your Morfia library' }] : []),
       { id: 'carry_over', icon: icon('forward'), name: 'Continue in a fresh chat', desc: 'Summarize this chat into a new one', divider: true },
@@ -526,6 +527,7 @@ class YavarSidePanel {
       local: () => this.openPicker('local'),
       carry_over: () => this.carryOverToNewChat(),
       ielts: () => this.startCoach(),
+      ideas: () => this.startIdeas(),
       save_morfia: () => this.saveForMorfia()
     };
     tools[id]?.();
@@ -597,7 +599,7 @@ class YavarSidePanel {
     });
     this.threadInput?.addEventListener('keydown', (e) => {
       if (!e.isComposing && this.commandMenuKey(e)) return;
-      if (this.composerTool && this.composerTool !== 'coach' && (e.key === 'Escape' || (e.key === 'Backspace' && !this.threadInput.value))) {
+      if (this.composerTool && !['coach', 'ideas'].includes(this.composerTool) && (e.key === 'Escape' || (e.key === 'Backspace' && !this.threadInput.value))) {
         e.preventDefault();
         this.clearComposerTool();
         return;
@@ -704,6 +706,7 @@ class YavarSidePanel {
       ctx = `<div class="home-group">` +
         row('read_folder', icon('folder'), 'Read a project folder', 'The big picture first, then file by file') +
         row('review_changes', icon('diff'), 'Changes in a project folder', 'Your work before you commit or push, and recent commits') +
+        row('ideas', icon('sparkle'), 'Ideas', 'Research widely, then ideas in rounds with proven methods') +
         `</div>`;
     }
     // The project reviewed last, whatever the tab shows
@@ -729,6 +732,7 @@ class YavarSidePanel {
     this.composerItems = [];
     this.composerTool = null;
     this._coach = null;
+    this._ideas = null;
     this.renderComposer();
     this._freshChatNext = true;
     this._threadId = (this._threadId || 0) + 1;

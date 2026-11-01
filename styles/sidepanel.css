@@ -555,6 +555,7 @@ html, body {
 .lib-tabs button:hover { color: var(--text-primary); }
 .lib-tabs button[aria-selected="true"] { color: var(--text-primary); background: var(--surface); box-shadow: var(--shadow-sm); }
 .lib-tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.wk-levels { align-self: flex-start; margin: var(--sp-2) 0; }
 
 .history-search-wrap {
   padding: var(--sp-3) var(--sp-4);

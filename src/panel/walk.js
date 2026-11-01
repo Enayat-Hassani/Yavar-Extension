@@ -38,6 +38,10 @@ import {
 } from '../utils/github.js';
 
 // Of the 10 MB Chrome gives an extension's storage (see pruneWalks)
+// A code file's reading levels, in order (the tabs of its walk)
+const LEVELS = [['overview', 'Overview'], ['syntax', 'Syntax'], ['lines', 'Lines']];
+const LEVEL_NAMES = Object.fromEntries(LEVELS);
+
 const STORE_FULL = 7 * 1024 * 1024;
 const STORE_AFTER = 5 * 1024 * 1024;
 const UNUSED = 90 * 24 * 60 * 60 * 1000;
@@ -135,6 +139,8 @@ export class WalkPart {
     if (isDocPath(path)) return this.createDocWalk(path);
     if (this._walkPending) return;
     const MAX_LINES = 400;
+    // A file walked for the first time opens on its overview; one made again keeps its tab
+    const level = this.walk?.path === path && this.walk.blocks ? this.walk.level || 'lines' : 'overview';
     this._walkPending = true;
     this._walkRaw = '';
     this.walk = { path, pending: true };
@@ -162,7 +168,7 @@ export class WalkPart {
         throw new Error(`couldn't find the blocks in the replies (asked ${tried})`);
       }
       await this.saveWalk({ path, range, total, summary: parsed.summary, blocks: parsed.blocks, current: 0, typed: {}, created: Date.now(),
-        sha: await textSha(content) });
+        sha: await textSha(content), level });
       await this.markRead([path]);
       this._readingContext = { label: repo, ts: Date.now() };
       this.followWalk();
@@ -414,7 +420,8 @@ export class WalkPart {
       this._walkFileChanged = w.summaryOpen || w.blocks[k].path !== w.blocks[w.current].path;
     }
     const had = this.walkPanel.contains(document.activeElement);
-    await this.saveWalk({ ...w, current: k, summaryOpen: false });
+    // Stepping a file's blocks is reading it line by line
+    await this.saveWalk({ ...w, current: k, summaryOpen: false, ...(w.change ? {} : { level: 'lines' }) });
     // The last block of the whole file reached: it counts as read on the map
     // (Finish file still suggests what to read next)
     const j = this.journey;
@@ -505,9 +512,13 @@ export class WalkPart {
     const more = last && range.end < total;
     const best = typed[i]?.best;
     const practised = (k) => typed[k]?.best >= 90;
+    // A code file is read in three levels: the big picture, its syntax, then block by block
+    const level = w.doc ? 'lines' : w.level || 'lines';
+    const tabs = w.doc ? '' : `<div class="lib-tabs wk-levels" role="tablist" aria-label="Reading level">` +
+      LEVELS.map(([id, name]) => `<button type="button" role="tab" data-wk="level" data-level="${id}"` +
+        ` aria-selected="${id === level}">${name}</button>`).join('') + `</div>`;
 
-    this.walkBody.innerHTML =
-      this.stepBar({
+    const bar = this.stepBar({
         act: 'wk', back: toMap, context: w.path.split('/').pop(),
         where: w.doc ? 'Summary' : `Block ${i + 1} of ${n}${range.start > 1 || range.end < total ? ` · lines ${range.start}-${range.end} of ${total}` : ''}`,
         first: i === 0, pct: Math.round(((i + 1) / n) * 100),
@@ -516,7 +527,10 @@ export class WalkPart {
             : `<button type="button" class="wk-step wk-step-text" data-wk="finish">Finish file</button>`,
         items: blocks.map((x, k) => ({ i: k, current: k === i, mark: practised(k) ? '✓' : k + 1, title: esc(x.title), meta: `${x.start}-${x.end}` })),
         extra: `<button type="button" class="files-link-btn wk-redo" data-wk="redo">Ask for a new ${w.doc ? 'summary' : 'walkthrough'} of this file</button>`
-      }) +
+      }) + tabs;
+    if (level !== 'lines') return this.renderLevel(bar, level);
+
+    this.walkBody.innerHTML = bar +
       (this._walkStale && this._walkStale === this.walkKey(w.path)
         ? `<p class="wk-stale" role="status">${esc(w.path.split('/').pop())} changed since this walk, so its blocks may sit on the wrong lines. ` +
           `<button type="button" class="files-link-btn" data-wk="rewalk">Walk it again</button></p>`
@@ -550,6 +564,54 @@ export class WalkPart {
     notes.forEach((note, k) => this.renderWalkNote(notesEl, note, k < notes.length - 1));
     this._walkCode = null;   // the practice editor is made when practice opens
     this.fitActs();
+  }
+
+  // Overview or Syntax: one answer on the whole walked range, asked the first
+  // time the tab opens (unless the chat is busy) and kept with the walk
+  renderLevel(bar, level) {
+    const w = this.walk;
+    const saved = w.levels?.[level];
+    const pending = this._levelPending === level;
+    this.walkBody.innerHTML = bar +
+      `<div class="walk-notes wk-level-notes"></div>` +
+      `<div class="wk-dock"><div class="wk-acts">` +
+        (!pending ? `<button type="button" class="run-ask" data-wk="level-ask">${saved ? 'Ask again' : `Ask for the ${level}`}</button>` : '') +
+        `<button type="button" class="run-ask is-key" data-wk="level" data-level="lines">Block by block ›</button>` +
+      `</div></div>`;
+    const notesEl = this.walkBody.querySelector('.wk-level-notes');
+    if (saved) this.renderWalkNote(notesEl, { label: LEVEL_NAMES[level], text: saved }, false);
+    else if (pending) notesEl.innerHTML = `<div class="sheet-wait"><span class="files-spinner"></span>Writing the ${level}…</div>`;
+    else if (!this._panelAsk) this.askLevel(level);
+  }
+
+  async askLevel(level) {
+    const w = this.walk;
+    if (this._levelPending || !w?.blocks) return;
+    this._levelPending = level;
+    this.walkBody.querySelector('[data-wk="level-ask"]')?.remove();
+    const notesEl = this.walkBody.querySelector('.wk-level-notes');
+    notesEl.innerHTML = '';
+    let text = null;
+    const { path, range } = w;
+    try {
+      const content = sliceLines(await this.readRepoFile(path), range.start, range.end);
+      const file = { path, content, lines: range };
+      const repo = this.repoDisplayName();
+      // Short files go inline, longer ones as one attachment, as createWalk does
+      const inline = content.length <= 4000;
+      const fname = path.split('/').pop() + '.md';
+      const prompt = `${inline ? 'Below is' : `The attached "${fname}" is`} \`${path}\`${repo ? ` from ${repo}` : ''} (lines ${range.start}-${range.end}). ` +
+        `${intentText(this._promptEdits, level)}${inline ? `\n\n${LINE_NUMBER_NOTE}\n\n${fencedFile(file)}` : ''}\n\n${CITE_RULE}`;
+      text = await this.showAnswerIn(notesEl, LEVEL_NAMES[level], prompt, { via: 'chat', inline: true, topic: this.readTopic(),
+        attachments: inline ? [] : [{ filename: fname, content: this.packFor([file]) }] });
+      this.markLineRefs(notesEl);
+    } finally {
+      this._levelPending = null;
+    }
+    const now = this.walk;
+    if (!text || now?.path !== path || now.change) return;
+    await this.saveWalk({ ...now, levels: { ...(now.levels || {}), [level]: text } });
+    if (now.level === level && !this.walkPanel.classList.contains('hidden') && this.walkView === 'file') this.renderWalk();
   }
 
   // Typing a block (or a change's new lines) yourself, hidden until asked for
@@ -754,6 +816,13 @@ export class WalkPart {
     const go = (k) => this.gotoWalk(k);
     if (act === 'list') return this.toggleStepList(this.walkBody, el);
     if (act === 'moreacts') return this.toggleMoreActs(el.nextElementSibling.hidden);
+    if (act === 'level') {
+      await this.saveWalk({ ...w, level: el.dataset.level });
+      await this.renderWalk();
+      this.walkBody.scrollTop = 0;
+      return;
+    }
+    if (act === 'level-ask') return this.askLevel(w.level);
     if (act === 'goto') return go(Number(el.dataset.i));
     if (act === 'prev') return go(w.summaryOpen ? i : Math.max(0, i - 1));
     if (act === 'summary') {

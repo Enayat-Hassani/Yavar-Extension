@@ -23,6 +23,21 @@ export const INTENTS = [
       'Define any unfamiliar term, point out a pattern worth learning, and end with one short question that checks I understood.'
   },
   {
+    id: 'overview', name: 'Overview', editable: true,
+    body: 'Give me the big picture of this file before I read it line by line, in plain words. ' +
+      '1) What it is for, in two sentences. 2) Its imports, in the order they appear: for each, what it is used for here, ' +
+      'why this library was likely chosen over the alternatives, and why it sits where it does in the order. ' +
+      '3) How many functions and classes it defines; for each, one line on why it exists and which others it calls or is called by. ' +
+      '4) Where it starts running and how data moves through it. Define any term a beginner would not know.'
+  },
+  {
+    id: 'syntax', name: 'Syntax', editable: true,
+    body: 'Before I read this file line by line, show me the language features and syntax it uses (for example decorators, ' +
+      'comprehensions, async/await, f-strings, destructuring, type hints, context managers), most used first. For each: ' +
+      'its name, what it means in one plain sentence, how many times it appears, and the line numbers where it does. ' +
+      'End with the two or three worth learning first and why.'
+  },
+  {
     id: 'lines', name: 'Line by line', editable: true,
     body: 'Go through it line by line, in order: for each line, or a few that belong together, the line number(s) in bold when ' +
       'they are shown, then what it does and why. Point out anything surprising or error-prone. One or two sentences an item.'
