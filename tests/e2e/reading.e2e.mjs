@@ -306,6 +306,49 @@ test('the reading map gives the big picture and the README before the code, and 
   } finally { await b.close(); }
 });
 
+test('the reading map asks for the syntax of the whole project once, and a file\'s Syntax tab builds on it', async () => {
+  const b = await launch();
+  try {
+    const page = await b.open('sidepanel.html');
+    await openFolder(page, 'shop', filesOf(makeRepo({ ...BEFORE, 'README.md': '# Shop\n\nA cart.\n' }, AFTER)));
+    await stubChat(page, (label) => label === 'Syntax across the project' ? 'Default parameters, see `src/cart.js:1-5`.' : 'ok');
+    const r = await page.evaluate(async () => {
+      const p = window.__panel;
+      const wait = async (f) => { for (let t = 0; t < 50 && !f(); t++) await new Promise(x => setTimeout(x, 100)); };
+      await p.saveJourney({ summary: 'A cart.', path: [{ file: 'src/cart.js', why: '' }], parts: [], done: [] });
+      p.renderJourney();
+      const box = () => document.querySelector('.jr-syntax');
+      const closed = !box().open;
+      box().open = true;
+      await wait(() => p.journey.syntax);
+      const asked = window.__asks.map(a => ({ label: a.label, attached: a.attached, prompt: a.prompt }));
+      // Back on the map, the saved answer shows without asking
+      p.showJourneyMap();
+      box().open = true;
+      await new Promise(x => setTimeout(x, 200));
+      const shown = document.querySelector('.jr-syntax-body')?.textContent || '';
+      // A file's Syntax prompt then carries the project answer
+      const fence = '`'.repeat(3);
+      p.askForJson = async (prompt, o) => ({ value: o.parse(`${fence}json\n{"summary":"Cart.","blocks":[{"start":1,"end":5,"title":"total()","explain":"Adds."}]}\n${fence}`), text: '', tried: 1 });
+      await p.startWalk('src/cart.js');
+      await wait(() => p.walk?.levels?.overview);
+      document.querySelector('[data-level="syntax"]').click();
+      await wait(() => p.walk.levels?.syntax);
+      return { closed, asked, shown, askedAfter: window.__asks.length, syntaxPrompt: window.__asks.at(-1).prompt, saved: p.journey.syntax };
+    });
+    assert.equal(r.closed, true);
+    assert.equal(r.asked.length, 1);
+    assert.equal(r.asked[0].label, 'Syntax across the project');
+    assert.deepEqual(r.asked[0].attached, ['shop-core-files.md']);
+    assert.match(r.asked[0].prompt, /language features and idioms this project uses/);
+    assert.match(r.asked[0].prompt, /path\/to\/file\.ext:START-END/);
+    assert.match(r.shown, /Default parameters/);
+    assert.equal(r.askedAfter, 3);   // syntax of the project, the file's overview, the file's syntax: the reopened map asked nothing
+    assert.match(r.syntaxPrompt, /language features and syntax[\s\S]*mark which features are new[\s\S]*### Syntax across the project\n\nDefault parameters/);
+    assert.deepEqual(b.errors, []);
+  } finally { await b.close(); }
+});
+
 test('in a file walk, Explain more studies the block and Line by line waits in the ⋯ menu', async () => {
   const b = await launch();
   try {

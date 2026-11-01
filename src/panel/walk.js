@@ -612,8 +612,13 @@ export class WalkPart {
       const fname = path.split('/').pop() + '.md';
       const what = `${inline ? 'Below is' : `The attached "${fname}" is`} \`${path}\`${repo ? ` from ${repo}` : ''} (lines ${range.start}-${range.end}).`;
       // A question carries what was said on this level, so it makes sense in any chat
-      const earlier = q ? earlierAnswers([{ label: LEVEL_NAMES[level], text: w.levels?.[level] || '' }, ...(w.levelNotes?.[level] || [])], { max: 3 }) : '';
-      const ask = q ? `I'm reading it from the big picture (its ${level}) before going line by line. My question: ${q}` : intentText(this._promptEdits, level);
+      let earlier = q ? earlierAnswers([{ label: LEVEL_NAMES[level], text: w.levels?.[level] || '' }, ...(w.levelNotes?.[level] || [])], { max: 3 }) : '';
+      let ask = q ? `I'm reading it from the big picture (its ${level}) before going line by line. My question: ${q}` : intentText(this._promptEdits, level);
+      // Syntax the whole project already showed is only new here if this file adds to it
+      if (!q && level === 'syntax' && this.journey?.syntax) {
+        ask += ' I have already been shown the syntax the whole project uses (below): mark which features are new in this file, and keep the ones I know to one line.';
+        earlier = earlierAnswers([{ label: 'Syntax across the project', text: this.journey.syntax }]);
+      }
       const prompt = `${what} ${ask}${inline ? `\n\n${LINE_NUMBER_NOTE}\n\n${fencedFile(file)}` : ''}${earlier ? `\n\n${earlier}` : ''}\n\n${CITE_RULE}`;
       text = await this.showAnswerIn(notesEl, label, prompt, { via: 'chat', inline: true, topic: this.readTopic(),
         attachments: inline ? [] : [{ filename: fname, content: this.packFor([file]) }] });
@@ -812,6 +817,7 @@ export class WalkPart {
     if (act === 'open') return this.openRepoFile(this.fileRefFor(el.dataset.path));
     if (act === 'journey-create') return this.createJourney();
     if (act === 'journey-reset') return this.resetJourney();
+    if (act === 'syntax-ask') return this.askProjectSyntax();
     if (act === 'journey-delete') return this.deleteJourney();
     if (act === 'jr-edit') { this._journeyEditing = !this._journeyEditing; return this.renderJourney(); }
     if (act === 'jr-move') return this.editOrder(path => moveInPath(path, Number(el.dataset.k), Number(el.dataset.to)));

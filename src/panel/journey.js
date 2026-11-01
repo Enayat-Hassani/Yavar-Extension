@@ -7,6 +7,8 @@ import { isReadablePath } from '../utils/github.js';
 import { idbGet } from '../utils/idb.js';
 import { extractImports, resolveImports } from '../utils/github.js';
 import { renderMarkdown } from '../utils/markdown.js';
+import { intentText } from '../utils/intents.js';
+import { CITE_RULE } from '../utils/github.js';
 
 export class JourneyPart {
   // The big picture first: the free chat reads the README and core files and
@@ -115,6 +117,7 @@ export class JourneyPart {
     this.walkView = 'map';
     this._journeyEditing = false;
     this._journeyError = null;
+    this._syntaxOpen = false;
     document.getElementById('walk-title').textContent = 'Reading';
     document.getElementById('walk-sub').textContent = this.repoDisplayName();
     this.renderJourney();
@@ -160,6 +163,15 @@ export class JourneyPart {
     await this.createJourney();
   }
 
+  // The README and core files the reading map (and the project's syntax) is read from
+  async coreFiles() {
+    const readme = this.repoTree.items.find(i => i.type === 'blob' && /^readme(\.\w+)?$/i.test(i.path))?.path;
+    const paths = [...new Set([readme, ...pickCoreFiles(this.repoTree.items)].filter(Boolean))].slice(0, 12);
+    const files = (await this.fetchRepoFilesMany(paths)).filter(f => !f.error);
+    if (!files.length) throw new Error('could not read the project files');
+    return files;
+  }
+
   async createJourney() {
     if (this._journeyPending) return;
     this.walkView = 'map';
@@ -171,10 +183,7 @@ export class JourneyPart {
     this.renderJourney();
     const done = this.journey?.done || [];
     try {
-      const readme = this.repoTree.items.find(i => i.type === 'blob' && /^readme(\.\w+)?$/i.test(i.path))?.path;
-      const paths = [...new Set([readme, ...pickCoreFiles(this.repoTree.items)].filter(Boolean))].slice(0, 12);
-      const files = (await this.fetchRepoFilesMany(paths)).filter(f => !f.error);
-      if (!files.length) throw new Error('could not read the project files');
+      const files = await this.coreFiles();
       const fname = `${this.repoTree.repo}-overview.md`.replace(/[^\w.-]+/g, '-');
       // Show the reading order as the AI writes it
       const { value: parsed, text, tried } = await this.askForJson(journeyPrompt(this.repoDisplayName(), fname), {
@@ -217,6 +226,9 @@ export class JourneyPart {
     const next = j.path.find(p => !done.has(p.file));
     const read = j.path.filter(p => done.has(p.file)).length;
     const editing = !!this._journeyEditing;
+    const syntax = `<details class="jr-syntax"${this._syntaxOpen ? ' open' : ''}><summary>Syntax across the project</summary>` +
+      `<div class="jr-syntax-body"></div>` +
+      `<button type="button" class="files-link-btn jr-link" data-wk="syntax-ask">${j.syntax ? 'Ask again' : 'Ask for it'}</button></details>`;
     const chip = (f) => `<button type="button" class="jr-file" data-wk="open" data-path="${esc(f)}" title="Open ${esc(f)} in the reader">${esc(f.split('/').pop())}</button>`;
     // The project's own docs come before its code: the top-level README and
     // an architecture or design note, when there is one and the order hasn't it
@@ -248,7 +260,7 @@ export class JourneyPart {
     // The big picture before the files, until reading has begun; then where you are comes first
     this.walkBody.innerHTML =
       (j.summary ? `<div class="jr-summary md">${renderMarkdown(j.summary).html}</div>` : '') +
-      (read || editing ? '' : parts) +
+      (read || editing ? '' : parts + syntax) +
       `<div class="jr-head"><span class="sheet-label">Reading order</span>` +
         `<span class="jr-head-end">${read && !editing ? `<span class="jr-count">${read} of ${j.path.length} read</span>` : ''}` +
         `<button type="button" class="files-link-btn jr-link" data-wk="jr-edit" aria-pressed="${editing}">${editing ? 'Done' : 'Edit'}</button></span></div>` +
@@ -262,12 +274,49 @@ export class JourneyPart {
           ? `<div class="jr-actions"><button type="button" class="files-send jr-primary" data-wk="walkfile" data-path="${esc(next.file)}">` +
             `${read ? 'Continue with' : 'Start with'} ${esc(next.file.split('/').pop())} →</button></div>`
           : '') +
-      (read && !editing ? parts : '') +
+      (read && !editing ? parts + syntax : '') +
       `<div class="jr-connections"></div>` +
       `<div class="jr-foot">${other}<button type="button" class="files-link-btn jr-link" data-wk="journey-reset">Start over with a new overview</button>` +
         `<button type="button" class="files-link-btn jr-link jr-delete" data-wk="journey-delete">Delete this reading</button></div>`;
     if (editing) return this.wireOrderEditing();
+    const box = this.walkBody.querySelector('.jr-syntax');
+    box.addEventListener('toggle', () => {
+      this._syntaxOpen = box.open;
+      if (box.open && !this.journey.syntax && !this._syntaxPending && !this._panelAsk) this.askProjectSyntax();
+    });
+    this.showProjectSyntax();
     this.renderConnections(j);
+  }
+
+  // What the project uses everywhere, asked the first time its section opens
+  // (it costs a chat question) and kept on the map as `syntax`
+  showProjectSyntax() {
+    const body = this.walkBody.querySelector('.jr-syntax-body');
+    if (body && this.journey.syntax) this.renderWalkNote(body, { label: 'Syntax across the project', text: this.journey.syntax }, false);
+  }
+
+  async askProjectSyntax() {
+    const j = this.journey;
+    const body = this.walkBody.querySelector('.jr-syntax-body');
+    if (!j || !body || this._syntaxPending) return;
+    this._syntaxPending = true;
+    body.innerHTML = '';
+    body.parentElement.querySelector('[data-wk="syntax-ask"]').hidden = true;
+    let text = null;
+    try {
+      const fname = `${this.repoTree.repo}-core-files.md`.replace(/[^\w.-]+/g, '-');
+      const prompt = `The attached "${fname}" is the README and core files of ${this.repoDisplayName()}. ${intentText(this._promptEdits, 'projectSyntax')}\n\n${CITE_RULE}`;
+      text = await this.showAnswerIn(body, 'Syntax across the project', prompt, { via: 'chat', inline: true, topic: this.readTopic(),
+        attachments: [{ filename: fname, content: this.packFor(await this.coreFiles()) }] });
+      this.markLineRefs(body);
+    } catch (e) {
+      body.textContent = '⚠️ ' + e.message;
+    } finally {
+      this._syntaxPending = false;
+    }
+    if (text && this.journey === j) await this.saveJourney({ ...j, syntax: text });
+    const ask = this.walkBody.querySelector('[data-wk="syntax-ask"]');
+    if (ask) { ask.hidden = false; ask.textContent = this.journey.syntax ? 'Ask again' : 'Ask for it'; }
   }
 
   // The reading order, edited on the map: saved at once, so walking a file

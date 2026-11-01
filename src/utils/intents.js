@@ -38,6 +38,12 @@ export const INTENTS = [
       'End with the two or three worth learning first and why.'
   },
   {
+    id: 'projectSyntax', name: 'Syntax across the project', editable: true,
+    body: 'List the language features and idioms this project uses throughout (language syntax, and project conventions such as ' +
+      'how errors are handled and how modules talk to each other), most used first. For each: its name, what it means in one ' +
+      'plain sentence, and one or two places where it shows, as path:START-END. Define any term a beginner would not know.'
+  },
+  {
     id: 'lines', name: 'Line by line', editable: true,
     body: 'Go through it line by line, in order: for each line, or a few that belong together, the line number(s) in bold when ' +
       'they are shown, then what it does and why. Point out anything surprising or error-prone. One or two sentences an item.'

@@ -42,6 +42,6 @@ test('Line by line on a change is the intent plus what a change needs', () => {
 });
 
 test('only the code-reading intents are editable, and blank edits keep the default', () => {
-  assert.deepEqual(editableIntents().map(i => i.id), ['explain', 'overview', 'syntax', 'lines', 'bugs', 'better', 'tests']);
+  assert.deepEqual(editableIntents().map(i => i.id), ['explain', 'overview', 'syntax', 'projectSyntax', 'lines', 'bugs', 'better', 'tests']);
   assert.deepEqual(editableIntents({ bugs: 'x', tests: '  ' }).filter(i => i.edited).map(i => i.id), ['bugs']);
 });

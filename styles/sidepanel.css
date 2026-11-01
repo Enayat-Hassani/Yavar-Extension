@@ -2471,6 +2471,9 @@ button.lens-item:focus-visible {
 .jr-parts li { padding: var(--sp-2) 0; border-bottom: 1px solid var(--border); line-height: 1.5; }
 .jr-parts li:last-child { border-bottom: none; }
 .jr-parts strong { font-weight: 600; margin-right: 4px; }
+.jr-syntax { margin: var(--sp-3) 0 4px; }
+.jr-syntax > summary { cursor: pointer; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text-secondary); padding: var(--sp-1) 0; }
+.jr-syntax-body { margin-top: var(--sp-2); }
 .jr-files { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 
 /* A file you can open: its name in mono, quiet until reached for */
