@@ -375,7 +375,7 @@ class YavarSidePanel {
 
   // A model's mark: its initial in a small tile, the same in the pill and menu
   modelMark(m) {
-    return `<span class="model-mark" data-model="${this.escapeHtml(m.id)}">${this.escapeHtml((m.name || '?').trim().charAt(0).toUpperCase())}</span>`;
+    return `<span class="model-mark" data-model="${this.escapeHtml(m.id)}">${m.id === 'chatgpt' ? 'GPT' : this.escapeHtml((m.name || '?').trim().charAt(0).toUpperCase())}</span>`;
   }
 
   // The header pill shows the current model; the composer is addressed to it
@@ -385,7 +385,7 @@ class YavarSidePanel {
     const name = document.getElementById('app-model-name');
     if (icon) icon.innerHTML = m ? this.modelMark(m) : '';
     if (name) name.textContent = m?.name || 'Choose a model';
-    if (this.threadInput && !this.composerItems?.length && !this.composerTool) this.threadInput.placeholder = `Message ${m?.name || 'the AI'} · / for commands`;
+    if (this.threadInput && !this.composerItems?.length && !this.composerTool) this.threadInput.placeholder = 'Ask · / for commands';
   }
 
   // Menus in the Yavar view: + (add to the message), its prompt templates, and ⋯

@@ -14,9 +14,9 @@
   --on-accent: #ffffff;
   /* Model marks, as in the panel */
   --brand-neutral: #6e6e73;
-  --brand-chatgpt: #10a37f;
-  --brand-claude: #d97757;
-  --brand-gemini: linear-gradient(135deg, #4285f4, #9b72cb);
+  --brand-chatgpt: #0b7f63;
+  --brand-claude: #b85a3a;
+  --brand-gemini: linear-gradient(135deg, #2f6fe0, #7e57c2);
   /* Shape and motion: the same scale as the side panel */
   --r-xs: 4px;
   --r-sm: 6px;
@@ -547,7 +547,7 @@ kbd {
   background: var(--brand-neutral);
   border-radius: var(--r-sm);
 }
-.model-row-icon[data-model="chatgpt"] { background: var(--brand-chatgpt); }
+.model-row-icon[data-model="chatgpt"] { background: var(--brand-chatgpt); font-size: 8.5px; letter-spacing: -0.02em; }
 .model-row-icon[data-model="claude"] { background: var(--brand-claude); }
 .model-row-icon[data-model="gemini"] { background: var(--brand-gemini); }
 

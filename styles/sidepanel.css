@@ -41,11 +41,14 @@
   /* Blue for small text on a tint: 4.5:1 or better on --accent-soft */
   --accent-ink: color-mix(in srgb, var(--accent) 80%, black);
   --warning: #b25e00;
+  /* Green and red for small text (diff counts): 4.5:1 or better on --bg-primary */
+  --success-ink: color-mix(in srgb, var(--success) 60%, black);
+  --danger-ink: color-mix(in srgb, var(--danger) 75%, black);
   /* Model marks: whose chat it is */
   --brand-neutral: #6e6e73;
-  --brand-chatgpt: #10a37f;
-  --brand-claude: #d97757;
-  --brand-gemini: linear-gradient(135deg, #4285f4, #9b72cb);
+  --brand-chatgpt: #0b7f63;
+  --brand-claude: #b85a3a;
+  --brand-gemini: linear-gradient(135deg, #2f6fe0, #7e57c2);
   --brand-api: #1d1d1f;          /* the logo's tile: models Yavar calls itself */
   /* Space: a 4px grid */
   --sp-1: 4px;
@@ -100,6 +103,8 @@
     --cm-builtin: #dabaff;
     --cm-property: #78c2b3;
     --warning: #ffb340;
+    --success-ink: var(--success);
+    --danger-ink: var(--danger);
     --accent-ink: #4aa3ff;
     --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
     --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.35);
@@ -390,7 +395,9 @@ html, body {
 
 .files-link-btn {
   margin-left: auto;
-  padding: 0;
+  padding: 7px 8px;
+  margin-block: -7px;
+  margin-right: -8px;
   font: inherit;
   font-size: 12px;
   color: var(--text-secondary);
@@ -866,7 +873,8 @@ html, body {
   align-items: center;
   gap: 4px;
   min-width: 0;
-  padding: 0;
+  padding: 7px 0;
+  margin-block: -7px;
   font: inherit;
   color: inherit;
   background: none;
@@ -893,7 +901,7 @@ html, body {
   animation: fadeIn var(--dur-base) var(--ease-std) both;
 }
 .answer-card.is-inline.is-failed { border-left-color: var(--danger); }
-.answer-card.is-inline .answer-title { color: var(--accent); }
+.answer-card.is-inline .answer-title { color: var(--accent-ink); }
 .answer-card.is-inline .answer-foot { margin-top: 2px; }
 .answer-card.is-inline.collapsed { border-left-color: var(--border); }
 .answer-card.is-inline.collapsed .answer-foot { display: none; }
@@ -906,7 +914,7 @@ html, body {
 .md h3, .md h4, .md h5, .md h6 { margin: 16px 0 6px; font-size: 13.5px; }
 .md hr { border: none; border-top: 1px solid var(--border); margin: 10px 0; }
 .md blockquote { padding-left: 10px; border-left: 3px solid var(--border); color: var(--text-secondary); }
-.md a { color: var(--accent); }
+.md a { color: var(--accent-ink); }
 .md code {
   padding: 1px 5px;
   font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -965,7 +973,7 @@ html, body {
   cursor: pointer;
 }
 
-.md-code-bar button[data-md-act="run"] { color: var(--accent); font-weight: 600; }
+.md-code-bar button[data-md-act="run"] { color: var(--accent-ink); font-weight: 600; }
 .md-code-bar button:hover { color: var(--text-primary); background: var(--bg-tertiary); }
 .md-code-bar button[data-md-act="run"]:hover { color: var(--accent); background: var(--accent-soft); }
 
@@ -1388,6 +1396,8 @@ button.lens-item:focus-visible {
   transition: border-color var(--dur-quick), box-shadow var(--dur-quick);
 }
 
+/* One line: a wrapped hint is clipped mid-word in the one-line field */
+.thread-form textarea::placeholder { white-space: nowrap; }
 .thread-form textarea:hover:not(:focus) { border-color: color-mix(in srgb, var(--text-primary) 16%, transparent); }
 .thread-form textarea:focus { border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); box-shadow: 0 0 0 3px var(--accent-soft); }
 
@@ -1673,6 +1683,9 @@ button.lens-item:focus-visible {
 .model-mark[data-model="chatgpt"] { background: var(--brand-chatgpt); }
 .model-mark[data-model="claude"] { background: var(--brand-claude); }
 .model-mark[data-model="gemini"] { background: var(--brand-gemini); }
+/* "GPT" so ChatGPT and Claude no longer share a "C"; the tile widens to fit */
+.model-mark[data-model="chatgpt"] { font-size: 8.5px; letter-spacing: -0.02em; }
+.app-model .model-mark[data-model="chatgpt"] { width: auto; min-width: 18px; padding: 0 3px; }
 .model-mark.is-plain { color: var(--text-secondary); background: var(--bg-tertiary); }
 .tool-menu[data-kind="models"] { width: 220px; }
 .tool-menu[data-kind="models"] .lens-emoji { display: inline-flex; }
@@ -1952,9 +1965,9 @@ button.lens-item:focus-visible {
   cursor: pointer;
   transition: color var(--dur-quick) var(--ease-std), background var(--dur-quick) var(--ease-std);
 }
-.wk-map { flex-shrink: 0; padding: 4px 2px; white-space: nowrap; }
+.wk-map { flex-shrink: 0; min-width: 28px; min-height: 28px; padding: 4px 8px; margin-inline: -6px 0; white-space: nowrap; }
 .wk-map:hover { color: var(--accent); }
-.wk-where { display: inline-flex; align-items: center; gap: 6px; min-width: 0; padding: 4px 6px; margin-left: -6px; font-weight: 600; color: var(--text-primary); }
+.wk-where { display: inline-flex; align-items: center; gap: 6px; min-width: 0; min-height: 28px; padding: 4px 6px; margin-left: -6px; font-weight: 600; color: var(--text-primary); }
 .wk-ctx, .wk-pos { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .wk-ctx { flex-shrink: 4; min-width: 3em; font-weight: 400; color: var(--text-secondary); }   /* the name gives way before the position */
 .wk-ctx:empty { display: none; }
@@ -1978,7 +1991,7 @@ button.lens-item:focus-visible {
 }
 .wk-step:hover { background: color-mix(in srgb, var(--accent) 17%, transparent); }
 .wk-step:disabled { color: var(--text-secondary); background: none; opacity: 0.45; cursor: default; }
-.wk-step-text { padding: 0 10px; font-size: 12.5px; font-weight: 600; }
+.wk-step-text { padding: 0 10px; font-size: 12.5px; font-weight: 600; color: var(--text-primary); }
 .wk-step[hidden] { display: none; }
 .wk-close {
   flex-shrink: 0;
@@ -2031,7 +2044,7 @@ button.lens-item:focus-visible {
   cursor: pointer;
 }
 .wk-blocks li button:hover { background: var(--fill-hover); }
-.wk-blocks li button.is-current { color: var(--accent); font-weight: 600; background: var(--accent-soft); }
+.wk-blocks li button.is-current { color: var(--accent-ink); font-weight: 600; background: var(--accent-soft); }
 .wk-n { flex: none; width: 18px; text-align: right; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
 .wk-t { flex: 1; min-width: 0; }
 .wk-l { flex: none; font-size: 11px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
@@ -2041,7 +2054,7 @@ button.lens-item:focus-visible {
 .wk-summary > :last-child, .wk-explain > :last-child, .wk-about > :last-child, .jr-summary > :last-child { margin-bottom: 0; }
 .wk-summary { margin: 0 0 var(--sp-4); color: var(--text-secondary); line-height: 1.55; text-wrap: pretty; }
 .wk-meta { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 11.5px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
-.wk-show { margin: 0; font-size: 11.5px; }
+.wk-show { margin: -7px -8px -7px 0; font-size: 11.5px; }
 .wk-show:hover { color: var(--accent); }
 .wk-title { margin: var(--sp-1) 0 var(--sp-2); font-size: 17px; line-height: 1.3; text-wrap: balance; }
 .wk-explain { margin: 0; font-size: 13.5px; line-height: 1.6; color: var(--text-primary); text-wrap: pretty; }
@@ -2053,13 +2066,13 @@ button.lens-item:focus-visible {
 .work-status .files-spinner { flex: none; }
 
 /* A line an explanation names: shows it in the reader */
-.walk-notes .line-ref { color: var(--accent); cursor: pointer; border-radius: 3px; }
+.walk-notes .line-ref { color: var(--accent-ink); cursor: pointer; border-radius: 3px; }
 .walk-notes .line-ref:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); text-decoration: underline; }
 /* More actions under the three a part needs most */
 .wk-found { margin: 4px 0 8px; padding-left: 18px; font-size: 13px; }
 .wk-found li { margin: 2px 0; }
-.wk-counts ins { color: var(--success); text-decoration: none; font-weight: 600; }
-.wk-counts del { color: var(--danger); text-decoration: none; font-weight: 600; }
+.wk-counts ins { color: var(--success-ink); text-decoration: none; font-weight: 600; }
+.wk-counts del { color: var(--danger-ink); text-decoration: none; font-weight: 600; }
 .wk-skipped { display: block; margin-top: 4px; font-size: 12px; }
 .raw-reply.wk-removed pre { white-space: pre; }   /* code keeps its lines; the pre scrolls sideways */
 
@@ -2368,7 +2381,7 @@ button.lens-item:focus-visible {
 .walk-diff span { display: block; white-space: pre; }
 /* One tint for "in the original, not matched"; yours-only lines fade */
 .walk-diff .is-same { color: var(--text-primary); }
-.walk-diff .is-missing { color: var(--accent); background: var(--accent-soft); }
+.walk-diff .is-missing { color: var(--accent-ink); background: var(--accent-soft); }
 .walk-diff .is-extra { color: var(--text-secondary); opacity: 0.7; }
 
 /* Answers kept on a block sit between its explanation and its actions */
@@ -2380,7 +2393,7 @@ button.lens-item:focus-visible {
   border-left: 2px solid color-mix(in srgb, var(--accent) 45%, var(--border));
   animation: fadeIn var(--dur-base) var(--ease-std) both;
 }
-.walk-quiz .answer-title { color: var(--accent); }
+.walk-quiz .answer-title { color: var(--accent-ink); }
 .walk-quiz ol { margin: 4px 0 0; padding-left: 18px; }
 .walk-quiz li { margin: 0 0 8px; }
 .walk-quiz li .md > :last-child { margin-bottom: 0; }
@@ -2495,7 +2508,7 @@ button.lens-item:focus-visible {
 .jr-step { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .jr-step code { padding: 0; font-size: 12px; background: none; border: none; color: inherit; overflow-wrap: anywhere; }
 .jr-step span { font-size: 12px; font-weight: 400; color: var(--text-secondary); }
-.jr-path li.current .jr-step code { color: var(--accent); }
+.jr-path li.current .jr-step code { color: var(--accent-ink); }
 
 /* Editing the reading order: each row moves (↑ ↓, or dragged by its grip)
    or leaves; a file of the project is added under the list */
@@ -2559,7 +2572,7 @@ button.lens-item:focus-visible {
 }
 .jr-next:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); }
 .jr-next:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.jr-next code { padding: 0; font-size: 12.5px; font-weight: 600; color: var(--accent); background: none; border: none; }
+.jr-next code { padding: 0; font-size: 12.5px; font-weight: 600; color: var(--accent-ink); background: none; border: none; }
 .jr-next span { font-size: 12.5px; color: var(--text-secondary); }
 .jr-picked { margin: 4px 0 0; font-size: 11px; color: var(--text-secondary); }
 .jr-also { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 8px; font-size: 12px; color: var(--text-secondary); }
